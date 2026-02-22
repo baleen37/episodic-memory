@@ -280,6 +280,18 @@ describe('Integration Tests', () => {
       }
       await handleStop(db, stopOptions);
 
+      // Make ordering deterministic: shortest observation first (most recent)
+      const now = Date.now();
+      db.prepare(`
+        UPDATE observations
+        SET timestamp = CASE title
+          WHEN 'Short' THEN ?
+          WHEN 'Medium' THEN ?
+          WHEN 'Long' THEN ?
+          ELSE timestamp
+        END
+      `).run(now, now - 1, now - 2);
+
       // Now start a new session with small token budget
       const config: SessionStartConfig = {
         maxObservations: 10,
