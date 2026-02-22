@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKFLOW_FILE="$REPO_ROOT/.github/workflows/update-versions.yml"
+MARKETPLACE_FILE="$REPO_ROOT/.claude-plugin/marketplace.json"
 
 fail() {
   echo "FAIL: $1"
@@ -19,6 +20,10 @@ assert_contains() {
 
 if [[ ! -f "$WORKFLOW_FILE" ]]; then
   fail "workflow file not found: $WORKFLOW_FILE"
+fi
+
+if [[ ! -f "$MARKETPLACE_FILE" ]]; then
+  fail "marketplace file not found: $MARKETPLACE_FILE"
 fi
 
 assert_contains "schedule:"

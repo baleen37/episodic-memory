@@ -1,0 +1,27 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "memmem",
+  "description": "Memmem plugin release metadata",
+  "owner": {
+    "name": "baleen"
+  },
+  "plugins": [
+    {
+      "name": "memmem",
+      "description": "Memmem - Conversation memory with semantic search across Claude Code sessions",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/baleen37/memmem.git"
+      },
+      "category": "productivity",
+      "tags": [
+        "memory",
+        "search",
+        "embeddings",
+        "semantic",
+        "mcp"
+      ],
+      "version": "1.0.3"
+    }
+  ]
+}
