@@ -101,8 +101,8 @@ describe('RateLimiter', () => {
   describe('Configuration', () => {
     test('uses default values when not specified', () => {
       const defaultLimiter = new RateLimiter();
-      // Default: 5 requests per second, burst size of 10
-      expect(defaultLimiter.getAvailableTokens()).toBe(10);
+      // Default burst size is strict (1 token)
+      expect(defaultLimiter.getAvailableTokens()).toBe(1);
     });
 
     test('accepts custom configuration', () => {
@@ -110,9 +110,9 @@ describe('RateLimiter', () => {
       expect(customLimiter.getAvailableTokens()).toBe(5);
     });
 
-    test('burst size defaults to 2x requests per second', () => {
+    test('burst size defaults to 1 when not specified', () => {
       const limiter = new RateLimiter({ requestsPerSecond: 3 });
-      expect(limiter.getAvailableTokens()).toBe(6);
+      expect(limiter.getAvailableTokens()).toBe(1);
     });
   });
 
@@ -206,8 +206,8 @@ describe('Config Integration', () => {
   test('getEmbeddingRateLimiter uses default values when no config', () => {
     mockConfigReturnValue = null;
     const limiter = getEmbeddingRateLimiter();
-    // Default: 5 rps, burst 10
-    expect(limiter.getAvailableTokens()).toBe(10);
+    // Default: strict 0.5 rps with burst 1
+    expect(limiter.getAvailableTokens()).toBe(1);
   });
 
   test('getEmbeddingRateLimiter uses config values when available', () => {
@@ -223,8 +223,8 @@ describe('Config Integration', () => {
   test('getLLMRateLimiter uses default values when no config', () => {
     mockConfigReturnValue = null;
     const limiter = getLLMRateLimiter();
-    // Default: 2 rps, burst 4
-    expect(limiter.getAvailableTokens()).toBe(4);
+    // Default: strict 0.5 rps with burst 1
+    expect(limiter.getAvailableTokens()).toBe(1);
   });
 
   test('getLLMRateLimiter uses config values when available', () => {
@@ -244,8 +244,8 @@ describe('Config Integration', () => {
       },
     };
     const limiter = getEmbeddingRateLimiter();
-    // Burst should be 8 * 2 = 16 (default multiplier)
-    expect(limiter.getAvailableTokens()).toBe(16);
+    // Burst should default to strict 1
+    expect(limiter.getAvailableTokens()).toBe(1);
   });
 
   test('getLLMRateLimiter uses default burst when only rps specified', () => {
@@ -255,8 +255,8 @@ describe('Config Integration', () => {
       },
     };
     const limiter = getLLMRateLimiter();
-    // Burst should be 3 * 2 = 6 (default multiplier)
-    expect(limiter.getAvailableTokens()).toBe(6);
+    // Burst should default to strict 1
+    expect(limiter.getAvailableTokens()).toBe(1);
   });
 
   test('both limiters use separate config values', () => {
