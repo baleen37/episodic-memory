@@ -22,13 +22,10 @@ interface RateLimiterConfig {
 }
 
 /** Default requests per second for embedding generation */
-const DEFAULT_EMBEDDING_RPS = 5;
+const DEFAULT_EMBEDDING_RPS = 0.5;
 
 /** Default requests per second for LLM calls */
-const DEFAULT_LLM_RPS = 2;
-
-/** Default burst multiplier (burst = rps * multiplier) */
-const DEFAULT_BURST_MULTIPLIER = 2;
+const DEFAULT_LLM_RPS = 0.5;
 
 /**
  * Token bucket rate limiter.
@@ -49,8 +46,8 @@ export class RateLimiter {
    * @param config - Configuration options
    */
   constructor(config: RateLimiterConfig = {}) {
-    const rps = config.requestsPerSecond ?? 5;
-    this.maxTokens = config.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER;
+    const rps = config.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    this.maxTokens = config.burstSize ?? 1;
     this.tokens = this.maxTokens;
     this.refillRate = rps / 1000; // Convert to tokens per millisecond
     this.lastRefill = Date.now();
@@ -159,7 +156,7 @@ let llmLimiter: RateLimiter | null = null;
  * Gets the singleton rate limiter for embedding generation.
  *
  * Reads configuration from ~/.config/memmem/config.json if available.
- * Default: 5 requests per second, burst of 10
+ * Default: 0.5 requests per second, burst of 1
  *
  * @returns RateLimiter instance for embeddings
  */
@@ -170,7 +167,7 @@ export function getEmbeddingRateLimiter(): RateLimiter {
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
     embeddingLimiter = new RateLimiter({
       requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER,
+      burstSize: ratelimitConfig?.burstSize ?? 1,
     });
   }
   return embeddingLimiter;
@@ -180,7 +177,7 @@ export function getEmbeddingRateLimiter(): RateLimiter {
  * Gets the singleton rate limiter for LLM API calls.
  *
  * Reads configuration from ~/.config/memmem/config.json if available.
- * Default: 2 requests per second, burst of 4
+ * Default: 0.5 requests per second, burst of 1
  *
  * @returns RateLimiter instance for LLM calls
  */
@@ -191,7 +188,7 @@ export function getLLMRateLimiter(): RateLimiter {
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
     llmLimiter = new RateLimiter({
       requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER,
+      burstSize: ratelimitConfig?.burstSize ?? 1,
     });
   }
   return llmLimiter;
