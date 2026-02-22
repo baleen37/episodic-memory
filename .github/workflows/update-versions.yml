@@ -13,4 +13,11 @@ permissions:
 
 jobs:
   update-versions:
-    uses: baleen37/baleen-marketplace/.github/workflows/reusable-update-versions.yml@main
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run update action
+        uses: baleen37/baleen-marketplace/.github/actions/update-versions@main
