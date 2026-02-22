@@ -1,0 +1,16 @@
+name: Update Plugin Versions
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - update_versions
+
+permissions:
+  contents: write
+
+jobs:
+  update-versions:
+    uses: baleen37/baleen-marketplace/.github/workflows/reusable-update-versions.yml@main
