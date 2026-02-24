@@ -12,14 +12,14 @@ Automatically indexes conversations and provides progressive disclosure search t
 ## Commands
 
 ```bash
-npm test                        # Run all tests (vitest)
-npm test path/to/file.test.ts   # Run single test file
-npm run test:watch              # Watch mode
-npm run build                   # Bundle with esbuild (node scripts/build.mjs)
-npm run typecheck               # tsc --noEmit
+bun test                        # Run all tests
+bun test path/to/file.test.ts   # Run single test file
+bun test --watch                # Watch mode
+bun run build                   # Bundle with bun build (scripts/build.mjs)
+bun run typecheck               # tsc --noEmit
 ```
 
-**CRITICAL**: Always use `npm`, never `bun` — `better-sqlite3` requires Node.js native bindings.
+**CRITICAL**: Always use `bun` — this project uses `bun:sqlite` (built-in) and `bun test`.
 
 ## Key Files
 

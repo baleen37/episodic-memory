@@ -1,20 +1,17 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Build script for memmem plugin
- * Bundles the MCP server and CLI into standalone files using esbuild
+ * Bundles the MCP server and CLI into standalone files using Bun.build
  */
 
-import { mkdir, copyFile } from "fs/promises";
+import { mkdir, copyFile, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { build } from "esbuild";
 
 const commonConfig = {
-  platform: "node",
+  target: "node",
   format: "esm",
-  sourcemap: false,
+  sourcemap: "none",
   minify: false,
-  bundle: true,
-  // External dependencies that should not be bundled
   external: [
     "@huggingface/transformers",
     "bun:sqlite",
@@ -24,46 +21,39 @@ const commonConfig = {
   ],
 };
 
+async function buildEntry(entrypoint, outfile) {
+  const result = await Bun.build({
+    ...commonConfig,
+    entrypoints: [entrypoint],
+    outfile,
+  });
+
+  if (!result.success) {
+    for (const log of result.logs) {
+      console.error(log);
+    }
+    throw new Error(`Failed to build ${outfile}`);
+  }
+
+  const built = await readFile(outfile, "utf8");
+  if (!built.startsWith("#!/usr/bin/env node")) {
+    await writeFile(outfile, `#!/usr/bin/env node\n${built}`);
+  }
+
+  console.log(`✓ Built ${outfile}`);
+}
+
 async function buildCli() {
-  // Ensure output directory exists
   await mkdir("dist", { recursive: true });
 
   try {
-    // Build actual CLI (bundled)
-    await build({
-      ...commonConfig,
-      entryPoints: ["src/cli/index-cli.ts"],
-      outfile: "dist/cli-internal.mjs",
-      banner: { js: "#!/usr/bin/env node" },
-    });
-    console.log("✓ Built dist/cli-internal.mjs");
+    await buildEntry("src/cli/index-cli.ts", "dist/cli-internal.mjs");
+    await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
+    await buildEntry("src/mcp/embedding-worker.ts", "dist/embedding-worker.mjs");
 
-    // Copy graceful wrapper (not bundled, just copied)
-    await copyFile(
-      join("src", "cli-graceful.mjs"),
-      join("dist", "cli.mjs")
-    );
+    await copyFile(join("src", "cli-graceful.mjs"), join("dist", "cli.mjs"));
     console.log("✓ Copied dist/cli.mjs (graceful wrapper)");
 
-    // Build MCP server
-    await build({
-      ...commonConfig,
-      entryPoints: ["src/mcp/server.ts"],
-      outfile: "dist/mcp-server.mjs",
-      banner: { js: "#!/usr/bin/env node" },
-    });
-    console.log("✓ Built dist/mcp-server.mjs");
-
-    // Build embedding worker (singleton process for all MCP clients)
-    await build({
-      ...commonConfig,
-      entryPoints: ["src/mcp/embedding-worker.ts"],
-      outfile: "dist/embedding-worker.mjs",
-      banner: { js: "#!/usr/bin/env node" },
-    });
-    console.log("✓ Built dist/embedding-worker.mjs");
-
-    // Copy wrapper script to dist/ for cached plugins
     await mkdir("dist/lib", { recursive: true });
     await copyFile(
       join("scripts", "mcp-server-wrapper.mjs"),
@@ -71,7 +61,6 @@ async function buildCli() {
     );
     console.log("✓ Copied dist/mcp-wrapper.mjs");
 
-    // Copy shared dependency library for dist/mcp-wrapper.mjs
     await copyFile(
       join("scripts", "lib", "check-dependencies.mjs"),
       join("dist", "lib", "check-dependencies.mjs")
