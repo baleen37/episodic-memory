@@ -4,12 +4,13 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['**/*.test.ts'],
-    exclude: ['**/node_modules/**', 'dist', '.git'],
+    exclude: ['**/node_modules/**', 'dist', '.git', '.worktrees/**'],
     testTimeout: 15000,
     hookTimeout: 15000,
+    pool: 'forks',
     poolOptions: {
-      threads: {
-        maxThreads: 4,
+      forks: {
+        singleFork: true,
       },
     },
     coverage: {

@@ -8080,18 +8080,18 @@ function getLLMRateLimiter() {
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
     llmLimiter = new RateLimiter({
       requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER
+      burstSize: ratelimitConfig?.burstSize ?? 1
     });
   }
   return llmLimiter;
 }
-var DEFAULT_LLM_RPS, DEFAULT_BURST_MULTIPLIER, RateLimiter, llmLimiter;
+var DEFAULT_EMBEDDING_RPS, DEFAULT_LLM_RPS, RateLimiter, llmLimiter;
 var init_ratelimiter = __esm({
   "src/core/ratelimiter.ts"() {
     "use strict";
     init_config();
-    DEFAULT_LLM_RPS = 2;
-    DEFAULT_BURST_MULTIPLIER = 2;
+    DEFAULT_EMBEDDING_RPS = 0.5;
+    DEFAULT_LLM_RPS = 0.5;
     RateLimiter = class {
       tokens;
       maxTokens;
@@ -8105,8 +8105,8 @@ var init_ratelimiter = __esm({
        * @param config - Configuration options
        */
       constructor(config2 = {}) {
-        const rps = config2.requestsPerSecond ?? 5;
-        this.maxTokens = config2.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER;
+        const rps = config2.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+        this.maxTokens = config2.burstSize ?? 1;
         this.tokens = this.maxTokens;
         this.refillRate = rps / 1e3;
         this.lastRefill = Date.now();

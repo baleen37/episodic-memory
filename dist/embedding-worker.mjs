@@ -46,18 +46,17 @@ function getEmbeddingRateLimiter() {
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
     embeddingLimiter = new RateLimiter({
       requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER
+      burstSize: ratelimitConfig?.burstSize ?? 1
     });
   }
   return embeddingLimiter;
 }
-var DEFAULT_EMBEDDING_RPS, DEFAULT_BURST_MULTIPLIER, RateLimiter, embeddingLimiter;
+var DEFAULT_EMBEDDING_RPS, RateLimiter, embeddingLimiter;
 var init_ratelimiter = __esm({
   "src/core/ratelimiter.ts"() {
     "use strict";
     init_config();
-    DEFAULT_EMBEDDING_RPS = 5;
-    DEFAULT_BURST_MULTIPLIER = 2;
+    DEFAULT_EMBEDDING_RPS = 0.5;
     RateLimiter = class {
       tokens;
       maxTokens;
@@ -71,8 +70,8 @@ var init_ratelimiter = __esm({
        * @param config - Configuration options
        */
       constructor(config = {}) {
-        const rps = config.requestsPerSecond ?? 5;
-        this.maxTokens = config.burstSize ?? rps * DEFAULT_BURST_MULTIPLIER;
+        const rps = config.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+        this.maxTokens = config.burstSize ?? 1;
         this.tokens = this.maxTokens;
         this.refillRate = rps / 1e3;
         this.lastRefill = Date.now();
@@ -200,8 +199,8 @@ async function initModel() {
     env.cacheDir = "./.cache";
     embeddingPipeline = await pipeline(
       "feature-extraction",
-      "onnx-community/embeddinggemma-300m-ONNX",
-      { dtype: "q4" }
+      "Supabase/gte-small",
+      { dtype: "fp16" }
     );
     console.log("Embedding model loaded");
   }
@@ -211,8 +210,7 @@ async function generateEmbeddingFromModel(text) {
     await initModel();
   }
   if (!embeddingPipeline) return null;
-  const prefixedText = `title: none | text: ${text}`;
-  const truncated = prefixedText.substring(0, 8e3);
+  const truncated = text.substring(0, 8e3);
   const output = await embeddingPipeline(truncated, {
     pooling: "mean",
     normalize: true

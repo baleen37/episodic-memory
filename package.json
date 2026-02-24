@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Memmem - Conversation memory with semantic search across Claude Code sessions",
   "scripts": {
+    "postinstall": "bash scripts/conditional-build.sh",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
