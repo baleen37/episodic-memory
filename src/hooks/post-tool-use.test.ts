@@ -9,13 +9,13 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { compressToolData } from '../core/compress.js';
 import { initDatabase, getAllPendingEvents } from '../core/db.js';
 import { handlePostToolUse } from './post-tool-use.js';
 
 describe('PostToolUse Hook', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     // Use in-memory database for testing

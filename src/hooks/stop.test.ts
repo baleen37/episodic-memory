@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -29,7 +29,7 @@ vi.mock('../core/embeddings.js', () => ({
   generateEmbedding: vi.fn().mockResolvedValue(mockEmbedding),
 }));
 
-function addReadEvents(db: Database.Database, sessionId: string, count: number): void {
+function addReadEvents(db: Database, sessionId: string, count: number): void {
   for (let i = 0; i < count; i++) {
     handlePostToolUse(db, sessionId, TEST_PROJECT, 'Read', {
       file_path: `/src/file${i}.ts`,
@@ -48,7 +48,7 @@ function createStopOptions(overrides?: Partial<StopHookOptions>): StopHookOption
 }
 
 describe('Stop Hook', () => {
-  let db: Database.Database;
+  let db: Database;
   let tmpSrcDir: string;
   let tmpDstDir: string;
 

@@ -12,7 +12,7 @@
  */
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import type Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 // Mock the search function - factory must define mock inline
 vi.mock('../core/search.js', () => ({
@@ -55,7 +55,7 @@ import { readConversation as mockReadConversation } from '../core/read.js';
 import { loadConfig as mockLoadConfig, createProvider as mockCreateProvider } from '../core/llm/index.js';
 
 describe('MCP Server Handlers', () => {
-  let mockDb: Database.Database;
+  let mockDb: Database;
 
   beforeEach(() => {
     __resetQueryNormalizerCacheForTests();
@@ -65,7 +65,7 @@ describe('MCP Server Handlers', () => {
       complete: vi.fn()
     } as any);
     // Create a mock database
-    mockDb = {} as Database.Database;
+    mockDb = {} as Database;
   });
 
   afterEach(() => {

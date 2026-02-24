@@ -14,7 +14,7 @@
  * 6. Runs async (non-blocking)
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import type { LLMProvider, CompressedEvent, PreviousObservation } from '../core/llm/index.js';
 import { extractObservationsFromBatch } from '../core/llm/index.js';
 import { create as createObservation } from '../core/observations.js';
@@ -70,7 +70,7 @@ export interface StopHookOptions {
  * @param options - Stop hook options
  */
 export async function handleStop(
-  db: Database.Database,
+  db: Database,
   options: StopHookOptions
 ): Promise<void> {
   const { provider, sessionId, project, batchSize = DEFAULT_BATCH_SIZE, projectSlug, claudeProjectsDir, archiveDir } = options;

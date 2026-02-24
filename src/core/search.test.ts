@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDatabase, insertObservation } from './db.js';
 import { search } from './search.js';
 import { EMBEDDING_DIM } from './constants.js';
@@ -18,7 +18,7 @@ vi.mock('./embeddings.js', () => ({
 }));
 
 describe('search - observation search', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     // Use in-memory database for testing
@@ -38,7 +38,7 @@ describe('search - observation search', () => {
 
   // Helper to insert test observation
   function insertTestObservation(
-    db: Database.Database,
+    db: Database,
     observation: {
       title: string;
       content: string;

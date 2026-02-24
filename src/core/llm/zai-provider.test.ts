@@ -8,9 +8,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ZAIProvider } from './zai-provider.js';
 import type { LLMOptions } from './types.js';
 
-// Mock fetch globally - we need to declare it properly for TypeScript
+// Mock fetch globally - use vi.stubGlobal to avoid TypeScript errors with bun-types
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+vi.stubGlobal('fetch', mockFetch);
 
 describe('ZAIProvider', () => {
   beforeEach(() => {

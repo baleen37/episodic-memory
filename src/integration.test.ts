@@ -9,7 +9,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDatabase, getAllPendingEvents, getObservation } from './core/db.js';
 import { handlePostToolUse } from './hooks/post-tool-use.js';
 import { handleStop, type StopHookOptions } from './hooks/stop.js';
@@ -43,7 +43,7 @@ vi.mock('./core/embeddings.js', () => ({
 }));
 
 describe('Integration Tests', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';

@@ -10,7 +10,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDatabase, insertObservation, getObservation } from '../core/db.js';
 import { handleSessionStart, type SessionStartConfig, type SessionStartResult } from './session-start.js';
 import { EMBEDDING_DIM } from '../core/constants.js';
@@ -29,7 +29,7 @@ vi.mock('../core/embeddings.js', () => ({
 const mockEmbedding = new Array(EMBEDDING_DIM).fill(0.1);
 
 describe('SessionStart Hook', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     // Use in-memory database for testing

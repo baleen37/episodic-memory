@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 vi.mock('../core/db.js', () => ({
   openDatabase: vi.fn(),
@@ -76,7 +76,7 @@ async function runInject(stdinData: string): Promise<void> {
 }
 
 describe('inject-cli behavior', () => {
-  let mockDb: Database.Database;
+  let mockDb: Database;
   let originalEnv: NodeJS.ProcessEnv;
   let consoleLogs: string[];
   let consoleErrors: string[];
@@ -89,7 +89,7 @@ describe('inject-cli behavior', () => {
       run: vi.fn(),
       get: vi.fn(),
       all: vi.fn(),
-    } as unknown as Database.Database;
+    } as unknown as Database;
 
     (openDatabase as ReturnType<typeof vi.fn>).mockReturnValue(mockDb);
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDatabase } from './db.js';
 import {
   create,
@@ -21,7 +21,7 @@ vi.mock('./embeddings.js', () => ({
 }));
 
 describe('observations', () => {
-  let db: Database.Database;
+  let db: Database;
   let testDbPath: string;
 
   beforeEach(() => {

@@ -19,7 +19,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import { search } from '../core/search.js';
 import { findByIds as getObservationsByIds } from '../core/observations.js';
 import { readConversation } from '../core/read.js';
@@ -184,7 +184,7 @@ async function getQueryNormalizerProvider(): Promise<LLMProvider | undefined> {
 
 export async function handleSearch(
   params: SearchInput,
-  db: Database.Database
+  db: Database
 ): Promise<SearchResult[]> {
   const queryNormalizerProvider = await getQueryNormalizerProvider();
 
@@ -217,7 +217,7 @@ export interface ObservationOutput {
 
 export async function handleGetObservations(
   params: GetObservationsInput,
-  db: Database.Database
+  db: Database
 ): Promise<ObservationOutput[]> {
   // Convert string IDs to numbers
   const numericIds = params.ids.map(id =>

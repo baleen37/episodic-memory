@@ -15,7 +15,7 @@
  * - ...
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { searchObservations, type ObservationResult } from '../core/db.js';
 
 /**
@@ -78,7 +78,7 @@ function formatObservation(obs: ObservationResult): string {
  * @returns Formatted markdown with recent observations
  */
 export async function handleSessionStart(
-  db: Database.Database,
+  db: Database,
   project: string,
   config: SessionStartConfig
 ): Promise<SessionStartResult> {

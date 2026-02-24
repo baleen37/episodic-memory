@@ -4,7 +4,7 @@
  * Search using observations table with vector similarity.
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { generateEmbedding, initEmbeddings } from './embeddings.js';
 import type { LLMProvider } from './llm/types.js';
 
@@ -142,7 +142,7 @@ function buildSharedFilterParts(
 
 async function vector_search(
   query: string,
-  options: SearchOptions & { db: Database.Database }
+  options: SearchOptions & { db: Database }
 ): Promise<CompactObservationResult[]> {
   const { db, limit = 10, after, before, projects, files } = options;
   const {
@@ -165,7 +165,7 @@ async function vector_search(
   // Request more vector candidates when file filters are present to avoid early cutoff.
   const vectorCandidateLimit = files && files.length > 0 ? Math.max(limit * 5, limit) : limit;
 
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT
       o.id,
       o.title,
@@ -196,7 +196,7 @@ async function vector_search(
 
 function keyword_search(
   query: string,
-  options: SearchOptions & { db: Database.Database }
+  options: SearchOptions & { db: Database }
 ): CompactObservationResult[] {
   const { db, limit = 10, after, before, projects, files } = options;
   const {
@@ -208,7 +208,7 @@ function keyword_search(
     fileFilterParams
   } = buildSharedFilterParts(after, before, projects, files);
 
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT
       o.id,
       o.title,
@@ -245,7 +245,7 @@ function keyword_search(
  */
 export async function search(
   query: string,
-  options: SearchOptions & { db: Database.Database }
+  options: SearchOptions & { db: Database }
 ): Promise<CompactObservationResult[]> {
   const { db, limit = 10, after, before, projects, files, queryNormalizerProvider } = options;
 

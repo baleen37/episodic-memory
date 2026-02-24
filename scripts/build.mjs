@@ -17,7 +17,7 @@ const commonConfig = {
   // External dependencies that should not be bundled
   external: [
     "@huggingface/transformers",
-    "better-sqlite3",
+    "bun:sqlite",
     "sharp",
     "onnxruntime-node",
     "sqlite-vec",

@@ -14,12 +14,17 @@
  * - observations_fts (full-text search removed - use vector search only)
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import path from 'path';
 import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
+
+// macOS: Apple's default SQLite disables extensions; use Homebrew SQLite
+if (process.platform === 'darwin') {
+  Database.setCustomSQLite('/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib');
+}
 
 export interface PendingEvent {
   sessionId: string;
@@ -63,7 +68,7 @@ interface SearchOptions {
  * Initialize database with schema
  * Deletes old database file if it exists (clean slate)
  */
-export function initDatabase(): Database.Database {
+export function initDatabase(): Database {
   return createDatabase(true);
 }
 
@@ -71,7 +76,7 @@ export function initDatabase(): Database.Database {
  * Open existing database or create new one if not exists.
  * Does not delete existing database.
  */
-export function openDatabase(): Database.Database {
+export function openDatabase(): Database {
   return createDatabase(false);
 }
 
@@ -79,7 +84,7 @@ export function openDatabase(): Database.Database {
  * Create or open database.
  * @param wipe Whether to delete existing database file first
  */
-function createDatabase(wipe: boolean): Database.Database {
+function createDatabase(wipe: boolean): Database {
   const dbPath = getDbPath();
 
   // Ensure directory exists
@@ -100,10 +105,10 @@ function createDatabase(wipe: boolean): Database.Database {
   sqliteVec.load(db);
 
   // Enable WAL mode for better concurrency
-  db.pragma('journal_mode = WAL');
+  db.exec('PRAGMA journal_mode = WAL');
 
   // Check if tables exist, create if not
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
+  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
   const tableNames = new Set(tables.map(t => t.name));
 
   // Create pending_events table if not exists
@@ -145,7 +150,7 @@ function createDatabase(wipe: boolean): Database.Database {
 
   // Upgrade observations schema for existing databases
   // Add content_original column if missing
-  const observationColumns = db.prepare(`
+  const observationColumns = db.query(`
     SELECT name FROM pragma_table_info('observations')
   `).all() as Array<{ name: string }>;
   const hasContentOriginal = observationColumns.some(
@@ -157,7 +162,7 @@ function createDatabase(wipe: boolean): Database.Database {
 
   // Migration: check if vec_observations has wrong dimension (768 -> 384)
   if (tableNames.has('vec_observations')) {
-    const schemaResult = db.prepare(
+    const schemaResult = db.query(
       "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
     ).get() as { sql: string } | undefined;
 
@@ -185,15 +190,13 @@ function createDatabase(wipe: boolean): Database.Database {
  * Insert a pending event into the database
  */
 export function insertPendingEvent(
-  db: Database.Database,
+  db: Database,
   event: PendingEvent
 ): number {
-  const stmt = db.prepare(`
+  const result = db.query(`
     INSERT INTO pending_events (session_id, project, tool_name, compressed, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  const result = stmt.run(
+  `).run(
     event.sessionId,
     event.project,
     event.toolName,
@@ -210,17 +213,15 @@ export function insertPendingEvent(
  * Optionally includes vector embedding for semantic search
  */
 export function insertObservation(
-  db: Database.Database,
+  db: Database,
   observation: Observation,
   embedding?: number[]
 ): number {
   // Insert into main table
-  const stmt = db.prepare(`
+  const result = db.query(`
     INSERT INTO observations (title, content, content_original, project, session_id, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const result = stmt.run(
+  `).run(
     observation.title,
     observation.content,
     observation.contentOriginal ?? null,
@@ -235,11 +236,10 @@ export function insertObservation(
   // Insert into vector table if embedding provided
   // Use the string id to link the tables
   if (embedding) {
-    const vecStmt = db.prepare(`
+    db.query(`
       INSERT INTO vec_observations (id, embedding)
       VALUES (?, ?)
-    `);
-    vecStmt.run(String(rowid), Buffer.from(new Float32Array(embedding).buffer));
+    `).run(String(rowid), Buffer.from(new Float32Array(embedding).buffer));
   }
 
   return rowid;
@@ -250,24 +250,22 @@ export function insertObservation(
  * Used by Stop hook for batch extraction.
  */
 export function getAllPendingEvents(
-  db: Database.Database,
+  db: Database,
   sessionId: string
 ): Array<PendingEvent & { id: number }> {
-  const stmt = db.prepare(`
+  return db.query(`
     SELECT id, session_id as sessionId, project, tool_name as toolName, compressed, timestamp, created_at as createdAt
     FROM pending_events
     WHERE session_id = ?
     ORDER BY created_at ASC
-  `);
-
-  return stmt.all(sessionId) as Array<PendingEvent & { id: number }>;
+  `).all(sessionId) as Array<PendingEvent & { id: number }>;
 }
 
 /**
  * Search observations with filters
  */
 export function searchObservations(
-  db: Database.Database,
+  db: Database,
   options: SearchOptions = {}
 ): ObservationResult[] {
   const { project, sessionId, after, before, limit = 100 } = options;
@@ -304,23 +302,21 @@ export function searchObservations(
   sql += ' ORDER BY timestamp DESC LIMIT ?';
   params.push(limit);
 
-  const stmt = db.prepare(sql);
-  return stmt.all(...params) as ObservationResult[];
+  return db.query(sql).all(...params) as ObservationResult[];
 }
 
 /**
  * Get a single observation by ID
  */
 export function getObservation(
-  db: Database.Database,
+  db: Database,
   id: number
 ): ObservationResult | null {
-  const stmt = db.prepare(`
+  const result = db.query(`
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
     FROM observations
     WHERE id = ?
-  `);
+  `).get(id) as ObservationResult | undefined;
 
-  const result = stmt.get(id) as ObservationResult | undefined;
   return result ?? null;
 }

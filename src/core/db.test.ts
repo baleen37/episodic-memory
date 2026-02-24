@@ -2,13 +2,13 @@ import { describe, test, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
 import { initDatabase, openDatabase, insertPendingEvent, insertObservation, searchObservations, getObservation, getAllPendingEvents } from './db.js';
 import { EMBEDDING_DIM } from './constants.js';
 
 describe('Database Schema', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     // Use in-memory database for testing
@@ -112,9 +112,9 @@ describe('Database Schema', () => {
     });
 
     test('enables WAL mode', () => {
-      const result = db.pragma('journal_mode', { simple: true });
+      const result = db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
       // In-memory databases fall back to 'memory', file-based would be 'wal'
-      expect(['wal', 'memory']).toContain(result);
+      expect(['wal', 'memory']).toContain(result.journal_mode);
     });
 
     test('loads sqlite-vec extension', () => {
@@ -525,9 +525,9 @@ describe('Database Schema', () => {
       const tempDbPath = path.join(tempDbDir, 'legacy.db');
       const previousDbPath = process.env.CONVERSATION_MEMORY_DB_PATH;
 
-      let legacyDb: Database.Database | undefined;
-      let migratedDb: Database.Database | undefined;
-      let secondOpenDb: Database.Database | undefined;
+      let legacyDb: Database | undefined;
+      let migratedDb: Database | undefined;
+      let secondOpenDb: Database | undefined;
 
       try {
         process.env.CONVERSATION_MEMORY_DB_PATH = tempDbPath;
@@ -591,8 +591,8 @@ describe('Database Schema', () => {
       const tempDbPath = path.join(tempDbDir, 'legacy-case.db');
       const previousDbPath = process.env.CONVERSATION_MEMORY_DB_PATH;
 
-      let legacyDb: Database.Database | undefined;
-      let migratedDb: Database.Database | undefined;
+      let legacyDb: Database | undefined;
+      let migratedDb: Database | undefined;
 
       try {
         process.env.CONVERSATION_MEMORY_DB_PATH = tempDbPath;

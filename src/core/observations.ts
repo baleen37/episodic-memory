@@ -5,7 +5,7 @@
  * Uses db.ts for database operations.
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import {
   Observation,
   ObservationResult,
@@ -41,7 +41,7 @@ export interface ObservationData {
  * @returns The ID of the created observation
  */
 export async function create(
-  db: Database.Database,
+  db: Database,
   title: string,
   content: string,
   project: string,
@@ -81,7 +81,7 @@ export async function create(
  * @returns Observation or null if not found
  */
 export async function findById(
-  db: Database.Database,
+  db: Database,
   id: number
 ): Promise<ObservationData | null> {
   const result = getObservation(db, id);
@@ -109,7 +109,7 @@ export async function findById(
  * @returns Array of observations (empty if none found)
  */
 export async function findByIds(
-  db: Database.Database,
+  db: Database,
   ids: number[]
 ): Promise<ObservationData[]> {
   if (ids.length === 0) {
@@ -117,7 +117,7 @@ export async function findByIds(
   }
 
   const placeholders = ids.map(() => '?').join(',');
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp
     FROM observations
     WHERE id IN (${placeholders})
