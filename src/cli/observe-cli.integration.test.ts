@@ -61,13 +61,13 @@ describe('observe-cli session_id integration', () => {
       encoding: 'utf8',
     });
 
-    // Debug: log CLI output if it failed
-    if (result.status !== 0 || result.stderr) {
-      console.log('CLI stdout:', result.stdout);
-      console.log('CLI stderr:', result.stderr);
-      console.log('CLI status:', result.status);
-      console.log('CLI error:', result.error);
-    }
+    // Debug: always log CLI output
+    console.log('CLI stdout:', result.stdout);
+    console.log('CLI stderr:', result.stderr);
+    console.log('CLI status:', result.status);
+    console.log('CLI error:', result.error);
+    console.log('dbPath:', dbPath);
+    console.log('fs.existsSync(dbPath):', fs.existsSync(dbPath));
 
     expect(result.status).toBe(0);
 
@@ -98,13 +98,13 @@ describe('observe-cli session_id integration', () => {
       encoding: 'utf8',
     });
 
-    // Debug: log CLI output if it failed
-    if (result.status !== 0 || result.stderr) {
-      console.log('CLI stdout:', result.stdout);
-      console.log('CLI stderr:', result.stderr);
-      console.log('CLI status:', result.status);
-      console.log('CLI error:', result.error);
-    }
+    // Debug: always log CLI output
+    console.log('CLI stdout:', result.stdout);
+    console.log('CLI stderr:', result.stderr);
+    console.log('CLI status:', result.status);
+    console.log('CLI error:', result.error);
+    console.log('dbPath:', dbPath);
+    console.log('fs.existsSync(dbPath):', fs.existsSync(dbPath));
 
     const db = new Database(dbPath);
     const rows = db.prepare('SELECT session_id FROM pending_events').all() as Array<{ session_id: string }>;
