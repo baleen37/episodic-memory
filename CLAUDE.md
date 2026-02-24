@@ -29,7 +29,7 @@ npm run typecheck               # tsc --noEmit
 | `src/core/observations.ts` | Observation CRUD (generates embeddings on create) |
 | `src/core/search.ts` | Hybrid vector-first + keyword-fallback search |
 | `src/core/compress.ts` | Rule-based tool data compression (no LLM) |
-| `src/core/embeddings.ts` | EmbeddingGemma-300m (768-dim ONNX, 4-bit quantized) |
+| `src/core/embeddings.ts` | gte-small (384-dim, fp16) |
 | `src/core/ratelimiter.ts` | Token bucket rate limiter (singleton, configurable) |
 | `src/core/llm/` | LLM providers (Gemini, ZAI) + batch extraction prompt |
 | `src/hooks/session-start.ts` | SessionStart hook implementation |
@@ -58,7 +58,7 @@ Three tables in `~/.config/memmem/conversation-index/conversations.db`:
 
 - **`pending_events`**: Temporary storage for compressed tool events within a session
 - **`observations`**: Long-term extracted insights (`title` ≤50 chars, `content` ≤200 chars in English, optional `content_original` for other languages)
-- **`vec_observations`**: 768-dimensional float embeddings (sqlite-vec virtual table)
+- **`vec_observations`**: 384-dimensional float embeddings (sqlite-vec virtual table)
 
 `openDatabase()` opens/creates (preserves data). `initDatabase()` wipes and recreates — tests only.
 
