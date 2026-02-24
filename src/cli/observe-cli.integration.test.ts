@@ -5,7 +5,7 @@
  * JSON is used when environment variables are not set.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, beforeAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -18,6 +18,13 @@ const CLI_PATH = new URL('../../dist/cli.mjs', import.meta.url).pathname;
 describe('observe-cli session_id integration', () => {
   let dbPath: string;
   let tempDir: string;
+
+  beforeAll(() => {
+    // Debug: verify CLI exists
+    if (!fs.existsSync(CLI_PATH)) {
+      throw new Error(`CLI not found at ${CLI_PATH}. Run 'npm run build' first.`);
+    }
+  });
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memmem-test-'));
@@ -54,6 +61,14 @@ describe('observe-cli session_id integration', () => {
       encoding: 'utf8',
     });
 
+    // Debug: log CLI output if it failed
+    if (result.status !== 0 || result.stderr) {
+      console.log('CLI stdout:', result.stdout);
+      console.log('CLI stderr:', result.stderr);
+      console.log('CLI status:', result.status);
+      console.log('CLI error:', result.error);
+    }
+
     expect(result.status).toBe(0);
 
     const db = new Database(dbPath);
@@ -72,7 +87,7 @@ describe('observe-cli session_id integration', () => {
       session_id: 'real-session-xyz',
     });
 
-    spawnSync('node', [CLI_PATH, 'observe'], {
+    const result = spawnSync('node', [CLI_PATH, 'observe'], {
       input: stdinPayload,
       env: {
         ...process.env,
@@ -82,6 +97,14 @@ describe('observe-cli session_id integration', () => {
       },
       encoding: 'utf8',
     });
+
+    // Debug: log CLI output if it failed
+    if (result.status !== 0 || result.stderr) {
+      console.log('CLI stdout:', result.stdout);
+      console.log('CLI stderr:', result.stderr);
+      console.log('CLI status:', result.status);
+      console.log('CLI error:', result.error);
+    }
 
     const db = new Database(dbPath);
     const rows = db.prepare('SELECT session_id FROM pending_events').all() as Array<{ session_id: string }>;
