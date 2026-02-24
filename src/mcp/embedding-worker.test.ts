@@ -3,11 +3,12 @@ import net from 'net';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import { EMBEDDING_DIM } from '../core/constants.js';
 
 // Mock embeddings-model (no real model loading)
 vi.mock('../core/embeddings-model.js', () => ({
   initModel: vi.fn().mockResolvedValue(undefined),
-  generateEmbeddingFromModel: vi.fn().mockResolvedValue(Array.from({ length: 768 }, (_, i) => i * 0.001)),
+  generateEmbeddingFromModel: vi.fn().mockResolvedValue(Array.from({ length: EMBEDDING_DIM }, (_, i) => i * 0.001)),
 }));
 
 // Mock ratelimiter
@@ -53,10 +54,10 @@ describe('startWorker()', () => {
     expect(server.listening).toBe(true);
   });
 
-  test('handles embedding request and returns 768-dim vector', async () => {
+  test('handles embedding request and returns correct-dim vector', async () => {
     const resp = await sendRequest(sockPath, { id: 'req-1', text: 'hello world' });
     expect(resp.id).toBe('req-1');
-    expect(resp.embedding).toHaveLength(768);
+    expect(resp.embedding).toHaveLength(EMBEDDING_DIM);
     expect(resp.error).toBeUndefined();
   });
 
@@ -67,7 +68,7 @@ describe('startWorker()', () => {
     const responses = await Promise.all(requests);
     const ids = new Set(responses.map(r => r.id));
     expect(ids.size).toBe(5);
-    responses.forEach(r => expect(r.embedding).toHaveLength(768));
+    responses.forEach(r => expect(r.embedding).toHaveLength(EMBEDDING_DIM));
   });
 
   test('returns error when generateEmbeddingFromModel returns null', async () => {

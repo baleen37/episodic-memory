@@ -17,6 +17,7 @@ import { handleSessionStart, type SessionStartConfig } from './hooks/session-sta
 import { search } from './core/search.js';
 import { findByIds as getObservationsByIds } from './core/observations.js';
 import type { LLMProvider } from './core/llm/index.js';
+import { EMBEDDING_DIM } from './core/constants.js';
 
 // Mock LLM provider
 const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_tokens: number; output_tokens: number } }>) => {
@@ -32,10 +33,13 @@ const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_
   } as unknown as LLMProvider & { __mockFn: ReturnType<typeof vi.fn> };
 };
 
+// Use vi.hoisted to create mock embedding array before vi.mock is hoisted
+const mockEmbedding = vi.hoisted(() => new Array(384).fill(0.1));
+
 // Mock embeddings module
 vi.mock('./core/embeddings.js', () => ({
   initEmbeddings: vi.fn().mockResolvedValue(undefined),
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(768).fill(0.1)),
+  generateEmbedding: vi.fn().mockResolvedValue(mockEmbedding),
 }));
 
 describe('Integration Tests', () => {

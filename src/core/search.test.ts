@@ -6,6 +6,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { initDatabase, insertObservation } from './db.js';
 import { search } from './search.js';
+import { EMBEDDING_DIM } from './constants.js';
 
 // Global mock factory that can be controlled per test
 let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
@@ -30,9 +31,9 @@ describe('search - observation search', () => {
     mockGenerateEmbedding = null;
   });
 
-  // Helper to create a 768-dimensional test embedding
+  // Helper to create a EMBEDDING_DIM-dimensional test embedding
   function createTestEmbedding(seed: number = 0): number[] {
-    return Array.from({ length: 768 }, (_, i) => Math.sin(seed + i * 0.1) * 0.5 + 0.5);
+    return Array.from({ length: EMBEDDING_DIM }, (_, i) => Math.sin(seed + i * 0.1) * 0.5 + 0.5);
   }
 
   // Helper to insert test observation

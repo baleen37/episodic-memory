@@ -20,10 +20,13 @@ const mockLLMProvider = {
   complete: vi.fn(),
 } as unknown as LLMProvider;
 
+// Use vi.hoisted to create mock embedding array before vi.mock is hoisted
+const mockEmbedding = vi.hoisted(() => new Array(384).fill(0.1));
+
 // Mock embeddings module
 vi.mock('../core/embeddings.js', () => ({
   initEmbeddings: vi.fn().mockResolvedValue(undefined),
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(768).fill(0.1)),
+  generateEmbedding: vi.fn().mockResolvedValue(mockEmbedding),
 }));
 
 function addReadEvents(db: Database.Database, sessionId: string, count: number): void {

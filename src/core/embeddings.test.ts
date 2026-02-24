@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import net from 'net';
 import EventEmitter from 'events';
+import { EMBEDDING_DIM } from './constants.js';
 
 vi.mock('./ratelimiter.js', () => ({
   getEmbeddingRateLimiter: () => ({ acquire: vi.fn().mockResolvedValue(undefined) }),
@@ -38,7 +39,7 @@ describe('generateEmbedding()', () => {
   });
 
   test('sends request to worker and returns embedding', async () => {
-    const mockEmbedding = Array.from({ length: 768 }, (_, i) => i * 0.001);
+    const mockEmbedding = Array.from({ length: EMBEDDING_DIM }, (_, i) => i * 0.001);
     const { generateEmbedding, __setWorkerConnectorForTests } = await import('./embeddings.js');
     __setWorkerConnectorForTests(() => Promise.resolve(createMockSocket({ embedding: mockEmbedding })));
 
@@ -77,7 +78,7 @@ describe('generateEmbedding()', () => {
     ]);
 
     expect(results).toHaveLength(3);
-    results.forEach(r => expect(r).toHaveLength(768));
+    results.forEach(r => expect(r).toHaveLength(EMBEDDING_DIM));
     __setWorkerConnectorForTests(null);
   });
 });
@@ -100,7 +101,7 @@ function createMockSocketMulti(): net.Socket {
   const emitter = new EventEmitter() as any;
   emitter.write = (data: any) => {
     const req = JSON.parse(data.toString().trim());
-    const embedding = Array.from({ length: 768 }, () => Math.random());
+    const embedding = Array.from({ length: EMBEDDING_DIM }, () => Math.random());
     setImmediate(() => emitter.emit('data', JSON.stringify({ id: req.id, embedding }) + '\n'));
     return true;
   };

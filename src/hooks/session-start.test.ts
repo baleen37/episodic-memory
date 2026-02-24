@@ -13,14 +13,20 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { initDatabase, insertObservation, getObservation } from '../core/db.js';
 import { handleSessionStart, type SessionStartConfig, type SessionStartResult } from './session-start.js';
+import { EMBEDDING_DIM } from '../core/constants.js';
+
+// Use vi.hoisted to create mock embedding array before vi.mock is hoisted
+// Note: Cannot use EMBEDDING_DIM here due to hoisting constraints
+const mockEmbeddingForMock = vi.hoisted(() => new Array(384).fill(0.1));
 
 // Mock embeddings module
 vi.mock('../core/embeddings.js', () => ({
   initEmbeddings: vi.fn().mockResolvedValue(undefined),
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(768).fill(0.1)),
+  generateEmbedding: vi.fn().mockResolvedValue(mockEmbeddingForMock),
 }));
 
-const mockEmbedding = new Array(768).fill(0.1);
+// Real embedding array for insertObservation calls - uses constant
+const mockEmbedding = new Array(EMBEDDING_DIM).fill(0.1);
 
 describe('SessionStart Hook', () => {
   let db: Database.Database;

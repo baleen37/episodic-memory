@@ -7,9 +7,10 @@ import {
   findByIds,
   type ObservationData
 } from './observations.js';
+import { EMBEDDING_DIM } from './constants.js';
 
 const { mockGenerateEmbedding, mockInitEmbeddings } = vi.hoisted(() => ({
-  mockGenerateEmbedding: vi.fn(async () => Array.from({ length: 768 }, () => Math.random() * 2 - 1)),
+  mockGenerateEmbedding: vi.fn(async () => Array.from({ length: EMBEDDING_DIM }, () => Math.random() * 2 - 1)),
   mockInitEmbeddings: vi.fn(async () => {}),
 }));
 
@@ -86,7 +87,7 @@ describe('observations', () => {
 
       expect(vecResult).toBeDefined();
       expect(Buffer.isBuffer(vecResult!.embedding)).toBe(true);
-      expect(vecResult!.embedding.length).toBe(768 * 4); // 768 floats * 4 bytes
+      expect(vecResult!.embedding.length).toBe(EMBEDDING_DIM * 4); // EMBEDDING_DIM floats * 4 bytes
     });
 
     it('should use provided timestamp', async () => {

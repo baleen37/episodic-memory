@@ -5,6 +5,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { initDatabase, openDatabase, insertPendingEvent, insertObservation, searchObservations, getObservation, getAllPendingEvents } from './db.js';
+import { EMBEDDING_DIM } from './constants.js';
 
 describe('Database Schema', () => {
   let db: Database.Database;
@@ -118,7 +119,7 @@ describe('Database Schema', () => {
 
     test('loads sqlite-vec extension', () => {
       // Try to create a test vector to verify the extension is loaded
-      const testVec = new Float32Array(768).fill(0.1);
+      const testVec = new Float32Array(EMBEDDING_DIM).fill(0.1);
       expect(() => {
         const stmt = db.prepare('INSERT INTO vec_observations (id, embedding) VALUES (?, ?)');
         stmt.run('test-id', Buffer.from(testVec.buffer));
@@ -202,7 +203,7 @@ describe('Database Schema', () => {
   describe('insertObservation', () => {
     test('inserts observation with all required fields', () => {
       const now = Date.now();
-      const embedding = new Array(768).fill(0.1);
+      const embedding = new Array(EMBEDDING_DIM).fill(0.1);
 
       insertObservation(db, {
         title: 'Test Observation',
@@ -247,7 +248,7 @@ describe('Database Schema', () => {
     });
 
     test('stores embedding in vec_observations table', () => {
-      const embedding = new Array(768).fill(0.5);
+      const embedding = new Array(EMBEDDING_DIM).fill(0.5);
 
       insertObservation(db, {
         title: 'Test',
@@ -263,7 +264,7 @@ describe('Database Schema', () => {
 
       expect(vecRow).toBeDefined();
       expect(vecRow.embedding).toBeInstanceOf(Buffer);
-      expect(vecRow.embedding.length).toBe(768 * 4); // 768 floats * 4 bytes
+      expect(vecRow.embedding.length).toBe(EMBEDDING_DIM * 4); // EMBEDDING_DIM floats * 4 bytes
     });
 
 
@@ -289,8 +290,8 @@ describe('Database Schema', () => {
 
   describe('searchObservations', () => {
     beforeEach(() => {
-      const embedding1 = new Array(768).fill(0.1);
-      const embedding2 = new Array(768).fill(0.9);
+      const embedding1 = new Array(EMBEDDING_DIM).fill(0.1);
+      const embedding2 = new Array(EMBEDDING_DIM).fill(0.9);
 
       insertObservation(db, {
         title: 'Database optimization',
