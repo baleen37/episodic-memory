@@ -8,7 +8,7 @@
  * 4. Full workflow from tool event to observation to search/injection
  */
 
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { initDatabase, getAllPendingEvents, getObservation } from './core/db.js';
 import { handlePostToolUse } from './hooks/post-tool-use.js';
@@ -16,31 +16,63 @@ import { handleStop, type StopHookOptions } from './hooks/stop.js';
 import { handleSessionStart, type SessionStartConfig } from './hooks/session-start.js';
 import { search } from './core/search.js';
 import { findByIds as getObservationsByIds } from './core/observations.js';
+import { __setWorkerConnectorForTests } from './core/embeddings.js';
 import type { LLMProvider } from './core/llm/index.js';
-import { EMBEDDING_DIM } from './core/constants.js';
+import net from 'net';
+import EventEmitter from 'events';
 
 // Mock LLM provider
 const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_tokens: number; output_tokens: number } }>) => {
   let callCount = 0;
-  const mockComplete = vi.fn(async () => {
+  const mockComplete = mock(async () => {
     const response = responses[Math.min(callCount, responses.length - 1)];
     callCount++;
     return response;
   });
   return {
     complete: mockComplete,
-    __mockFn: mockComplete, // Expose mock function for testing
-  } as unknown as LLMProvider & { __mockFn: ReturnType<typeof vi.fn> };
+    __mockFn: mockComplete,
+  } as unknown as LLMProvider & { __mockFn: ReturnType<typeof mock> };
 };
 
-// Use vi.hoisted to create mock embedding array before vi.mock is hoisted
-const mockEmbedding = vi.hoisted(() => new Array(384).fill(0.1));
+const MOCK_EMBEDDING = new Float32Array(384).fill(0.1);
 
-// Mock embeddings module
-vi.mock('./core/embeddings.js', () => ({
-  initEmbeddings: vi.fn().mockResolvedValue(undefined),
-  generateEmbedding: vi.fn().mockResolvedValue(mockEmbedding),
-}));
+function createMockEmbeddingSocket(): net.Socket {
+  const emitter = new EventEmitter() as any;
+  emitter.write = (data: any) => {
+    const req = JSON.parse(data.toString().trim());
+    setImmediate(() => emitter.emit('data', JSON.stringify({ id: req.id, embedding: Array.from(MOCK_EMBEDDING) }) + '\n'));
+    return true;
+  };
+  emitter.destroyed = false;
+  emitter.destroy = () => {
+    emitter.destroyed = true;
+    return emitter;
+  };
+  emitter.end = () => emitter;
+  return emitter as net.Socket;
+}
+
+async function runStop(db: Database, options: StopHookOptions): Promise<void> {
+  await handleStop(db, {
+    ...options,
+    createObservationFn: async (db, title, content, project, sessionId, timestamp, contentOriginal) => {
+      const now = Date.now();
+      const result = db.prepare(`
+        INSERT INTO observations (title, content, content_original, project, session_id, timestamp, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(title, content, contentOriginal ?? null, project, sessionId ?? null, timestamp ?? now, now);
+
+      const rowid = Number(result.lastInsertRowid);
+      db.prepare(`
+        INSERT INTO vec_observations (id, embedding)
+        VALUES (?, ?)
+      `).run(String(rowid), Buffer.from(MOCK_EMBEDDING.buffer));
+
+      return rowid;
+    },
+  });
+}
 
 describe('Integration Tests', () => {
   let db: Database;
@@ -48,10 +80,11 @@ describe('Integration Tests', () => {
   beforeEach(() => {
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
     db = initDatabase();
-    vi.clearAllMocks();
+    __setWorkerConnectorForTests(() => Promise.resolve(createMockEmbeddingSocket()));
   });
 
   afterEach(() => {
+    __setWorkerConnectorForTests(null);
     if (db) {
       db.close();
     }
@@ -101,7 +134,7 @@ describe('Integration Tests', () => {
         project,
       };
 
-      await handleStop(db, stopOptions);
+      await runStop(db, stopOptions);
 
       // Step 4: Verify observations were created
       const obs1 = getObservation(db, 1);
@@ -156,7 +189,7 @@ describe('Integration Tests', () => {
         project,
       };
 
-      await handleStop(db, stopOptions);
+      await runStop(db, stopOptions);
 
       // Should have called LLM twice (2 batches)
       expect(mockProvider.complete).toHaveBeenCalledTimes(2);
@@ -188,7 +221,7 @@ describe('Integration Tests', () => {
         project,
       };
 
-      await handleStop(db, stopOptions);
+      await runStop(db, stopOptions);
 
       // LLM should not be called
       expect(mockProvider.complete).not.toHaveBeenCalled();
@@ -240,7 +273,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 5; i++) {
         handlePostToolUse(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, stopOptions);
+      await runStop(db, stopOptions);
 
       // Now start a new session
       const config: SessionStartConfig = {
@@ -282,7 +315,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 5; i++) {
         handlePostToolUse(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, stopOptions);
+      await runStop(db, stopOptions);
 
       // Make ordering deterministic: shortest observation first (most recent)
       const now = Date.now();
@@ -325,7 +358,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'old-session', project, 'Read', { file_path: `/src/old${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: oldMockProvider,
         sessionId: 'old-session',
         project,
@@ -344,7 +377,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'recent-session', project, 'Read', { file_path: `/src/recent${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: recentMockProvider,
         sessionId: 'recent-session',
         project,
@@ -383,7 +416,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 5; i++) {
         handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider,
         sessionId: 'session-1',
         project,
@@ -418,7 +451,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider,
         sessionId: 'session-1',
         project,
@@ -445,7 +478,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-1', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider1,
         sessionId: 'session-1',
         project: 'project-a',
@@ -459,7 +492,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-2', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider2,
         sessionId: 'session-2',
         project: 'project-b',
@@ -490,7 +523,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider,
         sessionId: 'session-1',
         project,
@@ -533,7 +566,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider,
         sessionId: 'session-1',
         project,
@@ -577,7 +610,7 @@ describe('Integration Tests', () => {
         usage: { input_tokens: 200, output_tokens: 40 },
       }]);
 
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider1,
         sessionId: sessionId1,
         project,
@@ -619,7 +652,7 @@ describe('Integration Tests', () => {
         usage: { input_tokens: 150, output_tokens: 20 },
       }]);
 
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider2,
         sessionId: sessionId2,
         project,
@@ -648,7 +681,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-a', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProviderA,
         sessionId: 'session-a',
         project: 'project-a',
@@ -663,7 +696,7 @@ describe('Integration Tests', () => {
       for (let i = 0; i < 3; i++) {
         handlePostToolUse(db, 'session-b', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
       }
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProviderB,
         sessionId: 'session-b',
         project: 'project-b',
@@ -696,7 +729,7 @@ describe('Integration Tests', () => {
   describe('Error Handling and Edge Cases', () => {
     test('handles LLM errors gracefully', async () => {
       const mockProvider = {
-        complete: vi.fn().mockRejectedValue(new Error('API rate limit exceeded')),
+        complete: mock(async () => { throw new Error('API rate limit exceeded'); }),
       } as unknown as LLMProvider;
 
       for (let i = 0; i < 3; i++) {
@@ -724,7 +757,7 @@ describe('Integration Tests', () => {
         handlePostToolUse(db, 'session-empty', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
-      await handleStop(db, {
+      await runStop(db, {
         provider: mockProvider,
         sessionId: 'session-empty',
         project: 'test-project',

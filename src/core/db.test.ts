@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -263,7 +262,7 @@ describe('Database Schema', () => {
       `).get() as any;
 
       expect(vecRow).toBeDefined();
-      expect(vecRow.embedding).toBeInstanceOf(Buffer);
+      expect(vecRow.embedding).toBeInstanceOf(Uint8Array);
       expect(vecRow.embedding.length).toBe(EMBEDDING_DIM * 4); // EMBEDDING_DIM floats * 4 bytes
     });
 
@@ -731,7 +730,7 @@ describe('Database Schema', () => {
         SELECT * FROM vec_observations WHERE id = ?
       `).get(String(id));
 
-      expect(vecRow).toBeUndefined();
+      expect(vecRow).toBeNull();
     });
 
     test('searchObservations with combined filters', () => {

@@ -19485,7 +19485,7 @@ async function vector_search(query, options) {
     return [];
   }
   const vectorCandidateLimit = files && files.length > 0 ? Math.max(limit * 5, limit) : limit;
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT
       o.id,
       o.title,
@@ -19521,7 +19521,7 @@ function keyword_search(query, options) {
     fileClause,
     fileFilterParams
   } = buildSharedFilterParts(after, before, projects, files);
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT
       o.id,
       o.title,
@@ -19578,7 +19578,7 @@ async function search(query, options) {
 
 // src/core/db.ts
 init_paths();
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import path3 from "path";
 import fs2 from "fs";
 import * as sqliteVec from "sqlite-vec";
@@ -19587,6 +19587,9 @@ import * as sqliteVec from "sqlite-vec";
 var EMBEDDING_DIM = 384;
 
 // src/core/db.ts
+if (process.platform === "darwin") {
+  Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+}
 function openDatabase() {
   return createDatabase(false);
 }
@@ -19602,8 +19605,8 @@ function createDatabase(wipe) {
   }
   const db = new Database(dbPath);
   sqliteVec.load(db);
-  db.pragma("journal_mode = WAL");
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+  db.exec("PRAGMA journal_mode = WAL");
+  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all();
   const tableNames = new Set(tables.map((t) => t.name));
   if (!tableNames.has("pending_events")) {
     db.exec(`
@@ -19638,7 +19641,7 @@ function createDatabase(wipe) {
     db.exec(`CREATE INDEX idx_observations_session ON observations(session_id)`);
     db.exec(`CREATE INDEX idx_observations_timestamp ON observations(timestamp DESC)`);
   }
-  const observationColumns = db.prepare(`
+  const observationColumns = db.query(`
     SELECT name FROM pragma_table_info('observations')
   `).all();
   const hasContentOriginal = observationColumns.some(
@@ -19648,7 +19651,7 @@ function createDatabase(wipe) {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
   if (tableNames.has("vec_observations")) {
-    const schemaResult = db.prepare(
+    const schemaResult = db.query(
       "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
     ).get();
     if (schemaResult?.sql?.includes("float[768]")) {
@@ -19674,7 +19677,7 @@ async function findByIds(db, ids) {
     return [];
   }
   const placeholders = ids.map(() => "?").join(",");
-  const stmt = db.prepare(`
+  const stmt = db.query(`
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp
     FROM observations
     WHERE id IN (${placeholders})

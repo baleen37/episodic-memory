@@ -11,6 +11,7 @@ import { openDatabase } from '../core/db.js';
 import { handlePostToolUse } from '../hooks/post-tool-use.js';
 import { handleStop } from '../hooks/stop.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
+import type { StopHookOptions } from '../hooks/stop.js';
 
 /**
  * PostToolUse hook input from Claude Code.
@@ -66,23 +67,49 @@ function getProjectSlug(): string | undefined {
 /**
  * Handle PostToolUse hook.
  */
-async function handleObserve(toolName: string, toolInput: unknown, toolResponse: unknown, stdinSessionId?: string): Promise<void> {
-  const db = openDatabase();
+export type ObserveCliDeps = {
+  openDatabase: typeof openDatabase;
+  handlePostToolUse: typeof handlePostToolUse;
+  handleStop: typeof handleStop;
+  loadConfig: typeof loadConfig;
+  createProvider: typeof createProvider;
+};
+
+const defaultDeps: ObserveCliDeps = {
+  openDatabase,
+  handlePostToolUse,
+  handleStop,
+  loadConfig,
+  createProvider,
+};
+
+/**
+ * Merge tool_input and tool_response for compression.
+ */
+function mergeToolPayload(toolInput: unknown, toolResponse: unknown): Record<string, unknown> {
+  return {
+    ...((toolInput && typeof toolInput === 'object') ? toolInput : {}),
+    ...(typeof toolResponse === 'object' && toolResponse !== null ? toolResponse : {}),
+    ...(typeof toolResponse !== 'object' ? { result: toolResponse } : {}),
+  };
+}
+
+/**
+ * Handle PostToolUse hook.
+ */
+export async function runObserve(
+  toolName: string,
+  toolInput: unknown,
+  toolResponse: unknown,
+  stdinSessionId?: string,
+  deps: ObserveCliDeps = defaultDeps
+): Promise<void> {
+  const db = deps.openDatabase();
   try {
     const sessionId = getSessionId(stdinSessionId);
     const project = getProject();
-
-    // Merge tool_input and tool_response for compression
-    // tool_input contains the arguments (file_path, command, etc.)
-    // tool_response contains the result
-    const mergedData = {
-      ...((toolInput && typeof toolInput === 'object') ? toolInput : {}),
-      ...(typeof toolResponse === 'object' && toolResponse !== null ? toolResponse : {}),
-      // Include primitive responses as 'result' field
-      ...(typeof toolResponse !== 'object' ? { result: toolResponse } : {}),
-    };
-
-    handlePostToolUse(db, sessionId, project, toolName, mergedData);
+    const mergedData = mergeToolPayload(toolInput, toolResponse);
+    deps.handlePostToolUse(db, sessionId, project, toolName, mergedData);
   } finally {
     db.close();
   }
@@ -91,57 +118,60 @@ async function handleObserve(toolName: string, toolInput: unknown, toolResponse:
 /**
  * Handle Stop hook with summarization.
  */
-async function handleSummarize(stdinSessionId?: string): Promise<void> {
-  const db = openDatabase();
+export async function runSummarize(
+  stdinSessionId?: string,
+  deps: ObserveCliDeps = defaultDeps
+): Promise<void> {
+  const db = deps.openDatabase();
   try {
     const sessionId = getSessionId(stdinSessionId);
     const project = getProject();
-
-    // Load LLM config
-    const config = loadConfig();
+    const config = deps.loadConfig();
 
     if (!config) {
       console.error('[memmem] No LLM config found, skipping observation extraction');
       return;
     }
 
-    // Create LLM provider from config using factory function
-    const provider = await createProvider(config);
-
-    await handleStop(db, {
+    const provider = await deps.createProvider(config);
+    const options: StopHookOptions = {
       provider,
       sessionId,
       project,
       projectSlug: getProjectSlug(),
-    });
+    };
+
+    await deps.handleStop(db, options);
   } finally {
     db.close();
   }
 }
 
-async function main() {
+export async function runWithStdinData(
+  stdinData: string,
+  shouldSummarize: boolean,
+  deps: ObserveCliDeps = defaultDeps
+): Promise<void> {
+  if (shouldSummarize) {
+    const stdinSessionId = stdinData.trim() ? (JSON.parse(stdinData) as { session_id?: string }).session_id : undefined;
+    await runSummarize(stdinSessionId, deps);
+    return;
+  }
+
+  if (!stdinData.trim()) {
+    return;
+  }
+
+  const input = JSON.parse(stdinData) as PostToolUseInput;
+  await runObserve(input.tool_name, input.tool_input, input.tool_response, input.session_id, deps);
+}
+
+export async function main() {
   try {
     const command = process.argv[2];
     const shouldSummarize = command === '--summarize' || process.argv.includes('--summarize');
-
-    // Read stdin for both PostToolUse and Stop hooks
-    // Both hook types include session_id in their stdin JSON payload
     const stdinData = await readStdin();
-
-    if (shouldSummarize) {
-      // Stop hook - extract observations from pending events
-      const stdinSessionId = stdinData.trim() ? (JSON.parse(stdinData) as { session_id?: string }).session_id : undefined;
-      await handleSummarize(stdinSessionId);
-    } else {
-      // PostToolUse hook - compress and store tool event
-      // Handle empty stdin (hook might not send data for all tools)
-      if (!stdinData.trim()) {
-        return;
-      }
-
-      const input = JSON.parse(stdinData) as PostToolUseInput;
-      await handleObserve(input.tool_name, input.tool_input, input.tool_response, input.session_id);
-    }
+    await runWithStdinData(stdinData, shouldSummarize);
   } catch (error) {
     // Silent failure for async hooks to avoid disrupting session
     console.error(`[memmem] Error in observe: ${error instanceof Error ? error.message : String(error)}`);
@@ -149,4 +179,10 @@ async function main() {
   }
 }
 
-main();
+function shouldRunAsEntrypoint(): boolean {
+  return process.env.VITEST !== 'true' && !(import.meta as ImportMeta & { test?: boolean }).test;
+}
+
+if (shouldRunAsEntrypoint()) {
+  main();
+}

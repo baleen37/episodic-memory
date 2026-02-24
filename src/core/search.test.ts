@@ -2,7 +2,7 @@
  * Tests for observation search
  */
 
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { initDatabase, insertObservation } from './db.js';
 import { search } from './search.js';
@@ -12,9 +12,9 @@ import { EMBEDDING_DIM } from './constants.js';
 let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
 
 // Set up top-level mocks
-vi.mock('./embeddings.js', () => ({
-  initEmbeddings: vi.fn(() => Promise.resolve()),
-  generateEmbedding: vi.fn(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
+mock.module('./embeddings.js', () => ({
+  initEmbeddings: mock(() => Promise.resolve()),
+  generateEmbedding: mock(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
 }));
 
 describe('search - observation search', () => {
@@ -365,10 +365,10 @@ describe('search - observation search', () => {
       mockGenerateEmbedding = async () => createTestEmbedding(999);
 
       const queryNormalizerProvider = {
-        complete: vi.fn().mockResolvedValue({
+        complete: mock(async () => ({
           text: 'authentication issue',
           usage: { input_tokens: 10, output_tokens: 3 }
-        })
+        }))
       };
 
       const results = await search('인증 이슈', {
@@ -393,7 +393,7 @@ describe('search - observation search', () => {
       mockGenerateEmbedding = async () => createTestEmbedding(999);
 
       const queryNormalizerProvider = {
-        complete: vi.fn().mockRejectedValue(new Error('normalization failed'))
+        complete: mock(async () => { throw new Error('normalization failed'); })
       };
 
       const results = await search('인증 이슈', {

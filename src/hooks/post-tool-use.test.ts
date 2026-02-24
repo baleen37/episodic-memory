@@ -8,7 +8,7 @@
  * 4. Runs synchronously (simple function call)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { compressToolData } from '../core/compress.js';
 import { initDatabase, getAllPendingEvents } from '../core/db.js';

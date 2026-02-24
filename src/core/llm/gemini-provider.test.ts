@@ -4,44 +4,39 @@
  * These tests use mocking to avoid actual API calls while verifying correct behavior.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { vi } from 'vitest';
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { GeminiProvider } from './gemini-provider.js';
 import type { LLMOptions } from './types.js';
 
-// Mock the @google/generative-ai module
-// NOTE: vi.mock() is hoisted to the top of the file before any other code runs.
-// The factory function must be self-contained and cannot reference external variables.
-vi.mock('@google/generative-ai', () => {
-  // Helper function to create a mock successful response
-  const mockSuccessResponse = (text = 'Test response', promptTokens = 10, outputTokens = 5) => ({
-    response: {
-      text: vi.fn(() => text),
-      usageMetadata: {
-        promptTokenCount: promptTokens,
-        candidatesTokenCount: outputTokens,
-        totalTokenCount: promptTokens + outputTokens,
-      },
+// Helper function to create a mock successful response
+const mockSuccessResponse = (text = 'Test response', promptTokens = 10, outputTokens = 5) => ({
+  response: {
+    text: () => text,
+    usageMetadata: {
+      promptTokenCount: promptTokens,
+      candidatesTokenCount: outputTokens,
+      totalTokenCount: promptTokens + outputTokens,
     },
-  });
-
-  const mockGetGenerativeModel = vi.fn(() => ({
-    generateContent: vi.fn(() => Promise.resolve(mockSuccessResponse())),
-  }));
-
-  const mockGoogleGenerativeAI = vi.fn(() => ({
-    getGenerativeModel: mockGetGenerativeModel,
-  }));
-
-  return {
-    GoogleGenerativeAI: mockGoogleGenerativeAI,
-  };
+  },
 });
+
+const mockGetGenerativeModel = mock(() => ({
+  generateContent: mock(async () => mockSuccessResponse()),
+}));
+
+const mockGoogleGenerativeAI = mock(() => ({
+  getGenerativeModel: mockGetGenerativeModel,
+}));
+
+// Mock the @google/generative-ai module
+mock.module('@google/generative-ai', () => ({
+  GoogleGenerativeAI: mockGoogleGenerativeAI,
+}));
 
 describe('GeminiProvider', () => {
   beforeEach(() => {
-    // Reset mocks before each test
-    vi.clearAllMocks();
+    // Reset mocks
+    mockGetGenerativeModel.mockClear();
   });
 
   describe('constructor', () => {

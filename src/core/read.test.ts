@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { Database } from 'bun:sqlite';
 import { tmpdir } from 'os';
 import { join } from 'path';

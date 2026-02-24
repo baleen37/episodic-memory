@@ -10,33 +10,33 @@
  * - writeLog() - writes to log file
  */
 
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import fs from 'fs';
 import { LogLevel, logInfo, logWarn, logError, logDebug } from './logger.js';
 
 // Mock the paths module
-vi.mock('./paths.js', () => ({
-  getLogFilePath: vi.fn(() => '/tmp/test-memmem.log'),
+mock.module('./paths.js', () => ({
+  getLogFilePath: mock(() => '/tmp/test-memmem.log'),
 }));
 
 // Mock fs.appendFileSync
-const mockAppendFileSync = vi.spyOn(fs, 'appendFileSync').mockImplementation(() => {});
+const mockAppendFileSync = spyOn(fs, 'appendFileSync').mockImplementation(() => {});
 
 describe('logger', () => {
   let originalEnv: NodeJS.ProcessEnv;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleWarnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     // Store original environment
     originalEnv = { ...process.env };
 
     // Clear all mocks
-    vi.clearAllMocks();
+    mockAppendFileSync.mockClear();
 
     // Mock console output
-    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
+    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -50,10 +50,10 @@ describe('logger', () => {
 
   describe('LogLevel enum', () => {
     test('should have correct log levels', () => {
-      expect(LogLevel.INFO).toBe('INFO');
-      expect(LogLevel.WARN).toBe('WARN');
-      expect(LogLevel.ERROR).toBe('ERROR');
-      expect(LogLevel.DEBUG).toBe('DEBUG');
+      expect(LogLevel.INFO).toBe('INFO' as LogLevel);
+      expect(LogLevel.WARN).toBe('WARN' as LogLevel);
+      expect(LogLevel.ERROR).toBe('ERROR' as LogLevel);
+      expect(LogLevel.DEBUG).toBe('DEBUG' as LogLevel);
     });
   });
 
@@ -149,11 +149,11 @@ describe('logger', () => {
   });
 
   describe('logError', () => {
-    let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+    let consoleErrorSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
       // Mock console.error to ensure it's NOT called
-      consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
     });
 
     afterEach(() => {
@@ -248,7 +248,7 @@ describe('logger', () => {
         'utf-8'
       );
       // Debug logs include the message
-      const logCall = (consoleLogSpy as ReturnType<typeof vi.spyOn>).mock.calls.find((call) =>
+      const logCall = (consoleLogSpy.mock.calls as any[]).find((call: any[]) =>
         call[0] as string === '[DEBUG] Debug message'
       );
       expect(logCall).toBeTruthy();
@@ -285,7 +285,7 @@ describe('logger', () => {
       expect(logEntry).toContain(JSON.stringify(testData));
 
       // Verify console.log was called with debug message and data
-      const debugCalls = (consoleLogSpy as ReturnType<typeof vi.spyOn>).mock.calls.filter((call) =>
+      const debugCalls = (consoleLogSpy.mock.calls as any[]).filter((call: any[]) =>
         (call[0] as string).includes('[DEBUG]')
       );
       expect(debugCalls.length).toBeGreaterThan(0);

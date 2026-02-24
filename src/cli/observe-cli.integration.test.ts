@@ -5,7 +5,7 @@
  * JSON is used when environment variables are not set.
  */
 
-import { describe, test, expect, beforeEach, afterEach, beforeAll } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, beforeAll } from 'bun:test';
 import { spawnSync } from 'child_process';
 import { Database } from 'bun:sqlite';
 import fs from 'fs';
@@ -29,13 +29,15 @@ describe('observe-cli session_id integration', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memmem-test-'));
     dbPath = path.join(tempDir, 'conversations.db');
-    // Set env var BEFORE calling initDatabase so it uses our test path
+    // Set env vars BEFORE calling initDatabase so it uses our test path
+    process.env.CONVERSATION_MEMORY_DB_PATH = dbPath;
     process.env.MEMMEM_DB_PATH = dbPath;
     const db = initDatabase();
     db.close();
   });
 
   afterEach(() => {
+    delete process.env.CONVERSATION_MEMORY_DB_PATH;
     delete process.env.MEMMEM_DB_PATH;
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
@@ -49,10 +51,11 @@ describe('observe-cli session_id integration', () => {
       session_id: sessionId,
     });
 
-    const result = spawnSync('node', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
       input: stdinPayload,
       env: {
         ...process.env,
+        CONVERSATION_MEMORY_DB_PATH: dbPath,
         MEMMEM_DB_PATH: dbPath,
         // Explicitly unset session env vars
         CLAUDE_SESSION_ID: undefined,
@@ -87,10 +90,11 @@ describe('observe-cli session_id integration', () => {
       session_id: 'real-session-xyz',
     });
 
-    const result = spawnSync('node', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
       input: stdinPayload,
       env: {
         ...process.env,
+        CONVERSATION_MEMORY_DB_PATH: dbPath,
         MEMMEM_DB_PATH: dbPath,
         CLAUDE_SESSION_ID: undefined,
         CLAUDE_SESSION: undefined,

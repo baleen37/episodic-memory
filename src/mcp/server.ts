@@ -126,6 +126,24 @@ export interface SearchResult {
   timestamp: number;
 }
 
+type ServerHandlerDeps = {
+  searchFn: typeof search;
+  findByIdsFn: typeof getObservationsByIds;
+  readConversationFn: typeof readConversation;
+  loadConfigFn: typeof loadConfig;
+  createProviderFn: typeof createProvider;
+};
+
+const defaultServerHandlerDeps: ServerHandlerDeps = {
+  searchFn: search,
+  findByIdsFn: getObservationsByIds,
+  readConversationFn: readConversation,
+  loadConfigFn: loadConfig,
+  createProviderFn: createProvider,
+};
+
+let serverHandlerDeps: ServerHandlerDeps = defaultServerHandlerDeps;
+
 let cachedQueryNormalizerProvider: LLMProvider | undefined;
 let cachedQueryNormalizerConfigKey: string | null = null;
 let inFlightQueryNormalizerProvider: Promise<LLMProvider | undefined> | null = null;
@@ -138,12 +156,17 @@ export function __resetQueryNormalizerCacheForTests(): void {
   inFlightQueryNormalizerConfigKey = null;
 }
 
+export function __setServerHandlerDepsForTests(deps: Partial<ServerHandlerDeps> | null): void {
+  serverHandlerDeps = deps ? { ...defaultServerHandlerDeps, ...deps } : defaultServerHandlerDeps;
+  __resetQueryNormalizerCacheForTests();
+}
+
 function getConfigCacheKey(config: LLMConfig): string {
   return JSON.stringify([config.provider, config.model, config.apiKey]);
 }
 
 async function getQueryNormalizerProvider(): Promise<LLMProvider | undefined> {
-  const config = loadConfig();
+  const config = serverHandlerDeps.loadConfigFn();
   if (!config) {
     return undefined;
   }
@@ -157,7 +180,7 @@ async function getQueryNormalizerProvider(): Promise<LLMProvider | undefined> {
     return inFlightQueryNormalizerProvider;
   }
 
-  const providerPromise = createProvider(config)
+  const providerPromise = serverHandlerDeps.createProviderFn(config)
     .then(provider => {
       cachedQueryNormalizerProvider = provider;
       cachedQueryNormalizerConfigKey = configKey;
@@ -188,7 +211,7 @@ export async function handleSearch(
 ): Promise<SearchResult[]> {
   const queryNormalizerProvider = await getQueryNormalizerProvider();
 
-  const results = await search(params.query, {
+  const results = await serverHandlerDeps.searchFn(params.query, {
     db,
     limit: params.limit,
     after: params.after,
@@ -224,7 +247,7 @@ export async function handleGetObservations(
     typeof id === 'string' ? parseInt(id, 10) : id
   );
 
-  const observations = await getObservationsByIds(db, numericIds);
+  const observations = await serverHandlerDeps.findByIdsFn(db, numericIds);
 
   return observations.map(obs => ({
     id: obs.id,
@@ -237,7 +260,7 @@ export async function handleGetObservations(
 }
 
 export function handleRead(params: ReadInput): string {
-  const result = readConversation(params.path, params.startLine, params.endLine);
+  const result = serverHandlerDeps.readConversationFn(params.path, params.startLine, params.endLine);
   if (result === null) {
     throw new Error(`File not found: ${params.path}`);
   }

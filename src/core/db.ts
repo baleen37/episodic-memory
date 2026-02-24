@@ -22,8 +22,16 @@ import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
 
 // macOS: Apple's default SQLite disables extensions; use Homebrew SQLite
-if (process.platform === 'darwin') {
-  Database.setCustomSQLite('/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib');
+// Only set custom SQLite in production, not in test environment
+// (bun:test uses its own SQLite that may not support extensions the same way)
+// @ts-ignore - import.meta.test is set by bun test
+const isTestEnvironment = typeof import.meta !== 'undefined' && import.meta.test;
+if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV !== 'test') {
+  try {
+    Database.setCustomSQLite('/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib');
+  } catch {
+    // Ignore if SQLite is already loaded or not available
+  }
 }
 
 export interface PendingEvent {

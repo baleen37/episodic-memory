@@ -54,6 +54,8 @@ export interface StopHookOptions {
   claudeProjectsDir?: string;
   /** Override archive destination directory (for testing) */
   archiveDir?: string;
+  /** Override observation writer (for testing) */
+  createObservationFn?: typeof createObservation;
 }
 
 /**
@@ -73,7 +75,16 @@ export async function handleStop(
   db: Database,
   options: StopHookOptions
 ): Promise<void> {
-  const { provider, sessionId, project, batchSize = DEFAULT_BATCH_SIZE, projectSlug, claudeProjectsDir, archiveDir } = options;
+  const {
+    provider,
+    sessionId,
+    project,
+    batchSize = DEFAULT_BATCH_SIZE,
+    projectSlug,
+    claudeProjectsDir,
+    archiveDir,
+    createObservationFn = createObservation,
+  } = options;
 
   // Step 1: Collect all pending_events for this session
   const allEvents: Array<PendingEvent & { id: number }> = getAllPendingEvents(db, sessionId);
@@ -109,7 +120,7 @@ export async function handleStop(
       // Step 5: Store observations with embeddings
       for (const obs of extracted) {
         try {
-          await createObservation(
+          await createObservationFn(
             db,
             obs.title,
             obs.content,
