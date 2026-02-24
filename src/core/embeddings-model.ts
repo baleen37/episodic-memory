@@ -12,8 +12,8 @@ export async function initModel(): Promise<void> {
     env.cacheDir = './.cache';
     embeddingPipeline = await pipeline(
       'feature-extraction',
-      'onnx-community/embeddinggemma-300m-ONNX',
-      { dtype: 'q4' } as any
+      'Supabase/gte-small',
+      { dtype: 'fp16' } as any
     );
     console.log('Embedding model loaded');
   }
@@ -25,9 +25,8 @@ export async function generateEmbeddingFromModel(text: string): Promise<number[]
   }
   if (!embeddingPipeline) return null;
 
-  // CRITICAL: Task prefix is MANDATORY for EmbeddingGemma
-  const prefixedText = `title: none | text: ${text}`;
-  const truncated = prefixedText.substring(0, 8000);
+  // gte-small: no prefix needed, just truncate
+  const truncated = text.substring(0, 8000);
 
   const output = await embeddingPipeline!(truncated, {
     pooling: 'mean',
