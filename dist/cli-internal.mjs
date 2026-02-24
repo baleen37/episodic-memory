@@ -61,6 +61,15 @@ var init_paths = __esm({
   }
 });
 
+// src/core/constants.ts
+var EMBEDDING_DIM;
+var init_constants = __esm({
+  "src/core/constants.ts"() {
+    "use strict";
+    EMBEDDING_DIM = 384;
+  }
+});
+
 // src/core/db.ts
 import Database from "better-sqlite3";
 import path2 from "path";
@@ -126,11 +135,21 @@ function createDatabase(wipe) {
   if (!hasContentOriginal) {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
+  if (tableNames.has("vec_observations")) {
+    const schemaResult = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
+    ).get();
+    if (schemaResult?.sql?.includes("float[768]")) {
+      console.log("Migrating vec_observations from 768-dim to 384-dim (embeddings will be re-indexed)...");
+      db.exec(`DROP TABLE IF EXISTS vec_observations`);
+      tableNames.delete("vec_observations");
+    }
+  }
   if (!tableNames.has("vec_observations")) {
     db.exec(`
       CREATE VIRTUAL TABLE vec_observations USING vec0(
         id TEXT PRIMARY KEY,
-        embedding float[768]
+        embedding float[${EMBEDDING_DIM}]
       )
     `);
   }
@@ -217,6 +236,7 @@ var init_db = __esm({
   "src/core/db.ts"() {
     "use strict";
     init_paths();
+    init_constants();
   }
 });
 

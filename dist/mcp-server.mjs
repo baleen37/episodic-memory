@@ -19582,6 +19582,11 @@ import Database from "better-sqlite3";
 import path3 from "path";
 import fs2 from "fs";
 import * as sqliteVec from "sqlite-vec";
+
+// src/core/constants.ts
+var EMBEDDING_DIM = 384;
+
+// src/core/db.ts
 function openDatabase() {
   return createDatabase(false);
 }
@@ -19642,11 +19647,21 @@ function createDatabase(wipe) {
   if (!hasContentOriginal) {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
+  if (tableNames.has("vec_observations")) {
+    const schemaResult = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
+    ).get();
+    if (schemaResult?.sql?.includes("float[768]")) {
+      console.log("Migrating vec_observations from 768-dim to 384-dim (embeddings will be re-indexed)...");
+      db.exec(`DROP TABLE IF EXISTS vec_observations`);
+      tableNames.delete("vec_observations");
+    }
+  }
   if (!tableNames.has("vec_observations")) {
     db.exec(`
       CREATE VIRTUAL TABLE vec_observations USING vec0(
         id TEXT PRIMARY KEY,
-        embedding float[768]
+        embedding float[${EMBEDDING_DIM}]
       )
     `);
   }
