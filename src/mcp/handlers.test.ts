@@ -2,7 +2,7 @@
  * Tests for MCP tool handlers
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
@@ -12,15 +12,22 @@ import {
 } from './handlers.js';
 import { initDatabase, insertObservation } from '../core/db.js';
 import { EMBEDDING_DIM } from '../core/constants.js';
+import * as realEmbeddingsModule from '../core/embeddings.js';
 
 // Global mock factory that can be controlled per test
 let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
 
-// Set up top-level mocks
+// Set up top-level mocks (spread real exports to avoid leaking into other test files)
 mock.module('../core/embeddings.js', () => ({
+  ...realEmbeddingsModule,
   initEmbeddings: mock(() => Promise.resolve()),
   generateEmbedding: mock(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
 }));
+
+// Restore real embeddings module after all tests in this file
+afterAll(() => {
+  mock.module('../core/embeddings.js', () => ({ ...realEmbeddingsModule }));
+});
 
 describe('handlers', () => {
   let db: Database;

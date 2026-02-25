@@ -49,7 +49,7 @@ describe('record session_id integration', () => {
       session_id: sessionId,
     });
 
-    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'record'], {
       input: stdinPayload,
       env: {
         ...process.env,
@@ -86,7 +86,7 @@ describe('record session_id integration', () => {
       session_id: 'real-session-xyz',
     });
 
-    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'record'], {
       input: stdinPayload,
       env: {
         ...process.env,

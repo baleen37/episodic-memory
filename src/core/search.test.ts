@@ -2,20 +2,27 @@
  * Tests for observation search
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, afterAll, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { initDatabase, insertObservation } from './db.js';
 import { search } from './search.js';
 import { EMBEDDING_DIM } from './constants.js';
+import * as realEmbeddingsModule from './embeddings.js';
 
 // Global mock factory that can be controlled per test
 let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
 
-// Set up top-level mocks
+// Set up top-level mocks (spread real exports to avoid leaking into other test files)
 mock.module('./embeddings.js', () => ({
+  ...realEmbeddingsModule,
   initEmbeddings: mock(() => Promise.resolve()),
   generateEmbedding: mock(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
 }));
+
+// Restore real embeddings module after all tests in this file
+afterAll(() => {
+  mock.module('./embeddings.js', () => ({ ...realEmbeddingsModule }));
+});
 
 describe('search - observation search', () => {
   let db: Database;

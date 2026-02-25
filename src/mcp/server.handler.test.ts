@@ -5,7 +5,7 @@
  * These tests execute the actual handler code with mocked dependencies.
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
@@ -20,6 +20,9 @@ import {
   shouldRunAsEntrypoint,
   handleError,
 } from './server.js';
+import * as realSearchModule from '../core/search.js';
+import * as realDbModule from '../core/db.js';
+import * as realReadModule from '../core/read.js';
 
 const mockSearch: any = mock(async () => []);
 const mockFindByIds: any = mock(() => []);
@@ -27,18 +30,28 @@ const mockReadConversation: any = mock(() => null);
 const mockLoadConfig: any = mock(() => null);
 const mockCreateProvider: any = mock(async () => ({ complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })) }));
 
-// Mock the core modules
+// Mock the core modules (spread real exports to avoid leaking into other test files)
 mock.module('../core/search.js', () => ({
+  ...realSearchModule,
   search: mockSearch,
 }));
 
 mock.module('../core/db.js', () => ({
+  ...realDbModule,
   getObservationsByIds: mockFindByIds,
 }));
 
 mock.module('../core/read.js', () => ({
+  ...realReadModule,
   readConversation: mockReadConversation,
 }));
+
+// Restore real modules after all tests in this file to prevent leaking into other files
+afterAll(() => {
+  mock.module('../core/search.js', () => ({ ...realSearchModule }));
+  mock.module('../core/db.js', () => ({ ...realDbModule }));
+  mock.module('../core/read.js', () => ({ ...realReadModule }));
+});
 
 describe('MCP Server Handlers', () => {
   let mockDb: Database;
