@@ -22,7 +22,7 @@ import {
 } from './server.js';
 
 const mockSearch: any = mock(async () => []);
-const mockFindByIds: any = mock(async () => []);
+const mockFindByIds: any = mock(() => []);
 const mockReadConversation: any = mock(() => null);
 const mockLoadConfig: any = mock(() => null);
 const mockCreateProvider: any = mock(async () => ({ complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })) }));
