@@ -7,7 +7,7 @@ import { Database } from 'bun:sqlite';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { initDatabase, getObservation } from '../core/db.js';
+import { initDatabase, getObservationById } from '../core/db.js';
 import { handlePostToolUse } from '../hooks/post-tool-use.js';
 import { extractObservations, runExtract, type ExtractOptions, type ExtractCliDeps } from './extract.js';
 import type { LLMProvider } from '../core/llm/index.js';
@@ -83,7 +83,7 @@ describe('extractObservations', () => {
     await extractObservations(db, createExtractOptions());
 
     expect(mockLLMProvider.complete).not.toHaveBeenCalled();
-    expect(getObservation(db, 1)).toBeNull();
+    expect(getObservationById(db, 1)).toBeNull();
   });
 
   test('extracts and stores observations when threshold is met', async () => {
@@ -110,7 +110,7 @@ describe('extractObservations', () => {
 
     expect(mockLLMProvider.complete).toHaveBeenCalledTimes(1);
 
-    const obs = getObservation(db, 1);
+    const obs = getObservationById(db, 1);
     expect(obs).not.toBeNull();
     expect(obs?.title).toBe('Fixed auth bug');
     expect(obs?.content).toBe('Resolved JWT validation issue');
@@ -130,7 +130,7 @@ describe('extractObservations', () => {
     await extractObservations(db, createExtractOptions());
 
     expect(mockLLMProvider.complete).toHaveBeenCalledTimes(1);
-    expect(getObservation(db, 1)).toBeNull();
+    expect(getObservationById(db, 1)).toBeNull();
   });
 
   test('handles LLM errors gracefully', async () => {
@@ -139,7 +139,7 @@ describe('extractObservations', () => {
     addReadEvents(db, TEST_SESSION_ID, 3);
 
     await expect(extractObservations(db, createExtractOptions())).resolves.toBeUndefined();
-    expect(getObservation(db, 1)).toBeNull();
+    expect(getObservationById(db, 1)).toBeNull();
   });
 
   describe('batching behavior', () => {
