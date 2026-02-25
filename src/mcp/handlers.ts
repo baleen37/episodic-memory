@@ -30,6 +30,38 @@ export interface ObservationOutput {
   content_original?: string;
 }
 
+/**
+ * Format observations as human-readable text.
+ */
+export function formatObservations(
+  observations: ObservationOutput[],
+  includeOriginal: boolean
+): string {
+  if (observations.length === 0) {
+    return 'No observations found.';
+  }
+
+  let output = `Retrieved ${observations.length} observation${observations.length > 1 ? 's' : ''}:\n\n`;
+
+  for (const obs of observations) {
+    const date = new Date(obs.timestamp).toISOString().split('T')[0];
+    const time = new Date(obs.timestamp).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    output += `## [${obs.project}, ${date} ${time}] - ${obs.title}\n\n`;
+    output += `${obs.content}\n\n`;
+    if (includeOriginal && obs.content_original) {
+      output += `Original: ${obs.content_original}\n\n`;
+    }
+    output += `---\n\n`;
+  }
+
+  return output;
+}
+
 // Handlers
 
 export async function handleSearch(

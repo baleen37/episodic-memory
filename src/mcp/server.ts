@@ -32,6 +32,7 @@ import {
   handleSearch,
   handleGetObservations,
   handleRead,
+  formatObservations,
   type SearchResult,
   type ObservationOutput,
 } from './handlers.js';
@@ -102,36 +103,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const db = openDatabase();
       try {
         const observations = await handleGetObservations(params, db);
-
-        if (observations.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: 'No observations found.',
-              },
-            ],
-          };
-        }
-
-        let output = `Retrieved ${observations.length} observation${observations.length > 1 ? 's' : ''}:\n\n`;
-
-        for (const obs of observations) {
-          const date = new Date(obs.timestamp).toISOString().split('T')[0];
-          const time = new Date(obs.timestamp).toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          });
-
-          output += `## [${obs.project}, ${date} ${time}] - ${obs.title}\n\n`;
-          output += `${obs.content}\n\n`;
-          if (params.includeOriginal && obs.content_original) {
-            output += `Original: ${obs.content_original}\n\n`;
-          }
-          output += `---\n\n`;
-        }
-
+        const output = formatObservations(observations, params.includeOriginal ?? false);
         return { content: [{ type: 'text', text: output }] };
       } finally {
         db.close();
