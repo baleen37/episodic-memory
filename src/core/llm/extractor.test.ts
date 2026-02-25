@@ -1,11 +1,11 @@
 /**
- * Tests for batch-extract-prompt
+ * Tests for extractor
  *
  * These tests use mocking to avoid actual API calls while verifying correct behavior.
  */
 
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { buildBatchExtractPrompt, parseBatchExtractResponse, extractObservationsFromBatch } from './batch-extract-prompt.js';
+import { buildBatchExtractPrompt, parseBatchExtractResponse, extractFromBatch } from './extractor.js';
 import type { LLMProvider } from './types.js';
 
 // Mock the LLM provider
@@ -13,7 +13,7 @@ const mockLLMProvider = {
   complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })),
 } as unknown as LLMProvider;
 
-describe('batch-extract-prompt', () => {
+describe('extractor', () => {
   beforeEach(() => {
     // Reset mock
     mockLLMProvider.complete = mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } }));
@@ -180,7 +180,7 @@ describe('batch-extract-prompt', () => {
     });
   });
 
-  describe('extractObservationsFromBatch', () => {
+  describe('extractFromBatch', () => {
     it('should call LLM provider with built prompt', async () => {
       const mockComplete = mock(async () => ({
         text: JSON.stringify([{ title: 'Test', content: 'Content' }]),
@@ -195,7 +195,7 @@ describe('batch-extract-prompt', () => {
 
       const previousObservations = [{ title: 'Previous', content: 'Previous content' }];
 
-      const result = await extractObservationsFromBatch(
+      const result = await extractFromBatch(
         mockLLMProvider,
         events,
         previousObservations
@@ -229,7 +229,7 @@ describe('batch-extract-prompt', () => {
 
       const events = [{ toolName: 'Bash', summary: 'Ran echo test', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -241,7 +241,7 @@ describe('batch-extract-prompt', () => {
 
       const events = [{ toolName: 'Read', summary: 'Read file', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -256,7 +256,7 @@ describe('batch-extract-prompt', () => {
 
       const events = [{ toolName: 'Edit', summary: 'Edited file', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -271,7 +271,7 @@ describe('batch-extract-prompt', () => {
 
       const events = [{ toolName: 'Write', summary: 'Created file', timestamp: 1234567890 }];
 
-      await extractObservationsFromBatch(mockLLMProvider, events, []);
+      await extractFromBatch(mockLLMProvider, events, []);
 
       expect(mockComplete).toHaveBeenCalledWith(
         expect.any(String),
@@ -312,7 +312,7 @@ describe('batch-extract-prompt', () => {
         { title: 'Started auth implementation', content: 'Began work on authentication system' },
       ];
 
-      const result = await extractObservationsFromBatch(
+      const result = await extractFromBatch(
         mockLLMProvider,
         events,
         previousObservations
@@ -336,7 +336,7 @@ describe('batch-extract-prompt', () => {
         { toolName: 'Bash', summary: 'Ran `ls -la`', timestamp: 1234567891 },
       ];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });

@@ -15,8 +15,8 @@
  */
 
 import { Database } from 'bun:sqlite';
-import type { LLMProvider, CompressedEvent, PreviousObservation } from '../core/llm/index.js';
-import { extractObservationsFromBatch } from '../core/llm/index.js';
+import type { LLMProvider, EventSummary, PreviousObservation } from '../core/llm/index.js';
+import { extractFromBatch } from '../core/llm/index.js';
 import { create as createObservation } from '../core/observations.js';
 import { getAllBufferedEvents, type BufferedEvent } from '../core/db.js';
 import { archiveSession } from '../core/archive.js';
@@ -103,17 +103,17 @@ export async function handleStop(
   // Step 4: Process each batch
   for (const batch of batches) {
     try {
-      // Convert to CompressedEvent format
-      const compressedEvents: CompressedEvent[] = batch.map((event: BufferedEvent & { id: number }) => ({
+      // Convert to EventSummary format
+      const eventSummaries: EventSummary[] = batch.map((event: BufferedEvent & { id: number }) => ({
         toolName: event.toolName,
         summary: event.summary,
         timestamp: event.timestamp,
       }));
 
       // Extract observations using LLM with previous observations as context
-      const extracted = await extractObservationsFromBatch(
+      const extracted = await extractFromBatch(
         provider,
-        compressedEvents,
+        eventSummaries,
         allExtractedObservations // Pass all previous observations for deduplication
       );
 

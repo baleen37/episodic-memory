@@ -29,14 +29,14 @@ export { ZAIProvider } from './zai-provider.js';
 export type { LLMConfig } from './config.js';
 export { loadConfig, createProvider } from './config.js';
 
-// Types and functions from batch-extract-prompt.ts
+// Types and functions from extractor.ts
 export type {
-  CompressedEvent,
+  EventSummary,
   ExtractedObservation,
   PreviousObservation,
-} from './batch-extract-prompt.js';
+} from './extractor.js';
 export {
   buildBatchExtractPrompt,
   parseBatchExtractResponse,
-  extractObservationsFromBatch,
-} from './batch-extract-prompt.js';
+  extractFromBatch,
+} from './extractor.js';
