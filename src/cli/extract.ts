@@ -4,7 +4,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { openDatabase, getAllBufferedEvents, createObservation, type BufferedEvent } from '../core/db.js';
+import { openDatabase, getAllPendingEvents, createObservation, type PendingEvent } from '../core/db.js';
 import { extractFromBatch, loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMProvider, EventSummary, PreviousObservation } from '../core/llm/index.js';
 import { archiveSession } from '../core/archive.js';
@@ -47,7 +47,7 @@ export async function extractObservations(db: Database, options: ExtractOptions)
     createObservationFn = createObservation,
   } = options;
 
-  const allEvents: Array<BufferedEvent & { id: number }> = getAllBufferedEvents(db, sessionId);
+  const allEvents: Array<PendingEvent & { id: number }> = getAllPendingEvents(db, sessionId);
 
   if (allEvents.length < MIN_EVENT_THRESHOLD) {
     return;
@@ -58,7 +58,7 @@ export async function extractObservations(db: Database, options: ExtractOptions)
 
   for (const batch of batches) {
     try {
-      const eventSummaries: EventSummary[] = batch.map((event: BufferedEvent & { id: number }) => ({
+      const eventSummaries: EventSummary[] = batch.map((event: PendingEvent & { id: number }) => ({
         toolName: event.toolName,
         summary: event.summary,
         timestamp: event.timestamp,

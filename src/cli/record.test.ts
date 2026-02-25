@@ -4,8 +4,8 @@
 
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { summarizeEvent } from '../core/summarize.js';
-import { initDatabase, getAllBufferedEvents } from '../core/db.js';
+import { compressEvent } from '../core/compress.js';
+import { initDatabase, getAllPendingEvents } from '../core/db.js';
 import { recordEvent, runRecord, type RecordCliDeps } from './record.js';
 
 // ── recordEvent unit tests ────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ describe('recordEvent', () => {
 
     recordEvent(db, 'test-session-123', 'test-project', 'Read', toolData);
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].toolName).toBe('Read');
     expect(events[0].summary).toBe('Read /src/test.ts (100 lines)');
@@ -38,7 +38,7 @@ describe('recordEvent', () => {
   test('skips tools that return null from summarize (Glob)', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'Glob', { pattern: 'test' });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(0);
   });
 
@@ -47,7 +47,7 @@ describe('recordEvent', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'Bash', { command: 'echo test', exitCode: 0 });
     const afterTime = Date.now();
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].timestamp).toBeGreaterThanOrEqual(beforeTime);
     expect(events[0].timestamp).toBeLessThanOrEqual(afterTime);
@@ -62,7 +62,7 @@ describe('recordEvent', () => {
       new_string: 'async function login()',
     });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].toolName).toBe('Edit');
     expect(events[0].summary).toContain('Edited /src/auth.ts:');
@@ -76,7 +76,7 @@ describe('recordEvent', () => {
       lines: 250,
     });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].summary).toBe('Created /src/new.ts (250 lines)');
   });
@@ -84,7 +84,7 @@ describe('recordEvent', () => {
   test('handles Bash tool with success', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'Bash', { command: 'npm test', exitCode: 0 });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].summary).toContain('Ran `npm test` → exit 0');
   });
@@ -96,7 +96,7 @@ describe('recordEvent', () => {
       stderr: 'Error: Test failed\n    at test.js:10:5',
     });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].summary).toContain('Ran `npm test` → exit 1');
     expect(events[0].summary).toContain('Error: Test failed');
@@ -109,7 +109,7 @@ describe('recordEvent', () => {
       count: 5,
     });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].summary).toContain("Searched 'TODO' in /src → 5 matches");
   });
@@ -119,7 +119,7 @@ describe('recordEvent', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'Read', { file_path: '/src/b.ts', lines: 20 });
     recordEvent(db, 'test-session-123', 'test-project', 'Bash', { command: 'echo test', exitCode: 0 });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(3);
     expect(events[0].summary).toContain('/src/a.ts');
     expect(events[1].summary).toContain('/src/b.ts');
@@ -137,7 +137,7 @@ describe('recordEvent', () => {
       recordEvent(db, 'test-session-123', 'test-project', toolName, {});
     }
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(0);
   });
 
@@ -145,8 +145,8 @@ describe('recordEvent', () => {
     recordEvent(db, 'session-1', 'project-1', 'Read', { file_path: '/a.ts', lines: 10 });
     recordEvent(db, 'session-2', 'project-2', 'Read', { file_path: '/b.ts', lines: 20 });
 
-    const events1 = getAllBufferedEvents(db, 'session-1');
-    const events2 = getAllBufferedEvents(db, 'session-2');
+    const events1 = getAllPendingEvents(db, 'session-1');
+    const events2 = getAllPendingEvents(db, 'session-2');
 
     expect(events1).toHaveLength(1);
     expect(events2).toHaveLength(1);
@@ -157,7 +157,7 @@ describe('recordEvent', () => {
   test('handles unknown tool names', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'UnknownTool', { data: 'test' });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0].summary).toBe('UnknownTool');
   });
@@ -165,7 +165,7 @@ describe('recordEvent', () => {
   test('events have all required fields', () => {
     recordEvent(db, 'test-session-123', 'test-project', 'Read', { file_path: '/test.ts', lines: 100 });
 
-    const events = getAllBufferedEvents(db, 'test-session-123');
+    const events = getAllPendingEvents(db, 'test-session-123');
     expect(events).toHaveLength(1);
     expect(events[0]).toHaveProperty('id');
     expect(events[0]).toHaveProperty('sessionId');
@@ -176,14 +176,14 @@ describe('recordEvent', () => {
     expect(events[0]).toHaveProperty('createdAt');
   });
 
-  test('summarizeEvent helper works correctly', () => {
-    expect(summarizeEvent('Read', { file_path: '/test.ts', lines: 100 }))
+  test('compressEvent helper works correctly', () => {
+    expect(compressEvent('Read', { file_path: '/test.ts', lines: 100 }))
       .toBe('Read /test.ts (100 lines)');
-    expect(summarizeEvent('Glob', { pattern: '*.ts' }))
+    expect(compressEvent('Glob', { pattern: '*.ts' }))
       .toBeNull();
-    expect(summarizeEvent('Edit', { file_path: '/test.ts', old_string: 'old', new_string: 'new' }))
+    expect(compressEvent('Edit', { file_path: '/test.ts', old_string: 'old', new_string: 'new' }))
       .toContain('Edited /test.ts:');
-    expect(summarizeEvent('Bash', { command: 'ls', exitCode: 0 }))
+    expect(compressEvent('Bash', { command: 'ls', exitCode: 0 }))
       .toBe('Ran `ls` → exit 0');
   });
 });

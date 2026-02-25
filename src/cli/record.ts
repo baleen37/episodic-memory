@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * record - PostToolUse hook: summarize and buffer tool events.
+ * record - PostToolUse hook: compress and buffer tool events.
  */
 
 import { Database } from 'bun:sqlite';
-import { openDatabase, insertBufferedEvent, type BufferedEvent } from '../core/db.js';
-import { summarizeEvent } from '../core/summarize.js';
+import { openDatabase, insertPendingEvent, type PendingEvent } from '../core/db.js';
+import { compressEvent } from '../core/compress.js';
 
 // ── Core logic ────────────────────────────────────────────────────────────────
 
@@ -16,11 +16,11 @@ export function recordEvent(
   toolName: string,
   toolData: unknown
 ): void {
-  const summary = summarizeEvent(toolName, toolData);
+  const summary = compressEvent(toolName, toolData);
   if (summary === null) return;
 
   const now = Date.now();
-  const event: BufferedEvent = {
+  const event: PendingEvent = {
     sessionId,
     project,
     toolName,
@@ -28,7 +28,7 @@ export function recordEvent(
     timestamp: now,
     createdAt: now,
   };
-  insertBufferedEvent(db, event);
+  insertPendingEvent(db, event);
 }
 
 // ── Input parsing ─────────────────────────────────────────────────────────────

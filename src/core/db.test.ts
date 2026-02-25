@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
-import { initDatabase, openDatabase, insertBufferedEvent, insertObservation, searchObservations, getObservation, getAllBufferedEvents } from './db.js';
+import { initDatabase, openDatabase, insertPendingEvent, insertObservation, searchObservations, getObservation, getAllPendingEvents } from './db.js';
 import { EMBEDDING_DIM } from './constants.js';
 
 describe('Database Schema', () => {
@@ -127,11 +127,11 @@ describe('Database Schema', () => {
     });
   });
 
-  describe('insertBufferedEvent', () => {
+  describe('insertPendingEvent', () => {
     test('inserts buffered event with all fields', () => {
       const now = Date.now();
 
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'test-session',
         project: 'test-project',
         toolName: 'bash',
@@ -154,7 +154,7 @@ describe('Database Schema', () => {
     });
 
     test('auto-increments id', () => {
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-1',
         project: 'project-1',
         toolName: 'tool1',
@@ -163,7 +163,7 @@ describe('Database Schema', () => {
         createdAt: Date.now(),
       });
 
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-2',
         project: 'project-2',
         toolName: 'tool2',
@@ -185,7 +185,7 @@ describe('Database Schema', () => {
     test('stores special characters in summary field', () => {
       const specialData = 'Multi\nLine\tData\twith\x00null';
 
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'test-session',
         project: 'test-project',
         toolName: 'bash',
@@ -434,12 +434,12 @@ describe('Database Schema', () => {
     });
   });
 
-  describe('getAllBufferedEvents', () => {
+  describe('getAllPendingEvents', () => {
     test('returns all events for a session ordered by created_at', () => {
       const now = Date.now();
 
       // Insert events for session-1
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-1',
         project: 'project-a',
         toolName: 'bash',
@@ -448,7 +448,7 @@ describe('Database Schema', () => {
         createdAt: now - 2000,
       });
 
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-1',
         project: 'project-a',
         toolName: 'read',
@@ -458,7 +458,7 @@ describe('Database Schema', () => {
       });
 
       // Insert event for different session
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-2',
         project: 'project-b',
         toolName: 'write',
@@ -467,7 +467,7 @@ describe('Database Schema', () => {
         createdAt: now,
       });
 
-      const results = getAllBufferedEvents(db, 'session-1');
+      const results = getAllPendingEvents(db, 'session-1');
 
       expect(results).toHaveLength(2);
       expect(results[0].summary).toBe('first event');
@@ -477,13 +477,13 @@ describe('Database Schema', () => {
     });
 
     test('returns empty array for non-existent session', () => {
-      const results = getAllBufferedEvents(db, 'non-existent-session');
+      const results = getAllPendingEvents(db, 'non-existent-session');
 
       expect(results).toEqual([]);
     });
 
     test('includes id in results', () => {
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'session-1',
         project: 'project-a',
         toolName: 'bash',
@@ -492,7 +492,7 @@ describe('Database Schema', () => {
         createdAt: Date.now(),
       });
 
-      const results = getAllBufferedEvents(db, 'session-1');
+      const results = getAllPendingEvents(db, 'session-1');
 
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe(1);
@@ -501,7 +501,7 @@ describe('Database Schema', () => {
     test('maps column names correctly', () => {
       const now = Date.now();
 
-      insertBufferedEvent(db, {
+      insertPendingEvent(db, {
         sessionId: 'test-session',
         project: 'test-project',
         toolName: 'bash',
@@ -510,7 +510,7 @@ describe('Database Schema', () => {
         createdAt: now,
       });
 
-      const results = getAllBufferedEvents(db, 'test-session');
+      const results = getAllPendingEvents(db, 'test-session');
 
       expect(results[0].sessionId).toBe('test-session');
       expect(results[0].toolName).toBe('bash');
@@ -686,8 +686,8 @@ describe('Database Schema', () => {
   });
 
   describe('Edge cases and error handling', () => {
-    test('insertBufferedEvent returns inserted row id', () => {
-      const id = insertBufferedEvent(db, {
+    test('insertPendingEvent returns inserted row id', () => {
+      const id = insertPendingEvent(db, {
         sessionId: 'session-1',
         project: 'project-a',
         toolName: 'bash',
