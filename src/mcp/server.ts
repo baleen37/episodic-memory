@@ -18,7 +18,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
 import type { Database } from 'bun:sqlite';
 import { search } from '../core/search.js';
 import { findByIds as getObservationsByIds } from '../core/observations.js';
@@ -27,86 +26,18 @@ import { openDatabase } from '../core/db.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMConfig, LLMProvider } from '../core/llm/index.js';
 import { logDebug } from '../core/logger.js';
+import {
+  SearchInputSchema,
+  GetObservationsInputSchema,
+  ReadInputSchema,
+  type SearchInput,
+  type GetObservationsInput,
+  type ReadInput,
+} from './schemas.js';
 
-// Zod Schemas for Input Validation
-
-const SearchInputSchema = z
-  .object({
-    query: z
-      .string()
-      .min(2, 'Query must be at least 2 characters')
-      .describe('Search query string'),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(50)
-      .default(10)
-      .describe('Maximum number of results to return (default: 10)'),
-    after: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
-      .optional()
-      .describe('Only return results after this date (YYYY-MM-DD format)'),
-    before: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
-      .optional()
-      .describe('Only return results before this date (YYYY-MM-DD format)'),
-    projects: z
-      .array(z.string().min(1))
-      .optional()
-      .describe('Filter results to specific project names'),
-    files: z
-      .array(z.string().min(1))
-      .optional()
-      .describe('Filter results to specific file paths'),
-  })
-  .strict();
-
-export type SearchInput = z.infer<typeof SearchInputSchema>;
-
-const GetObservationsInputSchema = z
-  .object({
-    ids: z
-      .array(z.union([z.string(), z.number()]))
-      .min(1, 'Must provide at least 1 observation ID')
-      .max(20, 'Cannot get more than 20 observations at once')
-      .describe('Array of observation IDs to retrieve'),
-    includeOriginal: z
-      .boolean()
-      .default(false)
-      .describe('Include original-language/source text (content_original) when available'),
-  })
-  .strict();
-
-export type GetObservationsInput = z.infer<typeof GetObservationsInputSchema>;
-
-const ReadInputSchema = z
-  .object({
-    path: z
-      .string()
-      .min(1, 'Path is required')
-      .describe('Path to the JSONL conversation file'),
-    startLine: z
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe('Starting line number (1-indexed, inclusive)'),
-    endLine: z
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe('Ending line number (1-indexed, inclusive)'),
-  })
-  .strict();
-
-export type ReadInput = z.infer<typeof ReadInputSchema>;
-
-// Export schemas for testing
+// Re-export schemas for backward compatibility
 export { SearchInputSchema, GetObservationsInputSchema, ReadInputSchema };
+export type { SearchInput, GetObservationsInput, ReadInput };
 
 // Error Handling Utility
 
