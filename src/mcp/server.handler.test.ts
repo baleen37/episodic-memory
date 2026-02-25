@@ -142,7 +142,7 @@ describe('MCP Server Handlers', () => {
 
   describe('handleGetObservations', () => {
     test('converts string IDs to numbers', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         { id: 1, title: 'Obs 1', content: 'Content 1', project: 'p', sessionId: null, contentOriginal: null, timestamp: 1000 },
       ]);
 
@@ -154,7 +154,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('handles numeric IDs directly', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         { id: 10, title: 'Obs 10', content: 'Content 10', project: 'p', sessionId: null, contentOriginal: null, timestamp: 2000 },
         { id: 20, title: 'Obs 20', content: 'Content 20', project: 'p', sessionId: null, contentOriginal: null, timestamp: 3000 },
       ]);
@@ -167,7 +167,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('handles mixed string/number IDs', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         { id: 1, title: 'Obs', content: 'C', project: 'p', sessionId: null, contentOriginal: null, timestamp: 1000 },
       ]);
 
@@ -178,7 +178,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('returns observation objects with correct fields', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         {
           id: 42,
           title: 'Test Observation',
@@ -203,7 +203,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('includes content_original when includeOriginal is true', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         {
           id: 7,
           title: 'Bilingual observation',
@@ -229,7 +229,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('returns empty results when no observations found', async () => {
-      mockFindByIds.mockImplementation(async () => []);
+      mockFindByIds.mockImplementation(() => []);
 
       const params = GetObservationsInputSchema.parse({ ids: [999] });
       const results = await handleGetObservations(params, mockDb);
@@ -238,7 +238,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('handles multiple observations', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         { id: 1, title: 'First', content: 'C1', project: 'p1', sessionId: null, contentOriginal: null, timestamp: 1000 },
         { id: 2, title: 'Second', content: 'C2', project: 'p2', sessionId: null, contentOriginal: null, timestamp: 2000 },
         { id: 3, title: 'Third', content: 'C3', project: 'p3', sessionId: null, contentOriginal: null, timestamp: 3000 },
@@ -252,7 +252,7 @@ describe('MCP Server Handlers', () => {
     });
 
     test('does not include content_original by default', async () => {
-      mockFindByIds.mockImplementation(async () => [
+      mockFindByIds.mockImplementation(() => [
         {
           id: 8,
           title: 'Default output',
