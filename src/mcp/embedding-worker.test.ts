@@ -1,20 +1,18 @@
-import { describe, test, expect, beforeAll, afterAll, mock } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, mock, beforeEach, afterEach } from 'bun:test';
 import net from 'net';
 
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { EMBEDDING_DIM } from '../core/constants.js';
+import { resetRateLimiters, __setLoadConfigForTests } from '../core/ratelimiter.js';
 
 // Mock embeddings-model (no real model loading)
+// Note: We deliberately do NOT mock ratelimiter here because mock.module
+// affects the module cache globally and would break ratelimiter.test.ts
 mock.module('../core/embeddings-model.js', () => ({
   initModel: mock(async () => undefined),
   generateEmbeddingFromModel: mock(async () => Array.from({ length: EMBEDDING_DIM }, (_, i) => i * 0.001)),
-}));
-
-// Mock ratelimiter
-mock.module('../core/ratelimiter.js', () => ({
-  getEmbeddingRateLimiter: () => ({ acquire: mock(async () => undefined) }),
 }));
 
 type WorkerModule = typeof import('./embedding-worker.js');
@@ -44,6 +42,23 @@ describe('startWorker()', () => {
   const sockPath = path.join(os.tmpdir(), `memmem-worker-test-${process.pid}.sock`);
   let server: net.Server;
   let startWorkerFn: WorkerModule['startWorker'];
+
+  beforeEach(() => {
+    // Set high rate limit for tests (100 RPS, burst 100)
+    __setLoadConfigForTests(() => ({
+      provider: 'gemini',
+      apiKey: 'test',
+      ratelimit: {
+        embedding: { requestsPerSecond: 100, burstSize: 100 },
+      },
+    }) as any);
+    resetRateLimiters();
+  });
+
+  afterEach(() => {
+    __setLoadConfigForTests(null);
+    resetRateLimiters();
+  });
 
   beforeAll(async () => {
     const { startWorker } = await loadWorkerModule();
