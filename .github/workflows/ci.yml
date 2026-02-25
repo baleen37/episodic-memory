@@ -31,4 +31,4 @@ jobs:
         run: bun run build
 
       - name: Run tests
-        run: bun test --jobs 1
+        run: bun test --jobs=1
