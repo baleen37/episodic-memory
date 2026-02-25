@@ -11,14 +11,15 @@ import {
   handleSearch,
   handleGetObservations,
   handleRead,
+  resetQueryNormalizerCache,
 } from './handlers.js';
 import {
   SearchInputSchema,
   GetObservationsInputSchema,
   ReadInputSchema,
   shouldRunAsEntrypoint,
+  handleError,
 } from './server.js';
-import { handleError } from './error.js';
 
 const mockSearch: any = mock(async () => []);
 const mockFindByIds: any = mock(async () => []);
@@ -39,11 +40,6 @@ mock.module('../core/read.js', () => ({
   readConversation: mockReadConversation,
 }));
 
-mock.module('./query-normalizer.js', () => ({
-  getQueryNormalizerProvider: mock(async () => null),
-  resetQueryNormalizerCache: mock(() => {}),
-}));
-
 describe('MCP Server Handlers', () => {
   let mockDb: Database;
 
@@ -53,6 +49,7 @@ describe('MCP Server Handlers', () => {
     mockReadConversation.mockClear();
     mockLoadConfig.mockClear();
     mockCreateProvider.mockClear();
+    resetQueryNormalizerCache();
 
     mockDb = {} as Database;
   });
