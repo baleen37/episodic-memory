@@ -11,9 +11,9 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { initDatabase, getAllBufferedEvents, getObservation } from './core/db.js';
-import { handlePostToolUse } from './hooks/post-tool-use.js';
-import { handleStop, type StopHookOptions } from './hooks/stop.js';
-import { handleSessionStart, type SessionStartConfig } from './hooks/session-start.js';
+import { recordEvent } from './cli/record.js';
+import { extractObservations, type ExtractOptions } from './cli/extract.js';
+import { recallContext, type RecallConfig } from './cli/recall.js';
 import { search } from './core/search.js';
 import { getObservationsByIds } from './core/db.js';
 import { __setWorkerConnectorForTests } from './core/embeddings.js';
@@ -53,8 +53,8 @@ function createMockEmbeddingSocket(): net.Socket {
   return emitter as net.Socket;
 }
 
-async function runStop(db: Database, options: StopHookOptions): Promise<void> {
-  await handleStop(db, {
+async function runStop(db: Database, options: Omit<ExtractOptions, 'createObservationFn'>): Promise<void> {
+  await extractObservations(db, {
     ...options,
     createObservationFn: async (db, title, content, project, sessionId, timestamp, contentOriginal) => {
       const now = Date.now();
@@ -97,16 +97,16 @@ describe('Integration Tests', () => {
       const project = 'test-project';
 
       // User asks Claude to implement a feature
-      handlePostToolUse(db, sessionId, project, 'Read', { file_path: '/src/auth.ts', lines: 150 });
-      handlePostToolUse(db, sessionId, project, 'Grep', { pattern: 'login', path: '/src', count: 5 });
-      handlePostToolUse(db, sessionId, project, 'Read', { file_path: '/src/login.ts', lines: 80 });
-      handlePostToolUse(db, sessionId, project, 'Edit', {
+      recordEvent(db, sessionId, project, 'Read', { file_path: '/src/auth.ts', lines: 150 });
+      recordEvent(db, sessionId, project, 'Grep', { pattern: 'login', path: '/src', count: 5 });
+      recordEvent(db, sessionId, project, 'Read', { file_path: '/src/login.ts', lines: 80 });
+      recordEvent(db, sessionId, project, 'Edit', {
         file_path: '/src/auth.ts',
         old_string: 'function login()',
         new_string: 'async function login()'
       });
-      handlePostToolUse(db, sessionId, project, 'Bash', { command: 'npm test', exitCode: 0 });
-      handlePostToolUse(db, sessionId, project, 'Bash', { command: 'npm run lint', exitCode: 1, stderr: 'Error: Unused variable' });
+      recordEvent(db, sessionId, project, 'Bash', { command: 'npm test', exitCode: 0 });
+      recordEvent(db, sessionId, project, 'Bash', { command: 'npm run lint', exitCode: 1, stderr: 'Error: Unused variable' });
 
       // Step 2: Verify pending_events were stored
       const pendingEvents = getAllBufferedEvents(db, sessionId);
@@ -128,7 +128,7 @@ describe('Integration Tests', () => {
         usage: { input_tokens: 150, output_tokens: 30 },
       }]);
 
-      const stopOptions: StopHookOptions = {
+      const stopOptions: Omit<ExtractOptions, 'createObservationFn'> = {
         provider: mockProvider,
         sessionId,
         project,
@@ -165,7 +165,7 @@ describe('Integration Tests', () => {
 
       // Add 20 events (should create 2 batches with default batch size of 15)
       for (let i = 0; i < 20; i++) {
-        handlePostToolUse(db, sessionId, project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, sessionId, project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
       const mockProvider = createMockLLMProvider([
@@ -183,7 +183,7 @@ describe('Integration Tests', () => {
         },
       ]);
 
-      const stopOptions: StopHookOptions = {
+      const stopOptions: Omit<ExtractOptions, 'createObservationFn'> = {
         provider: mockProvider,
         sessionId,
         project,
@@ -207,15 +207,15 @@ describe('Integration Tests', () => {
       const project = 'test-project';
 
       // Add only 2 events (below minimum threshold of 3)
-      handlePostToolUse(db, sessionId, project, 'Read', { file_path: '/src/test.ts', lines: 100 });
-      handlePostToolUse(db, sessionId, project, 'Bash', { command: 'ls', exitCode: 0 });
+      recordEvent(db, sessionId, project, 'Read', { file_path: '/src/test.ts', lines: 100 });
+      recordEvent(db, sessionId, project, 'Bash', { command: 'ls', exitCode: 0 });
 
       const mockProvider = createMockLLMProvider([{
         text: JSON.stringify([{ title: 'Test', content: 'Content' }]),
         usage: { input_tokens: 100, output_tokens: 20 },
       }]);
 
-      const stopOptions: StopHookOptions = {
+      const stopOptions: Omit<ExtractOptions, 'createObservationFn'> = {
         provider: mockProvider,
         sessionId,
         project,
@@ -236,10 +236,10 @@ describe('Integration Tests', () => {
       const project = 'test-project';
 
       // Mix of valuable and low-value tools
-      handlePostToolUse(db, sessionId, project, 'Read', { file_path: '/src/test.ts', lines: 100 });
-      handlePostToolUse(db, sessionId, project, 'Glob', { pattern: '*.ts' }); // Should be filtered
-      handlePostToolUse(db, sessionId, project, 'Bash', { command: 'npm test', exitCode: 0 });
-      handlePostToolUse(db, sessionId, project, 'LSP', { operation: 'goToDefinition' }); // Should be filtered
+      recordEvent(db, sessionId, project, 'Read', { file_path: '/src/test.ts', lines: 100 });
+      recordEvent(db, sessionId, project, 'Glob', { pattern: '*.ts' }); // Should be filtered
+      recordEvent(db, sessionId, project, 'Bash', { command: 'npm test', exitCode: 0 });
+      recordEvent(db, sessionId, project, 'LSP', { operation: 'goToDefinition' }); // Should be filtered
 
       // Only Read and Bash should be in pending_events
       const pendingEvents = getAllBufferedEvents(db, sessionId);
@@ -263,7 +263,7 @@ describe('Integration Tests', () => {
         usage: { input_tokens: 150, output_tokens: 40 },
       }]);
 
-      const stopOptions: StopHookOptions = {
+      const stopOptions: Omit<ExtractOptions, 'createObservationFn'> = {
         provider: mockProvider,
         sessionId: 'previous-session',
         project,
@@ -271,19 +271,19 @@ describe('Integration Tests', () => {
 
       // Add events and create observations
       for (let i = 0; i < 5; i++) {
-        handlePostToolUse(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, stopOptions);
 
       // Now start a new session
-      const config: SessionStartConfig = {
+      const config: RecallConfig = {
         maxObservations: 10,
         maxTokens: 500,
         recencyDays: 7,
         projectOnly: true,
       };
 
-      const result = await handleSessionStart(db, project, config);
+      const result = await recallContext(db, project, config);
 
       // Should inject observations
       expect(result.markdown).toContain('# test-project recent context (memmem)');
@@ -306,14 +306,14 @@ describe('Integration Tests', () => {
         usage: { input_tokens: 150, output_tokens: 40 },
       }]);
 
-      const stopOptions: StopHookOptions = {
+      const stopOptions: Omit<ExtractOptions, 'createObservationFn'> = {
         provider: mockProvider,
         sessionId: 'previous-session',
         project,
       };
 
       for (let i = 0; i < 5; i++) {
-        handlePostToolUse(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'previous-session', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, stopOptions);
 
@@ -330,14 +330,14 @@ describe('Integration Tests', () => {
       `).run(now, now - 1, now - 2);
 
       // Now start a new session with small token budget
-      const config: SessionStartConfig = {
+      const config: RecallConfig = {
         maxObservations: 10,
         maxTokens: 100, // Small budget but enough for short observation
         recencyDays: 7,
         projectOnly: true,
       };
 
-      const result = await handleSessionStart(db, project, config);
+      const result = await recallContext(db, project, config);
 
       // Should stop before exceeding budget
       expect(result.tokenCount).toBeLessThanOrEqual(50);
@@ -356,7 +356,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'old-session', project, 'Read', { file_path: `/src/old${i}.ts`, lines: 100 });
+        recordEvent(db, 'old-session', project, 'Read', { file_path: `/src/old${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: oldMockProvider,
@@ -375,7 +375,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'recent-session', project, 'Read', { file_path: `/src/recent${i}.ts`, lines: 100 });
+        recordEvent(db, 'recent-session', project, 'Read', { file_path: `/src/recent${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: recentMockProvider,
@@ -384,14 +384,14 @@ describe('Integration Tests', () => {
       });
 
       // Now start session with 7-day recency filter
-      const config: SessionStartConfig = {
+      const config: RecallConfig = {
         maxObservations: 10,
         maxTokens: 500,
         recencyDays: 7,
         projectOnly: true,
       };
 
-      const result = await handleSessionStart(db, project, config);
+      const result = await recallContext(db, project, config);
 
       // Should only include recent observation
       expect(result.markdown).toContain('Recent observation');
@@ -414,7 +414,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 5; i++) {
-        handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider,
@@ -449,7 +449,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider,
@@ -476,7 +476,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-1', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider1,
@@ -490,7 +490,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-2', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-2', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider2,
@@ -521,7 +521,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider,
@@ -564,7 +564,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', project, 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProvider,
@@ -590,16 +590,16 @@ describe('Integration Tests', () => {
       const sessionId2 = 'session-day-2';
 
       // Day 1: Work on authentication feature
-      handlePostToolUse(db, sessionId1, project, 'Read', { file_path: '/src/auth.ts', lines: 200 });
-      handlePostToolUse(db, sessionId1, project, 'Grep', { pattern: 'JWT', path: '/src', count: 3 });
-      handlePostToolUse(db, sessionId1, project, 'Read', { file_path: '/src/jwt.ts', lines: 100 });
-      handlePostToolUse(db, sessionId1, project, 'Edit', {
+      recordEvent(db, sessionId1, project, 'Read', { file_path: '/src/auth.ts', lines: 200 });
+      recordEvent(db, sessionId1, project, 'Grep', { pattern: 'JWT', path: '/src', count: 3 });
+      recordEvent(db, sessionId1, project, 'Read', { file_path: '/src/jwt.ts', lines: 100 });
+      recordEvent(db, sessionId1, project, 'Edit', {
         file_path: '/src/auth.ts',
         old_string: 'function verify(token)',
         new_string: 'async function verify(token)'
       });
-      handlePostToolUse(db, sessionId1, project, 'Bash', { command: 'npm test auth', exitCode: 0 });
-      handlePostToolUse(db, sessionId1, project, 'Bash', { command: 'npm run build', exitCode: 0 });
+      recordEvent(db, sessionId1, project, 'Bash', { command: 'npm test auth', exitCode: 0 });
+      recordEvent(db, sessionId1, project, 'Bash', { command: 'npm run build', exitCode: 0 });
 
       // Extract observations from Day 1
       const mockProvider1 = createMockLLMProvider([{
@@ -621,14 +621,14 @@ describe('Integration Tests', () => {
       expect(obsCountAfterDay1).toBe(2);
 
       // Day 2: Start new session (should inject previous observations)
-      const config: SessionStartConfig = {
+      const config: RecallConfig = {
         maxObservations: 10,
         maxTokens: 500,
         recencyDays: 7,
         projectOnly: true,
       };
 
-      const sessionStartResult = await handleSessionStart(db, project, config);
+      const sessionStartResult = await recallContext(db, project, config);
 
       // Should inject previous observations
       expect(sessionStartResult.markdown).toContain('Made verify async');
@@ -636,13 +636,13 @@ describe('Integration Tests', () => {
       expect(sessionStartResult.includedCount).toBe(2);
 
       // Continue working on Day 2
-      handlePostToolUse(db, sessionId2, project, 'Read', { file_path: '/src/auth.ts', lines: 200 });
-      handlePostToolUse(db, sessionId2, project, 'Edit', {
+      recordEvent(db, sessionId2, project, 'Read', { file_path: '/src/auth.ts', lines: 200 });
+      recordEvent(db, sessionId2, project, 'Edit', {
         file_path: '/src/auth.ts',
         old_string: 'async function verify(token)',
         new_string: 'async function verify(token, options = {})'
       });
-      handlePostToolUse(db, sessionId2, project, 'Bash', { command: 'npm test auth', exitCode: 0 });
+      recordEvent(db, sessionId2, project, 'Bash', { command: 'npm test auth', exitCode: 0 });
 
       // Extract observations from Day 2
       const mockProvider2 = createMockLLMProvider([{
@@ -679,7 +679,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-a', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-a', 'project-a', 'Read', { file_path: `/src/a${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProviderA,
@@ -694,7 +694,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-b', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-b', 'project-b', 'Read', { file_path: `/src/b${i}.ts`, lines: 100 });
       }
       await runStop(db, {
         provider: mockProviderB,
@@ -733,11 +733,11 @@ describe('Integration Tests', () => {
       } as unknown as LLMProvider;
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-error', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-error', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
       // Should not throw
-      await expect(handleStop(db, {
+      await expect(runStop(db, {
         provider: mockProvider,
         sessionId: 'session-error',
         project: 'test-project',
@@ -754,7 +754,7 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-empty', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-empty', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
       await runStop(db, {
@@ -775,11 +775,11 @@ describe('Integration Tests', () => {
       }]);
 
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-malformed', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-malformed', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
       // Should not throw
-      await expect(handleStop(db, {
+      await expect(runStop(db, {
         provider: mockProvider,
         sessionId: 'session-malformed',
         project: 'test-project',
@@ -792,8 +792,8 @@ describe('Integration Tests', () => {
     test('handles concurrent sessions', async () => {
       // Simulate two sessions running concurrently
       for (let i = 0; i < 3; i++) {
-        handlePostToolUse(db, 'session-1', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
-        handlePostToolUse(db, 'session-2', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-1', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
+        recordEvent(db, 'session-2', 'test-project', 'Read', { file_path: `/src/file${i}.ts`, lines: 100 });
       }
 
       // Process sessions independently
@@ -808,8 +808,8 @@ describe('Integration Tests', () => {
       }]);
 
       await Promise.all([
-        handleStop(db, { provider: mockProvider1, sessionId: 'session-1', project: 'test-project' }),
-        handleStop(db, { provider: mockProvider2, sessionId: 'session-2', project: 'test-project' }),
+        runStop(db, { provider: mockProvider1, sessionId: 'session-1', project: 'test-project' }),
+        runStop(db, { provider: mockProvider2, sessionId: 'session-2', project: 'test-project' }),
       ]);
 
       // Both observations should be created

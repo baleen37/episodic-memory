@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh inject",
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh recall",
             "timeout": 1000
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh observe",
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh record",
             "async": true
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh observe --summarize",
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh extract",
             "async": true
           }
         ]

@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { initDatabase, getObservationById } from '../core/db.js';
-import { handlePostToolUse } from '../hooks/post-tool-use.js';
+import { recordEvent } from './record.js';
 import { extractObservations, runExtract, type ExtractOptions, type ExtractCliDeps } from './extract.js';
 import type { LLMProvider } from '../core/llm/index.js';
 
@@ -23,7 +23,7 @@ let mockLLMProvider: LLMProvider;
 
 function addReadEvents(db: Database, sessionId: string, count: number): void {
   for (let i = 0; i < count; i++) {
-    handlePostToolUse(db, sessionId, TEST_PROJECT, 'Read', {
+    recordEvent(db, sessionId, TEST_PROJECT, 'Read', {
       file_path: `/src/file${i}.ts`,
       lines: 100,
     });
@@ -77,8 +77,8 @@ describe('extractObservations', () => {
   test('skips extraction when less than 3 events', async () => {
     (mockLLMProvider.complete as ReturnType<typeof mock>).mockImplementation?.(async () => ({ text: '[]', usage: { input_tokens: 0, output_tokens: 0 } }));
 
-    handlePostToolUse(db, TEST_SESSION_ID, TEST_PROJECT, 'Read', { file_path: '/src/test.ts', lines: 100 });
-    handlePostToolUse(db, TEST_SESSION_ID, TEST_PROJECT, 'Bash', { command: 'echo test', exitCode: 0 });
+    recordEvent(db, TEST_SESSION_ID, TEST_PROJECT, 'Read', { file_path: '/src/test.ts', lines: 100 });
+    recordEvent(db, TEST_SESSION_ID, TEST_PROJECT, 'Bash', { command: 'echo test', exitCode: 0 });
 
     await extractObservations(db, createExtractOptions());
 
@@ -98,13 +98,13 @@ describe('extractObservations', () => {
       usage: { input_tokens: 100, output_tokens: 20 },
     }));
 
-    handlePostToolUse(db, TEST_SESSION_ID, TEST_PROJECT, 'Read', { file_path: '/src/auth.ts', lines: 100 });
-    handlePostToolUse(db, TEST_SESSION_ID, TEST_PROJECT, 'Edit', {
+    recordEvent(db, TEST_SESSION_ID, TEST_PROJECT, 'Read', { file_path: '/src/auth.ts', lines: 100 });
+    recordEvent(db, TEST_SESSION_ID, TEST_PROJECT, 'Edit', {
       file_path: '/src/auth.ts',
       old_string: 'old',
       new_string: 'new',
     });
-    handlePostToolUse(db, TEST_SESSION_ID, TEST_PROJECT, 'Bash', { command: 'npm test', exitCode: 0 });
+    recordEvent(db, TEST_SESSION_ID, TEST_PROJECT, 'Bash', { command: 'npm test', exitCode: 0 });
 
     await extractObservations(db, createExtractOptions());
 
@@ -207,9 +207,9 @@ describe('extractObservations', () => {
       fs.mkdirSync(srcProjectDir, { recursive: true });
       fs.writeFileSync(path.join(srcProjectDir, `${sessionId}.jsonl`), '{"type":"user"}\n');
 
-      handlePostToolUse(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/a.ts', lines: 10 });
-      handlePostToolUse(db, sessionId, TEST_PROJECT, 'Edit', { file_path: '/src/a.ts', old_string: 'a', new_string: 'b' });
-      handlePostToolUse(db, sessionId, TEST_PROJECT, 'Bash', { command: 'npm test', exitCode: 0 });
+      recordEvent(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/a.ts', lines: 10 });
+      recordEvent(db, sessionId, TEST_PROJECT, 'Edit', { file_path: '/src/a.ts', old_string: 'a', new_string: 'b' });
+      recordEvent(db, sessionId, TEST_PROJECT, 'Bash', { command: 'npm test', exitCode: 0 });
 
       await extractObservations(db, createExtractOptions({
         sessionId,
@@ -231,8 +231,8 @@ describe('extractObservations', () => {
       fs.mkdirSync(srcProjectDir, { recursive: true });
       fs.writeFileSync(path.join(srcProjectDir, `${sessionId}.jsonl`), '{"type":"user"}\n');
 
-      handlePostToolUse(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/a.ts', lines: 10 });
-      handlePostToolUse(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/b.ts', lines: 10 });
+      recordEvent(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/a.ts', lines: 10 });
+      recordEvent(db, sessionId, TEST_PROJECT, 'Read', { file_path: '/src/b.ts', lines: 10 });
 
       await extractObservations(db, createExtractOptions({
         sessionId,
