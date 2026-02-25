@@ -21,6 +21,14 @@ interface RateLimiterConfig {
   burstSize?: number;
 }
 
+type LoadConfigFn = typeof loadConfig;
+
+let loadConfigFn: LoadConfigFn = loadConfig;
+
+export function __setLoadConfigForTests(fn: LoadConfigFn | null): void {
+  loadConfigFn = fn ?? loadConfig;
+}
+
 /** Default requests per second for embedding generation */
 const DEFAULT_EMBEDDING_RPS = 0.5;
 
@@ -162,7 +170,7 @@ let llmLimiter: RateLimiter | null = null;
  */
 export function getEmbeddingRateLimiter(): RateLimiter {
   if (!embeddingLimiter) {
-    const config = loadConfig();
+    const config = loadConfigFn();
     const ratelimitConfig = config?.ratelimit?.embedding;
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
     embeddingLimiter = new RateLimiter({
@@ -183,7 +191,7 @@ export function getEmbeddingRateLimiter(): RateLimiter {
  */
 export function getLLMRateLimiter(): RateLimiter {
   if (!llmLimiter) {
-    const config = loadConfig();
+    const config = loadConfigFn();
     const ratelimitConfig = config?.ratelimit?.llm;
     const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
     llmLimiter = new RateLimiter({

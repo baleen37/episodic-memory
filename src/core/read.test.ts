@@ -1,5 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { existsSync, writeFileSync, mkdirSync, rmSync } from 'fs';
@@ -41,7 +40,7 @@ interface ConversationMessage {
 }
 
 describe('read.ts', () => {
-  let db: Database.Database;
+  let db: Database;
   let dbPath: string;
   let tempDir: string;
 

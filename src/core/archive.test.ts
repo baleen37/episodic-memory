@@ -5,7 +5,6 @@
  * to ~/.config/memmem/conversation-archive/{project-slug}/
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

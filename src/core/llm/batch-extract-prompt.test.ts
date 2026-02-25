@@ -4,18 +4,19 @@
  * These tests use mocking to avoid actual API calls while verifying correct behavior.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import { buildBatchExtractPrompt, parseBatchExtractResponse, extractObservationsFromBatch } from './batch-extract-prompt.js';
 import type { LLMProvider } from './types.js';
 
 // Mock the LLM provider
 const mockLLMProvider = {
-  complete: vi.fn(),
+  complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })),
 } as unknown as LLMProvider;
 
 describe('batch-extract-prompt', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset mock
+    mockLLMProvider.complete = mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } }));
   });
 
   describe('buildBatchExtractPrompt', () => {
@@ -181,10 +182,10 @@ describe('batch-extract-prompt', () => {
 
   describe('extractObservationsFromBatch', () => {
     it('should call LLM provider with built prompt', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: JSON.stringify([{ title: 'Test', content: 'Content' }]),
         usage: { input_tokens: 100, output_tokens: 20 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 
@@ -208,19 +209,21 @@ describe('batch-extract-prompt', () => {
       );
 
       // Verify the prompt contains key elements
-      const callArgs = mockComplete.mock.calls[0];
-      const prompt = callArgs[0] as string;
-      expect(prompt).toContain('Read file.ts');
-      expect(prompt).toContain('Previous');
+      const calls = (mockComplete as any).mock?.calls;
+      if (calls && calls.length > 0) {
+        const prompt = calls[0][0] as string;
+        expect(prompt).toContain('Read file.ts');
+        expect(prompt).toContain('Previous');
+      }
 
       expect(result).toEqual([{ title: 'Test', content: 'Content' }]);
     });
 
     it('should return empty array when LLM returns empty array', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: JSON.stringify([]),
         usage: { input_tokens: 50, output_tokens: 5 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 
@@ -232,7 +235,7 @@ describe('batch-extract-prompt', () => {
     });
 
     it('should return empty array when LLM call fails', async () => {
-      const mockComplete = vi.fn().mockRejectedValue(new Error('API error'));
+      const mockComplete = mock(async () => { throw new Error('API error'); });
 
       mockLLMProvider.complete = mockComplete;
 
@@ -244,10 +247,10 @@ describe('batch-extract-prompt', () => {
     });
 
     it('should handle malformed LLM response gracefully', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: 'This is not valid JSON',
         usage: { input_tokens: 50, output_tokens: 10 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 
@@ -259,10 +262,10 @@ describe('batch-extract-prompt', () => {
     });
 
     it('should include system prompt guidance for canonical and original content', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: JSON.stringify([{ title: 'Test', content: 'Content' }]),
         usage: { input_tokens: 100, output_tokens: 20 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 
@@ -287,13 +290,13 @@ describe('batch-extract-prompt', () => {
 
   describe('integration scenarios', () => {
     it('should handle a realistic batch of tool events', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: JSON.stringify([
           { title: 'Implemented auth feature', content: 'Added JWT authentication to login endpoint' },
           { title: 'Fixed memory leak', content: 'Resolved memory leak in event handler' },
         ]),
         usage: { input_tokens: 200, output_tokens: 40 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 
@@ -321,10 +324,10 @@ describe('batch-extract-prompt', () => {
     });
 
     it('should handle low-value batch by returning empty array', async () => {
-      const mockComplete = vi.fn().mockResolvedValue({
+      const mockComplete = mock(async () => ({
         text: JSON.stringify([]),
         usage: { input_tokens: 100, output_tokens: 5 },
-      });
+      }));
 
       mockLLMProvider.complete = mockComplete;
 

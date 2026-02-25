@@ -10,7 +10,7 @@ DIST_DIR="$PLUGIN_ROOT/dist"
 if [ ! -d "$DIST_DIR" ]; then
   echo "dist/ not found, building..."
   cd "$PLUGIN_ROOT"
-  npm run build
+  bun run build
   exit 0
 fi
 
@@ -30,7 +30,7 @@ fi
 if [ -z "$EARLIEST_DIST" ]; then
   echo "dist/ is empty, building..."
   cd "$PLUGIN_ROOT"
-  npm run build
+  bun run build
   exit 0
 fi
 
@@ -38,7 +38,7 @@ fi
 if [ "$LATEST_SRC" -gt "$EARLIEST_DIST" ]; then
   echo "Source files changed, rebuilding..."
   cd "$PLUGIN_ROOT"
-  npm run build
+  bun run build
 else
   echo "dist/ is up to date, skipping build"
 fi

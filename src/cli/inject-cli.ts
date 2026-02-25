@@ -60,48 +60,63 @@ function getConfig(): SessionStartConfig {
   };
 }
 
+export type InjectCliDeps = {
+  openDatabase: typeof openDatabase;
+  handleSessionStart: typeof handleSessionStart;
+};
+
+const defaultInjectCliDeps: InjectCliDeps = {
+  openDatabase,
+  handleSessionStart,
+};
+
+export async function runInjectMain(stdinData: string, deps: InjectCliDeps = defaultInjectCliDeps): Promise<void> {
+  // Parse input or use defaults if stdin is empty
+  let input: SessionStartInput;
+  if (stdinData.trim()) {
+    input = JSON.parse(stdinData) as SessionStartInput;
+  } else {
+    // Default input when no stdin data provided
+    input = {
+      session_id: process.env.CLAUDE_SESSION_ID || 'unknown',
+      transcript_path: '',
+    };
+  }
+
+  // Get project and config
+  const project = getProject(input);
+  const config = getConfig();
+
+  // Open existing database (don't wipe)
+  const db = deps.openDatabase();
+
+  try {
+    // Handle session start hook
+    const result = await deps.handleSessionStart(db, project, config);
+
+    // Output markdown to stdout for injection
+    if (result.markdown) {
+      console.log(result.markdown);
+    }
+  } finally {
+    db.close();
+  }
+}
+
 async function main() {
   try {
-    // Read input from stdin (may be empty for SessionStart)
     const stdinData = await readStdin();
-
-    // Parse input or use defaults if stdin is empty
-    let input: SessionStartInput;
-    if (stdinData.trim()) {
-      input = JSON.parse(stdinData) as SessionStartInput;
-    } else {
-      // Default input when no stdin data provided
-      input = {
-        session_id: process.env.CLAUDE_SESSION_ID || 'unknown',
-        transcript_path: '',
-      };
-    }
-
-    // Get project and config
-    const project = getProject(input);
-    const config = getConfig();
-
-    // Open existing database (don't wipe)
-    const db = openDatabase();
-
-    try {
-      // Handle session start hook
-      const result = await handleSessionStart(db, project, config);
-
-      // Output markdown to stdout for injection
-      if (result.markdown) {
-        console.log(result.markdown);
-      }
-
-      // Debug info to stderr (optional, can be removed)
-      // console.error(`[memmem] Injected ${result.includedCount} observations (${result.tokenCount} tokens)`);
-    } finally {
-      db.close();
-    }
+    await runInjectMain(stdinData);
   } catch (error) {
     console.error(`[memmem] Error in inject: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 }
 
-main();
+function shouldRunAsEntrypoint(): boolean {
+  return process.env.VITEST !== 'true' && !(import.meta as ImportMeta & { test?: boolean }).test;
+}
+
+if (shouldRunAsEntrypoint()) {
+  main();
+}

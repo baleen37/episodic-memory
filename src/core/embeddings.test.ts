@@ -1,15 +1,7 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import net from 'net';
 import EventEmitter from 'events';
 import { EMBEDDING_DIM } from './constants.js';
-
-vi.mock('./ratelimiter.js', () => ({
-  getEmbeddingRateLimiter: () => ({ acquire: vi.fn().mockResolvedValue(undefined) }),
-}));
-
-vi.mock('./paths.js', () => ({
-  getSuperpowersDir: () => '/tmp/test-memmem-embed',
-}));
 
 // Don't mock child_process spawn — the connector mock prevents actual spawning
 
@@ -20,7 +12,7 @@ describe('isEmbeddingsDisabled()', () => {
   });
 
   test('returns true when MEMMEM_DISABLE_EMBEDDINGS=true', async () => {
-    vi.resetModules();
+    // Note: Module reset not needed in bun:test - mock.module is hoisted
     process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     const { isEmbeddingsDisabled } = await import('./embeddings.js');
     expect(isEmbeddingsDisabled()).toBe(true);
@@ -29,7 +21,17 @@ describe('isEmbeddingsDisabled()', () => {
 });
 
 describe('generateEmbedding()', () => {
-  beforeEach(() => { vi.resetModules(); });
+  // Note: In bun:test, mock.module is hoisted and doesn't need resetModules
+
+  beforeEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+  });
+
+  afterEach(async () => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    const { __setWorkerConnectorForTests } = await import('./embeddings.js');
+    __setWorkerConnectorForTests(null);
+  });
 
   test('returns null when MEMMEM_DISABLE_EMBEDDINGS=true', async () => {
     process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';

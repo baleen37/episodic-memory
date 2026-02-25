@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { initDatabase } from './db.js';
 import {
   create,
@@ -9,19 +9,18 @@ import {
 } from './observations.js';
 import { EMBEDDING_DIM } from './constants.js';
 
-const { mockGenerateEmbedding, mockInitEmbeddings } = vi.hoisted(() => ({
-  mockGenerateEmbedding: vi.fn(async () => Array.from({ length: EMBEDDING_DIM }, () => Math.random() * 2 - 1)),
-  mockInitEmbeddings: vi.fn(async () => {}),
-}));
+// Mock functions at top-level (outside describe blocks)
+const mockGenerateEmbedding = mock(async () => Array.from({ length: EMBEDDING_DIM }, () => Math.random() * 2 - 1));
+const mockInitEmbeddings = mock(async () => {});
 
 // Mock generateEmbedding to avoid loading the model in tests
-vi.mock('./embeddings.js', () => ({
+mock.module('./embeddings.js', () => ({
   generateEmbedding: mockGenerateEmbedding,
   initEmbeddings: mockInitEmbeddings,
 }));
 
 describe('observations', () => {
-  let db: Database.Database;
+  let db: Database;
   let testDbPath: string;
 
   beforeEach(() => {
@@ -29,7 +28,8 @@ describe('observations', () => {
     testDbPath = ':memory:';
     process.env.CONVERSATION_MEMORY_DB_PATH = testDbPath;
     db = initDatabase();
-    vi.clearAllMocks();
+    mockGenerateEmbedding.mockClear();
+    mockInitEmbeddings.mockClear();
   });
 
   afterEach(() => {
@@ -83,10 +83,11 @@ describe('observations', () => {
 
       // Check vector table
       const vecStmt = db.prepare('SELECT embedding FROM vec_observations WHERE id = ?');
-      const vecResult = vecStmt.get(String(id)) as { embedding: Buffer } | undefined;
+      const vecResult = vecStmt.get(String(id)) as { embedding: Uint8Array } | undefined;
 
       expect(vecResult).toBeDefined();
-      expect(Buffer.isBuffer(vecResult!.embedding)).toBe(true);
+      // bun:sqlite returns Uint8Array for BLOB columns, not Buffer
+      expect(vecResult!.embedding).toBeInstanceOf(Uint8Array);
       expect(vecResult!.embedding.length).toBe(EMBEDDING_DIM * 4); // EMBEDDING_DIM floats * 4 bytes
     });
 

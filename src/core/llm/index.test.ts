@@ -5,7 +5,6 @@
  * re-exported from the LLM module's index.ts file.
  */
 
-import { describe, it, expect } from 'vitest';
 import {
   // Classes from gemini-provider.ts
   GeminiProvider,

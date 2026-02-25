@@ -75,6 +75,17 @@ export interface LLMConfig {
   ratelimit?: RateLimitsConfig;
 }
 
+let configFileDeps = {
+  existsSync,
+  readFileSync,
+};
+
+export function __setConfigFileDepsForTests(
+  deps: { existsSync: typeof existsSync; readFileSync: typeof readFileSync } | null
+): void {
+  configFileDeps = deps ?? { existsSync, readFileSync };
+}
+
 /**
  * Loads LLM configuration from the config file.
  *
@@ -97,12 +108,12 @@ export function loadConfig(): LLMConfig | null {
   const configPath = join(configDir, 'config.json');
 
   // Return null if config file doesn't exist
-  if (!existsSync(configPath)) {
+  if (!configFileDeps.existsSync(configPath)) {
     return null;
   }
 
   try {
-    const configContent = readFileSync(configPath, 'utf-8');
+    const configContent = configFileDeps.readFileSync(configPath, 'utf-8');
     const config = JSON.parse(configContent) as LLMConfig;
 
     // Validate required fields

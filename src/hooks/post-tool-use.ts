@@ -8,7 +8,7 @@
  * 4. Runs async (non-blocking)
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { compressToolData } from '../core/compress.js';
 import { insertPendingEvent, type PendingEvent } from '../core/db.js';
 
@@ -22,7 +22,7 @@ import { insertPendingEvent, type PendingEvent } from '../core/db.js';
  * @param toolData - Result/output data from the tool call
  */
 export function handlePostToolUse(
-  db: Database.Database,
+  db: Database,
   sessionId: string,
   project: string,
   toolName: string,

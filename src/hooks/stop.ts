@@ -14,7 +14,7 @@
  * 6. Runs async (non-blocking)
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import type { LLMProvider, CompressedEvent, PreviousObservation } from '../core/llm/index.js';
 import { extractObservationsFromBatch } from '../core/llm/index.js';
 import { create as createObservation } from '../core/observations.js';
@@ -54,6 +54,8 @@ export interface StopHookOptions {
   claudeProjectsDir?: string;
   /** Override archive destination directory (for testing) */
   archiveDir?: string;
+  /** Override observation writer (for testing) */
+  createObservationFn?: typeof createObservation;
 }
 
 /**
@@ -70,10 +72,19 @@ export interface StopHookOptions {
  * @param options - Stop hook options
  */
 export async function handleStop(
-  db: Database.Database,
+  db: Database,
   options: StopHookOptions
 ): Promise<void> {
-  const { provider, sessionId, project, batchSize = DEFAULT_BATCH_SIZE, projectSlug, claudeProjectsDir, archiveDir } = options;
+  const {
+    provider,
+    sessionId,
+    project,
+    batchSize = DEFAULT_BATCH_SIZE,
+    projectSlug,
+    claudeProjectsDir,
+    archiveDir,
+    createObservationFn = createObservation,
+  } = options;
 
   // Step 1: Collect all pending_events for this session
   const allEvents: Array<PendingEvent & { id: number }> = getAllPendingEvents(db, sessionId);
@@ -109,7 +120,7 @@ export async function handleStop(
       // Step 5: Store observations with embeddings
       for (const obs of extracted) {
         try {
-          await createObservation(
+          await createObservationFn(
             db,
             obs.title,
             obs.content,

@@ -4,40 +4,11 @@
  * These tests use mocking to avoid actual API calls while verifying correct behavior.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { ZAIProvider } from './zai-provider.js';
 import type { LLMOptions } from './types.js';
 
-// Mock fetch globally - we need to declare it properly for TypeScript
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
-
 describe('ZAIProvider', () => {
-  beforeEach(() => {
-    // Reset mocks before each test
-    vi.clearAllMocks();
-
-    // Setup default successful response
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{
-          index: 0,
-          finish_reason: 'stop',
-          message: {
-            role: 'assistant',
-            content: 'Test response',
-          },
-        }],
-        usage: {
-          prompt_tokens: 10,
-          completion_tokens: 5,
-          total_tokens: 15,
-        },
-      }),
-    });
-  });
-
   describe('constructor', () => {
     it('should create a provider with API key', () => {
       const provider = new ZAIProvider('test-api-key');
@@ -60,6 +31,34 @@ describe('ZAIProvider', () => {
   });
 
   describe('complete method', () => {
+    let fetchSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      // Setup default successful response
+      fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'Test response',
+            },
+          }],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+        }),
+      } as any);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
     it('should return text and usage from API response', async () => {
       const provider = new ZAIProvider('test-api-key');
       const result = await provider.complete('test prompt');
@@ -79,7 +78,7 @@ describe('ZAIProvider', () => {
       expect(result.text).toBeDefined();
 
       // Verify the fetch was called with max_tokens in the body
-      expect(mockFetch).toHaveBeenCalledWith(
+      expect(fetchSpy).toHaveBeenCalledWith(
         expect.stringContaining('/chat/completions'),
         expect.objectContaining({
           body: expect.stringContaining('"max_tokens":2048'),
@@ -97,7 +96,7 @@ describe('ZAIProvider', () => {
       expect(result.text).toBeDefined();
 
       // Verify the fetch was called with system prompt in messages
-      expect(mockFetch).toHaveBeenCalledWith(
+      expect(fetchSpy).toHaveBeenCalledWith(
         expect.stringContaining('/chat/completions'),
         expect.objectContaining({
           body: expect.stringContaining('"role":"system"'),
@@ -117,10 +116,7 @@ describe('ZAIProvider', () => {
     });
 
     it('should throw error when API request fails', async () => {
-      const provider = new ZAIProvider('test-api-key');
-
-      // Mock failed response
-      mockFetch.mockResolvedValueOnce({
+      fetchSpy.mockResolvedValueOnce({
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
@@ -129,13 +125,41 @@ describe('ZAIProvider', () => {
             message: 'Invalid API key',
           },
         }),
-      });
+      } as any);
 
+      const provider = new ZAIProvider('test-api-key');
       await expect(provider.complete('test prompt')).rejects.toThrow('Z.AI API request failed');
     });
   });
 
   describe('TokenUsage structure', () => {
+    let fetchSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'Test response',
+            },
+          }],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+        }),
+      } as any);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
     it('should return TokenUsage with input and output tokens', async () => {
       const provider = new ZAIProvider('test-api-key');
       const result = await provider.complete('test');
@@ -156,6 +180,33 @@ describe('ZAIProvider', () => {
   });
 
   describe('LLMProvider interface compliance', () => {
+    let fetchSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'Test response',
+            },
+          }],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+        }),
+      } as any);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
     it('should implement LLMProvider interface', () => {
       const provider = new ZAIProvider('test-api-key');
 
@@ -174,6 +225,33 @@ describe('ZAIProvider', () => {
   });
 
   describe('integration scenarios', () => {
+    let fetchSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: 'Test response',
+            },
+          }],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+        }),
+      } as any);
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
     it('should handle simple summarization prompt', async () => {
       const provider = new ZAIProvider('test-api-key');
 

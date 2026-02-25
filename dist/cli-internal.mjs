@@ -71,7 +71,7 @@ var init_constants = __esm({
 });
 
 // src/core/db.ts
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import path2 from "path";
 import fs2 from "fs";
 import * as sqliteVec from "sqlite-vec";
@@ -90,8 +90,8 @@ function createDatabase(wipe) {
   }
   const db = new Database(dbPath);
   sqliteVec.load(db);
-  db.pragma("journal_mode = WAL");
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+  db.exec("PRAGMA journal_mode = WAL");
+  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all();
   const tableNames = new Set(tables.map((t) => t.name));
   if (!tableNames.has("pending_events")) {
     db.exec(`
@@ -126,7 +126,7 @@ function createDatabase(wipe) {
     db.exec(`CREATE INDEX idx_observations_session ON observations(session_id)`);
     db.exec(`CREATE INDEX idx_observations_timestamp ON observations(timestamp DESC)`);
   }
-  const observationColumns = db.prepare(`
+  const observationColumns = db.query(`
     SELECT name FROM pragma_table_info('observations')
   `).all();
   const hasContentOriginal = observationColumns.some(
@@ -136,7 +136,7 @@ function createDatabase(wipe) {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
   if (tableNames.has("vec_observations")) {
-    const schemaResult = db.prepare(
+    const schemaResult = db.query(
       "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
     ).get();
     if (schemaResult?.sql?.includes("float[768]")) {
@@ -156,11 +156,10 @@ function createDatabase(wipe) {
   return db;
 }
 function insertPendingEvent(db, event) {
-  const stmt = db.prepare(`
+  const result = db.query(`
     INSERT INTO pending_events (session_id, project, tool_name, compressed, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
+  `).run(
     event.sessionId,
     event.project,
     event.toolName,
@@ -171,11 +170,10 @@ function insertPendingEvent(db, event) {
   return result.lastInsertRowid;
 }
 function insertObservation(db, observation, embedding) {
-  const stmt = db.prepare(`
+  const result = db.query(`
     INSERT INTO observations (title, content, content_original, project, session_id, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
+  `).run(
     observation.title,
     observation.content,
     observation.contentOriginal ?? null,
@@ -186,22 +184,20 @@ function insertObservation(db, observation, embedding) {
   );
   const rowid = result.lastInsertRowid;
   if (embedding) {
-    const vecStmt = db.prepare(`
+    db.query(`
       INSERT INTO vec_observations (id, embedding)
       VALUES (?, ?)
-    `);
-    vecStmt.run(String(rowid), Buffer.from(new Float32Array(embedding).buffer));
+    `).run(String(rowid), Buffer.from(new Float32Array(embedding).buffer));
   }
   return rowid;
 }
 function getAllPendingEvents(db, sessionId) {
-  const stmt = db.prepare(`
+  return db.query(`
     SELECT id, session_id as sessionId, project, tool_name as toolName, compressed, timestamp, created_at as createdAt
     FROM pending_events
     WHERE session_id = ?
     ORDER BY created_at ASC
-  `);
-  return stmt.all(sessionId);
+  `).all(sessionId);
 }
 function searchObservations(db, options = {}) {
   const { project, sessionId, after, before, limit = 100 } = options;
@@ -229,14 +225,16 @@ function searchObservations(db, options = {}) {
   }
   sql += " ORDER BY timestamp DESC LIMIT ?";
   params.push(limit);
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
+  return db.query(sql).all(...params);
 }
 var init_db = __esm({
   "src/core/db.ts"() {
     "use strict";
     init_paths();
     init_constants();
+    if (process.platform === "darwin") {
+      Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+    }
   }
 });
 
