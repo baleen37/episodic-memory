@@ -208,4 +208,5 @@ export function getLLMRateLimiter(): RateLimiter {
 export function resetRateLimiters(): void {
   embeddingLimiter = null;
   llmLimiter = null;
+  loadConfigFn = loadConfig;
 }
