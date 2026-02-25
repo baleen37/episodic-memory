@@ -36,8 +36,11 @@ import {
   type SearchResult,
   type ObservationOutput,
 } from './handlers.js';
-import { allTools } from './tools/index.js';
-import { handleError } from './error.js';
+import { allTools } from './tools.js';
+
+export function handleError(error: unknown): string {
+  return error instanceof Error ? `Error: ${error.message}` : `Error: ${String(error)}`;
+}
 
 // Re-export schemas for backward compatibility
 export { SearchInputSchema, GetObservationsInputSchema, ReadInputSchema };

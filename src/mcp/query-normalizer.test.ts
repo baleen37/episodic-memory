@@ -3,7 +3,7 @@ import {
   getQueryNormalizerProvider,
   resetQueryNormalizerCache,
   type QueryNormalizerConfig
-} from './query-normalizer.js';
+} from './handlers.js';
 
 describe('query-normalizer', () => {
   beforeEach(() => {
