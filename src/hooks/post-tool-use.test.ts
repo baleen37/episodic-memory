@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { summarizeEvent } from '../core/summarize.js';
-import { initDatabase, getAllPendingEvents } from '../core/db.js';
+import { initDatabase, getAllBufferedEvents } from '../core/db.js';
 import { handlePostToolUse } from './post-tool-use.js';
 
 describe('PostToolUse Hook', () => {
@@ -38,10 +38,10 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Read', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
       expect(events[0].toolName).toBe('Read');
-      expect(events[0].compressed).toBe('Read /src/test.ts (100 lines)');
+      expect(events[0].summary).toBe('Read /src/test.ts (100 lines)');
       expect(events[0].project).toBe('test-project');
       expect(events[0].sessionId).toBe('test-session-123');
     });
@@ -51,7 +51,7 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Glob', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(0);
     });
 
@@ -62,7 +62,7 @@ describe('PostToolUse Hook', () => {
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Bash', toolData);
 
       const afterTime = Date.now();
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
 
       expect(events).toHaveLength(1);
       expect(events[0].timestamp).toBeGreaterThanOrEqual(beforeTime);
@@ -80,12 +80,12 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Edit', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
       expect(events[0].toolName).toBe('Edit');
-      expect(events[0].compressed).toContain('Edited /src/auth.ts:');
-      expect(events[0].compressed).toContain('function login()');
-      expect(events[0].compressed).toContain('→');
+      expect(events[0].summary).toContain('Edited /src/auth.ts:');
+      expect(events[0].summary).toContain('function login()');
+      expect(events[0].summary).toContain('→');
     });
 
     test('handles Write tool compression', () => {
@@ -96,9 +96,9 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Write', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toBe('Created /src/new.ts (250 lines)');
+      expect(events[0].summary).toBe('Created /src/new.ts (250 lines)');
     });
 
     test('handles Bash tool compression with success', () => {
@@ -109,9 +109,9 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Bash', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toContain('Ran `npm test` → exit 0');
+      expect(events[0].summary).toContain('Ran `npm test` → exit 0');
     });
 
     test('handles Bash tool compression with error', () => {
@@ -123,10 +123,10 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Bash', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toContain('Ran `npm test` → exit 1');
-      expect(events[0].compressed).toContain('Error: Test failed');
+      expect(events[0].summary).toContain('Ran `npm test` → exit 1');
+      expect(events[0].summary).toContain('Error: Test failed');
     });
 
     test('handles Grep tool compression', () => {
@@ -138,9 +138,9 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Grep', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toContain("Searched 'TODO' in /src → 5 matches");
+      expect(events[0].summary).toContain("Searched 'TODO' in /src → 5 matches");
     });
 
     test('handles WebSearch tool compression', () => {
@@ -150,9 +150,9 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'WebSearch', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toBe('Searched: TypeScript best practices 2026');
+      expect(events[0].summary).toBe('Searched: TypeScript best practices 2026');
     });
 
     test('handles WebFetch tool compression', () => {
@@ -162,9 +162,9 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'WebFetch', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toBe('Fetched https://example.com/api/docs');
+      expect(events[0].summary).toBe('Fetched https://example.com/api/docs');
     });
 
     test('handles multiple tool events in sequence', () => {
@@ -172,11 +172,11 @@ describe('PostToolUse Hook', () => {
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Read', { file_path: '/src/b.ts', lines: 20 });
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Bash', { command: 'echo test', exitCode: 0 });
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(3);
-      expect(events[0].compressed).toContain('/src/a.ts');
-      expect(events[1].compressed).toContain('/src/b.ts');
-      expect(events[2].compressed).toContain('echo test');
+      expect(events[0].summary).toContain('/src/a.ts');
+      expect(events[1].summary).toContain('/src/b.ts');
+      expect(events[2].summary).toContain('echo test');
     });
 
     test('filters out skipped tools', () => {
@@ -191,7 +191,7 @@ describe('PostToolUse Hook', () => {
         handlePostToolUse(db, 'test-session-123', 'test-project', toolName, {});
       }
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(0);
     });
 
@@ -199,8 +199,8 @@ describe('PostToolUse Hook', () => {
       handlePostToolUse(db, 'session-1', 'project-1', 'Read', { file_path: '/a.ts', lines: 10 });
       handlePostToolUse(db, 'session-2', 'project-2', 'Read', { file_path: '/b.ts', lines: 20 });
 
-      const events1 = getAllPendingEvents(db, 'session-1');
-      const events2 = getAllPendingEvents(db, 'session-2');
+      const events1 = getAllBufferedEvents(db, 'session-1');
+      const events2 = getAllBufferedEvents(db, 'session-2');
 
       expect(events1).toHaveLength(1);
       expect(events2).toHaveLength(1);
@@ -211,9 +211,9 @@ describe('PostToolUse Hook', () => {
     test('handles unknown tool names', () => {
       handlePostToolUse(db, 'test-session-123', 'test-project', 'UnknownTool', { data: 'test' });
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
-      expect(events[0].compressed).toBe('UnknownTool');
+      expect(events[0].summary).toBe('UnknownTool');
     });
 
     test('compresses tool data correctly for all supported tools', () => {
@@ -259,13 +259,13 @@ describe('PostToolUse Hook', () => {
 
       handlePostToolUse(db, 'test-session-123', 'test-project', 'Read', toolData);
 
-      const events = getAllPendingEvents(db, 'test-session-123');
+      const events = getAllBufferedEvents(db, 'test-session-123');
       expect(events).toHaveLength(1);
       expect(events[0]).toHaveProperty('id');
       expect(events[0]).toHaveProperty('sessionId');
       expect(events[0]).toHaveProperty('project');
       expect(events[0]).toHaveProperty('toolName');
-      expect(events[0]).toHaveProperty('compressed');
+      expect(events[0]).toHaveProperty('summary');
       expect(events[0]).toHaveProperty('timestamp');
       expect(events[0]).toHaveProperty('createdAt');
     });
@@ -274,8 +274,8 @@ describe('PostToolUse Hook', () => {
       handlePostToolUse(db, 'session-1', 'project-1', 'Read', { file_path: '/a.ts', lines: 10 });
       handlePostToolUse(db, 'session-2', 'project-2', 'Read', { file_path: '/b.ts', lines: 20 });
 
-      const events1 = getAllPendingEvents(db, 'session-1');
-      const events2 = getAllPendingEvents(db, 'session-2');
+      const events1 = getAllBufferedEvents(db, 'session-1');
+      const events2 = getAllBufferedEvents(db, 'session-2');
 
       expect(events1).toHaveLength(1);
       expect(events2).toHaveLength(1);

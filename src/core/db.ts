@@ -34,11 +34,11 @@ if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV 
   }
 }
 
-export interface PendingEvent {
+export interface BufferedEvent {
   sessionId: string;
   project: string;
   toolName: string;
-  compressed: string;
+  summary: string;
   timestamp: number;
   createdAt: number;
 }
@@ -127,7 +127,7 @@ function createDatabase(wipe: boolean): Database {
         session_id TEXT NOT NULL,
         project TEXT NOT NULL,
         tool_name TEXT NOT NULL,
-        compressed TEXT NOT NULL,
+        summary TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         created_at INTEGER NOT NULL
       )
@@ -168,6 +168,15 @@ function createDatabase(wipe: boolean): Database {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
 
+  // Migrate pending_events: rename compressed → summary
+  const pendingColumns = db.query(`
+    SELECT name FROM pragma_table_info('pending_events')
+  `).all() as Array<{ name: string }>;
+  const hasCompressed = pendingColumns.some(c => c.name === 'compressed');
+  if (hasCompressed) {
+    db.exec('ALTER TABLE pending_events RENAME COLUMN compressed TO summary');
+  }
+
   // Create vector table if not exists
   if (!tableNames.has('vec_observations')) {
     db.exec(`
@@ -182,20 +191,20 @@ function createDatabase(wipe: boolean): Database {
 }
 
 /**
- * Insert a pending event into the database
+ * Insert a buffered event into the database
  */
-export function insertPendingEvent(
+export function insertBufferedEvent(
   db: Database,
-  event: PendingEvent
+  event: BufferedEvent
 ): number {
   const result = db.query(`
-    INSERT INTO pending_events (session_id, project, tool_name, compressed, timestamp, created_at)
+    INSERT INTO pending_events (session_id, project, tool_name, summary, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     event.sessionId,
     event.project,
     event.toolName,
-    event.compressed,
+    event.summary,
     event.timestamp,
     event.createdAt
   );
@@ -241,19 +250,20 @@ export function insertObservation(
 }
 
 /**
- * Get all pending events for a session (no limit).
+ * Get all buffered events for a session (no limit).
  * Used by Stop hook for batch extraction.
  */
-export function getAllPendingEvents(
+export function getAllBufferedEvents(
   db: Database,
   sessionId: string
-): Array<PendingEvent & { id: number }> {
+): Array<BufferedEvent & { id: number }> {
   return db.query(`
-    SELECT id, session_id as sessionId, project, tool_name as toolName, compressed, timestamp, created_at as createdAt
+    SELECT id, session_id as sessionId, project, tool_name as toolName,
+           summary, timestamp, created_at as createdAt
     FROM pending_events
     WHERE session_id = ?
     ORDER BY created_at ASC
-  `).all(sessionId) as Array<PendingEvent & { id: number }>;
+  `).all(sessionId) as Array<BufferedEvent & { id: number }>;
 }
 
 /**

@@ -14,7 +14,7 @@ import { logDebug, logInfo, logError } from '../logger.js';
  */
 export interface CompressedEvent {
   toolName: string;
-  compressed: string;
+  summary: string;
   timestamp: number;
 }
 
@@ -88,7 +88,7 @@ export function buildBatchExtractPrompt(
   // Add tool events
   prompt += '<tool_events>\n';
   for (const event of events) {
-    prompt += `[${event.timestamp}] ${event.toolName}: ${event.compressed}\n`;
+    prompt += `[${event.timestamp}] ${event.toolName}: ${event.summary}\n`;
   }
   prompt += '</tool_events>\n\n';
 

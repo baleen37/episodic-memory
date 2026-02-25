@@ -10,7 +10,7 @@
 
 import { Database } from 'bun:sqlite';
 import { summarizeEvent } from '../core/summarize.js';
-import { insertPendingEvent, type PendingEvent } from '../core/db.js';
+import { insertBufferedEvent, type BufferedEvent } from '../core/db.js';
 
 /**
  * Handle PostToolUse hook - compress and store tool events.
@@ -29,23 +29,23 @@ export function handlePostToolUse(
   toolData: unknown
 ): void {
   // Step 1: Get summarized tool data
-  const compressed = summarizeEvent(toolName, toolData);
+  const summary = summarizeEvent(toolName, toolData);
 
   // Step 2: Skip if compression returned null (low value tool)
-  if (compressed === null) {
+  if (summary === null) {
     return;
   }
 
   // Step 3: Store in pending_events table
   const now = Date.now();
-  const event: PendingEvent = {
+  const event: BufferedEvent = {
     sessionId,
     project,
     toolName,
-    compressed,
+    summary,
     timestamp: now,
     createdAt: now,
   };
 
-  insertPendingEvent(db, event);
+  insertBufferedEvent(db, event);
 }

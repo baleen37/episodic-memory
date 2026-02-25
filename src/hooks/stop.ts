@@ -18,7 +18,7 @@ import { Database } from 'bun:sqlite';
 import type { LLMProvider, CompressedEvent, PreviousObservation } from '../core/llm/index.js';
 import { extractObservationsFromBatch } from '../core/llm/index.js';
 import { create as createObservation } from '../core/observations.js';
-import { getAllPendingEvents, type PendingEvent } from '../core/db.js';
+import { getAllBufferedEvents, type BufferedEvent } from '../core/db.js';
 import { archiveSession } from '../core/archive.js';
 import { getArchiveDir } from '../core/paths.js';
 import os from 'os';
@@ -87,7 +87,7 @@ export async function handleStop(
   } = options;
 
   // Step 1: Collect all pending_events for this session
-  const allEvents: Array<PendingEvent & { id: number }> = getAllPendingEvents(db, sessionId);
+  const allEvents: Array<BufferedEvent & { id: number }> = getAllBufferedEvents(db, sessionId);
 
   // Step 2: Skip if < 3 events (too short to be useful)
   if (allEvents.length < MIN_EVENT_THRESHOLD) {
@@ -104,9 +104,9 @@ export async function handleStop(
   for (const batch of batches) {
     try {
       // Convert to CompressedEvent format
-      const compressedEvents: CompressedEvent[] = batch.map((event: PendingEvent & { id: number }) => ({
+      const compressedEvents: CompressedEvent[] = batch.map((event: BufferedEvent & { id: number }) => ({
         toolName: event.toolName,
-        compressed: event.compressed,
+        summary: event.summary,
         timestamp: event.timestamp,
       }));
 

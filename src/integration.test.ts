@@ -10,7 +10,7 @@
 
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { initDatabase, getAllPendingEvents, getObservation } from './core/db.js';
+import { initDatabase, getAllBufferedEvents, getObservation } from './core/db.js';
 import { handlePostToolUse } from './hooks/post-tool-use.js';
 import { handleStop, type StopHookOptions } from './hooks/stop.js';
 import { handleSessionStart, type SessionStartConfig } from './hooks/session-start.js';
@@ -109,7 +109,7 @@ describe('Integration Tests', () => {
       handlePostToolUse(db, sessionId, project, 'Bash', { command: 'npm run lint', exitCode: 1, stderr: 'Error: Unused variable' });
 
       // Step 2: Verify pending_events were stored
-      const pendingEvents = getAllPendingEvents(db, sessionId);
+      const pendingEvents = getAllBufferedEvents(db, sessionId);
       expect(pendingEvents).toHaveLength(6);
       expect(pendingEvents[0].toolName).toBe('Read');
       expect(pendingEvents[0].project).toBe(project);
@@ -242,7 +242,7 @@ describe('Integration Tests', () => {
       handlePostToolUse(db, sessionId, project, 'LSP', { operation: 'goToDefinition' }); // Should be filtered
 
       // Only Read and Bash should be in pending_events
-      const pendingEvents = getAllPendingEvents(db, sessionId);
+      const pendingEvents = getAllBufferedEvents(db, sessionId);
       expect(pendingEvents).toHaveLength(2);
       expect(pendingEvents[0].toolName).toBe('Read');
       expect(pendingEvents[1].toolName).toBe('Bash');
