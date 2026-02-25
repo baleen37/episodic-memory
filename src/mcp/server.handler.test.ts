@@ -15,10 +15,10 @@ import {
   SearchInputSchema,
   GetObservationsInputSchema,
   ReadInputSchema,
-  __resetQueryNormalizerCacheForTests,
   __setServerHandlerDepsForTests,
   shouldRunAsEntrypoint,
 } from './server.js';
+import { resetQueryNormalizerCache } from './query-normalizer.js';
 
 const mockSearch: any = mock(async () => []);
 const mockFindByIds: any = mock(async () => []);
@@ -30,7 +30,7 @@ describe('MCP Server Handlers', () => {
   let mockDb: Database;
 
   beforeEach(() => {
-    __resetQueryNormalizerCacheForTests();
+    resetQueryNormalizerCache();
     __setServerHandlerDepsForTests({
       searchFn: mockSearch as any,
       findByIdsFn: mockFindByIds as any,

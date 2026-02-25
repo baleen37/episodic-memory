@@ -24,8 +24,10 @@ import { findByIds as getObservationsByIds } from '../core/observations.js';
 import { readConversation } from '../core/read.js';
 import { openDatabase } from '../core/db.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
-import type { LLMConfig, LLMProvider } from '../core/llm/index.js';
-import { logDebug } from '../core/logger.js';
+import {
+  getQueryNormalizerProvider,
+  resetQueryNormalizerCache,
+} from './query-normalizer.js';
 import {
   SearchInputSchema,
   GetObservationsInputSchema,
@@ -75,72 +77,19 @@ const defaultServerHandlerDeps: ServerHandlerDeps = {
 
 let serverHandlerDeps: ServerHandlerDeps = defaultServerHandlerDeps;
 
-let cachedQueryNormalizerProvider: LLMProvider | undefined;
-let cachedQueryNormalizerConfigKey: string | null = null;
-let inFlightQueryNormalizerProvider: Promise<LLMProvider | undefined> | null = null;
-let inFlightQueryNormalizerConfigKey: string | null = null;
-
-export function __resetQueryNormalizerCacheForTests(): void {
-  cachedQueryNormalizerProvider = undefined;
-  cachedQueryNormalizerConfigKey = null;
-  inFlightQueryNormalizerProvider = null;
-  inFlightQueryNormalizerConfigKey = null;
-}
-
 export function __setServerHandlerDepsForTests(deps: Partial<ServerHandlerDeps> | null): void {
   serverHandlerDeps = deps ? { ...defaultServerHandlerDeps, ...deps } : defaultServerHandlerDeps;
-  __resetQueryNormalizerCacheForTests();
-}
-
-function getConfigCacheKey(config: LLMConfig): string {
-  return JSON.stringify([config.provider, config.model, config.apiKey]);
-}
-
-async function getQueryNormalizerProvider(): Promise<LLMProvider | undefined> {
-  const config = serverHandlerDeps.loadConfigFn();
-  if (!config) {
-    return undefined;
-  }
-
-  const configKey = getConfigCacheKey(config);
-  if (cachedQueryNormalizerProvider && cachedQueryNormalizerConfigKey === configKey) {
-    return cachedQueryNormalizerProvider;
-  }
-
-  if (inFlightQueryNormalizerProvider && inFlightQueryNormalizerConfigKey === configKey) {
-    return inFlightQueryNormalizerProvider;
-  }
-
-  const providerPromise = serverHandlerDeps.createProviderFn(config)
-    .then(provider => {
-      cachedQueryNormalizerProvider = provider;
-      cachedQueryNormalizerConfigKey = configKey;
-      return provider;
-    })
-    .catch(error => {
-      logDebug('handleSearch: query normalizer unavailable, falling back to original query', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return undefined;
-    })
-    .finally(() => {
-      if (inFlightQueryNormalizerConfigKey === configKey) {
-        inFlightQueryNormalizerProvider = null;
-        inFlightQueryNormalizerConfigKey = null;
-      }
-    });
-
-  inFlightQueryNormalizerProvider = providerPromise;
-  inFlightQueryNormalizerConfigKey = configKey;
-
-  return providerPromise;
+  resetQueryNormalizerCache();
 }
 
 export async function handleSearch(
   params: SearchInput,
   db: Database
 ): Promise<SearchResult[]> {
-  const queryNormalizerProvider = await getQueryNormalizerProvider();
+  const queryNormalizerProvider = await getQueryNormalizerProvider(
+    serverHandlerDeps.loadConfigFn,
+    serverHandlerDeps.createProviderFn
+  );
 
   const results = await serverHandlerDeps.searchFn(params.query, {
     db,
