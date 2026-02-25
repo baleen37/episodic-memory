@@ -15,7 +15,7 @@ import { handlePostToolUse } from './hooks/post-tool-use.js';
 import { handleStop, type StopHookOptions } from './hooks/stop.js';
 import { handleSessionStart, type SessionStartConfig } from './hooks/session-start.js';
 import { search } from './core/search.js';
-import { findByIds as getObservationsByIds } from './core/observations.js';
+import { getObservationsByIds } from './core/db.js';
 import { __setWorkerConnectorForTests } from './core/embeddings.js';
 import type { LLMProvider } from './core/llm/index.js';
 import net from 'net';

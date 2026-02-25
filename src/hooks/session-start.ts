@@ -16,7 +16,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { searchObservations, type ObservationResult } from '../core/db.js';
+import { getRecentObservations, type Observation } from '../core/db.js';
 
 /**
  * Configuration for the SessionStart hook.
@@ -64,7 +64,7 @@ function countTokens(text: string): number {
 /**
  * Format a single observation as a markdown bullet point.
  */
-function formatObservation(obs: ObservationResult): string {
+function formatObservation(obs: Observation): string {
   // Format: "- title: content"
   return `- ${obs.title}: ${obs.content}`;
 }
@@ -88,7 +88,7 @@ export async function handleSessionStart(
   const cutoffTimestamp = calculateRecencyCutoff(recencyDays);
 
   // Step 2: Query recent observations
-  const observations = searchObservations(db, {
+  const observations = getRecentObservations(db, {
     project: projectOnly ? project : undefined,
     after: cutoffTimestamp,
     limit: maxObservations,

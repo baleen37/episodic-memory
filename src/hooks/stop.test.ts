@@ -52,7 +52,7 @@ function createStopOptions(overrides?: Partial<StopHookOptions>): StopHookOption
       `).run(String(rowid), Buffer.from(embedding.buffer));
 
       return rowid;
-    }) as unknown as typeof import('../core/observations.js').create,
+    }) as unknown as typeof import('../core/db.js').createObservation,
     ...overrides,
   };
 }

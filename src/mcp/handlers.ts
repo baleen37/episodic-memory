@@ -7,7 +7,7 @@
 
 import type { Database } from 'bun:sqlite';
 import { search } from '../core/search.js';
-import { findByIds as getObservationsByIds } from '../core/observations.js';
+import { getObservationsByIds } from '../core/db.js';
 import { readConversation } from '../core/read.js';
 import type { LLMConfig, LLMProvider } from '../core/llm/index.js';
 import { logDebug } from '../core/logger.js';
@@ -175,7 +175,7 @@ export async function handleGetObservations(
     typeof id === 'string' ? parseInt(id, 10) : id
   );
 
-  const observations = await getObservationsByIds(db, numericIds);
+  const observations = getObservationsByIds(db, numericIds);
 
   return observations.map(obs => ({
     id: obs.id,

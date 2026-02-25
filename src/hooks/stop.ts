@@ -17,8 +17,7 @@
 import { Database } from 'bun:sqlite';
 import type { LLMProvider, EventSummary, PreviousObservation } from '../core/llm/index.js';
 import { extractFromBatch } from '../core/llm/index.js';
-import { create as createObservation } from '../core/observations.js';
-import { getAllBufferedEvents, type BufferedEvent } from '../core/db.js';
+import { createObservation, getAllBufferedEvents, type BufferedEvent } from '../core/db.js';
 import { archiveSession } from '../core/archive.js';
 import { getArchiveDir } from '../core/paths.js';
 import os from 'os';

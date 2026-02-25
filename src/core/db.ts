@@ -20,6 +20,7 @@ import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
+import { generateEmbedding, initEmbeddings } from './embeddings.js';
 
 // macOS: Apple's default SQLite disables extensions; use Homebrew SQLite
 // Only set custom SQLite in production, not in test environment
@@ -44,16 +45,6 @@ export interface BufferedEvent {
 }
 
 export interface Observation {
-  title: string;
-  content: string;
-  contentOriginal?: string | null;
-  project: string;
-  sessionId?: string;
-  timestamp: number;
-  createdAt: number;
-}
-
-export interface ObservationResult {
   id: number;
   title: string;
   content: string;
@@ -62,6 +53,12 @@ export interface ObservationResult {
   sessionId: string | null;
   timestamp: number;
   createdAt: number;
+}
+
+interface RecentObservationsOptions {
+  project?: string;
+  after?: number;
+  limit?: number;
 }
 
 interface SearchOptions {
@@ -213,12 +210,15 @@ export function insertBufferedEvent(
 }
 
 /**
- * Insert an observation into the database
- * Optionally includes vector embedding for semantic search
+ * Insert an observation into the database.
+ * Optionally includes vector embedding for semantic search.
  */
 export function insertObservation(
   db: Database,
-  observation: Observation,
+  observation: Omit<Observation, 'id' | 'contentOriginal' | 'sessionId'> & {
+    contentOriginal?: string | null;
+    sessionId?: string | null;
+  },
   embedding?: number[]
 ): number {
   // Insert into main table
@@ -250,6 +250,38 @@ export function insertObservation(
 }
 
 /**
+ * Create a new observation with embedding.
+ *
+ * Generates an embedding from title + content and stores both
+ * the observation and its vector in the database.
+ */
+export async function createObservation(
+  db: Database,
+  title: string,
+  content: string,
+  project: string,
+  sessionId?: string,
+  timestamp?: number,
+  contentOriginal?: string
+): Promise<number> {
+  const now = Date.now();
+  const observation: Omit<Observation, 'id'> = {
+    title,
+    content,
+    contentOriginal: contentOriginal ?? null,
+    project,
+    sessionId: sessionId ?? null,
+    timestamp: timestamp ?? now,
+    createdAt: now,
+  };
+
+  await initEmbeddings();
+  const embedding = await generateEmbedding(`${title}\n${content}`);
+
+  return insertObservation(db, observation, embedding ?? undefined);
+}
+
+/**
  * Get all buffered events for a session (no limit).
  * Used by Stop hook for batch extraction.
  */
@@ -267,12 +299,47 @@ export function getAllBufferedEvents(
 }
 
 /**
- * Search observations with filters
+ * Get recent observations with optional filters.
+ * Used by SessionStart hook to load recent context.
+ */
+export function getRecentObservations(
+  db: Database,
+  options: RecentObservationsOptions = {}
+): Observation[] {
+  const { project, after, limit = 100 } = options;
+
+  const params: any[] = [];
+
+  let sql = `
+    SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
+    FROM observations
+    WHERE 1=1
+  `;
+
+  if (project) {
+    sql += ' AND project = ?';
+    params.push(project);
+  }
+
+  if (after) {
+    sql += ' AND timestamp >= ?';
+    params.push(after);
+  }
+
+  sql += ' ORDER BY timestamp DESC LIMIT ?';
+  params.push(limit);
+
+  return db.query(sql).all(...params) as Observation[];
+}
+
+/**
+ * Search observations with filters.
+ * Used by db.test.ts for backward compatibility.
  */
 export function searchObservations(
   db: Database,
   options: SearchOptions = {}
-): ObservationResult[] {
+): Observation[] {
   const { project, sessionId, after, before, limit = 100 } = options;
 
   const params: any[] = [];
@@ -307,21 +374,46 @@ export function searchObservations(
   sql += ' ORDER BY timestamp DESC LIMIT ?';
   params.push(limit);
 
-  return db.query(sql).all(...params) as ObservationResult[];
+  return db.query(sql).all(...params) as Observation[];
 }
 
 /**
- * Get a single observation by ID
+ * Get a single observation by ID.
  */
-export function getObservation(
+export function getObservationById(
   db: Database,
   id: number
-): ObservationResult | null {
+): Observation | null {
   const result = db.query(`
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
     FROM observations
     WHERE id = ?
-  `).get(id) as ObservationResult | undefined;
+  `).get(id) as Observation | undefined;
 
   return result ?? null;
+}
+
+/**
+ * Get a single observation by ID.
+ * @deprecated Use getObservationById instead.
+ */
+export function getObservation(
+  db: Database,
+  id: number
+): Observation | null {
+  return getObservationById(db, id);
+}
+
+/**
+ * Find multiple observations by IDs.
+ */
+export function getObservationsByIds(db: Database, ids: number[]): Observation[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return db.query(`
+    SELECT id, title, content, content_original as contentOriginal,
+           project, session_id as sessionId, timestamp, created_at as createdAt
+    FROM observations WHERE id IN (${placeholders})
+    ORDER BY timestamp DESC
+  `).all(...ids) as Observation[];
 }

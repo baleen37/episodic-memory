@@ -32,8 +32,8 @@ mock.module('../core/search.js', () => ({
   search: mockSearch,
 }));
 
-mock.module('../core/observations.js', () => ({
-  findByIds: mockFindByIds,
+mock.module('../core/db.js', () => ({
+  getObservationsByIds: mockFindByIds,
 }));
 
 mock.module('../core/read.js', () => ({
