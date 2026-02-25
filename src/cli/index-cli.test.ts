@@ -8,7 +8,7 @@
  * - Shows error for unknown commands
  */
 
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 
 describe('index-cli', () => {
   let originalArgv: string[];
@@ -24,15 +24,15 @@ describe('index-cli', () => {
 
     // Mock process.exit to capture exit code without actually exiting
     originalExit = process.exit;
-    process.exit = vi.fn((code?: number) => {
+    process.exit = mock((code?: number) => {
       throw new Error(`process.exit called with code ${code}`);
     }) as unknown as (code?: number) => never;
 
     // Mock console.log and console.error
-    vi.spyOn(console, 'log').mockImplementation((...args) => {
+    spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map(String).join(' '));
     });
-    vi.spyOn(console, 'error').mockImplementation((...args) => {
+    spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       consoleErrors.push(args.map(String).join(' '));
     });
   });
@@ -41,7 +41,7 @@ describe('index-cli', () => {
     // Restore original argv and process.exit
     process.argv = originalArgv;
     process.exit = originalExit;
-    vi.restoreAllMocks();
+    mock.restore();
   });
 
   describe('command parsing', () => {

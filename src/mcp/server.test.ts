@@ -42,7 +42,7 @@
  * - Multi-concept search removed (V3 uses single-string query with full-text search)
  */
 
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect } from 'bun:test';
 import { z } from 'zod';
 
 // Re-define schemas for testing (in production these would be imported from server.ts)
