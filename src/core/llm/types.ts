@@ -1,6 +1,6 @@
 /**
  * Token usage information for LLM API calls.
- * Matches the TokenUsage interface from summarizer.ts for compatibility.
+ * Matches the TokenUsage interface from compress.ts for compatibility.
  */
 export interface TokenUsage {
   /** Number of input tokens consumed */

@@ -1,6 +1,6 @@
 /**
- * Rule-based tool data summarization for PostToolUse hook.
- * Summarizes tool output/results for storage in pending_events table.
+ * Rule-based tool data compression for PostToolUse hook.
+ * Compresses tool output/results for storage in pending_events table.
  * NO LLM calls - pure rule-based summarization.
  */
 
@@ -208,14 +208,14 @@ function compressWebFetch(data: unknown): string {
 }
 
 /**
- * Summarizes tool data into a concise string for storage in pending_events.
+ * Compresses tool data into a concise string for storage in pending_events.
  * Returns null for skipped tools (low value).
  *
  * @param toolName - Name of the tool that was called
  * @param toolData - Result/output data from the tool call
- * @returns Summarized string representation or null for skipped tools
+ * @returns Compressed string representation or null for skipped tools
  */
-export function summarizeEvent(toolName: string, toolData: unknown): string | null {
+export function compressEvent(toolName: string, toolData: unknown): string | null {
   // Check if tool should be skipped
   if (SKIPPED_TOOLS.has(toolName)) {
     return null;

@@ -4,7 +4,7 @@
 
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { summarizeEvent } from '../core/summarize.js';
+import { compressEvent } from '../core/compress.js';
 import { initDatabase, getAllBufferedEvents } from '../core/db.js';
 import { recordEvent, runRecord, type RecordCliDeps } from './record.js';
 
@@ -176,14 +176,14 @@ describe('recordEvent', () => {
     expect(events[0]).toHaveProperty('createdAt');
   });
 
-  test('summarizeEvent helper works correctly', () => {
-    expect(summarizeEvent('Read', { file_path: '/test.ts', lines: 100 }))
+  test('compressEvent helper works correctly', () => {
+    expect(compressEvent('Read', { file_path: '/test.ts', lines: 100 }))
       .toBe('Read /test.ts (100 lines)');
-    expect(summarizeEvent('Glob', { pattern: '*.ts' }))
+    expect(compressEvent('Glob', { pattern: '*.ts' }))
       .toBeNull();
-    expect(summarizeEvent('Edit', { file_path: '/test.ts', old_string: 'old', new_string: 'new' }))
+    expect(compressEvent('Edit', { file_path: '/test.ts', old_string: 'old', new_string: 'new' }))
       .toContain('Edited /test.ts:');
-    expect(summarizeEvent('Bash', { command: 'ls', exitCode: 0 }))
+    expect(compressEvent('Bash', { command: 'ls', exitCode: 0 }))
       .toBe('Ran `ls` → exit 0');
   });
 });
