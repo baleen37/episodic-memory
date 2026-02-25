@@ -47,7 +47,7 @@ async function buildCli() {
   await mkdir("dist", { recursive: true });
 
   try {
-    await buildEntry("src/cli/index-cli.ts", "dist/cli-internal.mjs");
+    await buildEntry("src/cli/main.ts", "dist/cli-internal.mjs");
     await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
     await buildEntry("src/mcp/embedding-worker.ts", "dist/embedding-worker.mjs");
 
