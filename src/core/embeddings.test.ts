@@ -23,8 +23,10 @@ describe('isEmbeddingsDisabled()', () => {
 describe('generateEmbedding()', () => {
   // Note: In bun:test, mock.module is hoisted and doesn't need resetModules
 
-  beforeEach(() => {
+  beforeEach(async () => {
     delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    const { __setWorkerConnectorForTests } = await import('./embeddings.js');
+    __setWorkerConnectorForTests(null);
   });
 
   afterEach(async () => {
