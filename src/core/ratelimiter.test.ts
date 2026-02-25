@@ -141,13 +141,14 @@ describe('RateLimiter', () => {
 
 describe('Factory Functions', () => {
   beforeEach(() => {
-    resetRateLimiters();
     mockConfigReturnValue = null;
     __setLoadConfigForTests(() => mockConfigReturnValue as any);
+    resetRateLimiters();
   });
 
   afterEach(() => {
     __setLoadConfigForTests(null);
+    resetRateLimiters();
     setSystemTime();
   });
 
@@ -175,13 +176,14 @@ describe('Factory Functions', () => {
 
 describe('Config Integration', () => {
   beforeEach(() => {
-    resetRateLimiters();
     mockConfigReturnValue = null;
     __setLoadConfigForTests(() => mockConfigReturnValue as any);
+    resetRateLimiters();
   });
 
   afterEach(() => {
     __setLoadConfigForTests(null);
+    resetRateLimiters();
     setSystemTime();
   });
 
