@@ -36,6 +36,7 @@ import {
   type ObservationOutput,
 } from './handlers.js';
 import { allTools } from './tools/index.js';
+import { handleError } from './error.js';
 
 // Re-export schemas for backward compatibility
 export { SearchInputSchema, GetObservationsInputSchema, ReadInputSchema };
@@ -43,15 +44,6 @@ export type { SearchInput, GetObservationsInput, ReadInput };
 
 // Re-export handler types for backward compatibility
 export type { SearchResult, ObservationOutput };
-
-// Error Handling Utility
-
-export function handleError(error: unknown): string {
-  if (error instanceof Error) {
-    return `Error: ${error.message}`;
-  }
-  return `Error: ${String(error)}`;
-}
 
 // Create MCP Server
 

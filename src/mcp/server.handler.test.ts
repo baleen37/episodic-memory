@@ -13,12 +13,12 @@ import {
   handleRead,
 } from './handlers.js';
 import {
-  handleError,
   SearchInputSchema,
   GetObservationsInputSchema,
   ReadInputSchema,
   shouldRunAsEntrypoint,
 } from './server.js';
+import { handleError } from './error.js';
 
 const mockSearch: any = mock(async () => []);
 const mockFindByIds: any = mock(async () => []);
