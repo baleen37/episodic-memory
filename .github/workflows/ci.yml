@@ -22,7 +22,7 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Install native sqlite-vec for Linux
-        run: bun add -d sqlite-vec-linux-x64
+        run: bun add -d sqlite-vec-linux-x64 --ignore-scripts
 
       - name: Type check
         run: bun run typecheck
