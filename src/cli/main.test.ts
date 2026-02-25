@@ -1,34 +1,32 @@
 /**
- * Tests for index-cli.ts - CLI entry point.
+ * Tests for main.ts - CLI entry point.
  *
  * This is the main CLI entry point that:
  * - Shows help when no command or --help is provided
- * - Routes to inject-cli.js for 'inject' command
- * - Routes to observe-cli.js for 'observe' command
+ * - Routes to recall.js for 'recall' command
+ * - Routes to record.js for 'record' command
+ * - Routes to extract.js for 'extract' command
  * - Shows error for unknown commands
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 
-describe('index-cli', () => {
+describe('main', () => {
   let originalArgv: string[];
   let originalExit: (code?: number) => never;
   let consoleLogs: string[];
   let consoleErrors: string[];
 
   beforeEach(() => {
-    // Store original argv and process.exit
     originalArgv = process.argv;
     consoleLogs = [];
     consoleErrors = [];
 
-    // Mock process.exit to capture exit code without actually exiting
     originalExit = process.exit;
     process.exit = mock((code?: number) => {
       throw new Error(`process.exit called with code ${code}`);
     }) as unknown as (code?: number) => never;
 
-    // Mock console.log and console.error
     spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map(String).join(' '));
     });
@@ -38,7 +36,6 @@ describe('index-cli', () => {
   });
 
   afterEach(() => {
-    // Restore original argv and process.exit
     process.argv = originalArgv;
     process.exit = originalExit;
     mock.restore();
@@ -46,79 +43,88 @@ describe('index-cli', () => {
 
   describe('command parsing', () => {
     test('should detect no command when argv length is 2', () => {
-      process.argv = ['node', 'index-cli'];
+      process.argv = ['node', 'main'];
       const command = process.argv[2];
       expect(command).toBeUndefined();
     });
 
     test('should detect --help flag', () => {
-      process.argv = ['node', 'index-cli', '--help'];
+      process.argv = ['node', 'main', '--help'];
       const command = process.argv[2];
       expect(command).toBe('--help');
     });
 
     test('should detect -h flag', () => {
-      process.argv = ['node', 'index-cli', '-h'];
+      process.argv = ['node', 'main', '-h'];
       const command = process.argv[2];
       expect(command).toBe('-h');
     });
 
-    test('should detect inject command', () => {
-      process.argv = ['node', 'index-cli', 'inject'];
+    test('should detect recall command', () => {
+      process.argv = ['node', 'main', 'recall'];
       const command = process.argv[2];
-      expect(command).toBe('inject');
+      expect(command).toBe('recall');
     });
 
-    test('should detect observe command', () => {
-      process.argv = ['node', 'index-cli', 'observe'];
+    test('should detect record command', () => {
+      process.argv = ['node', 'main', 'record'];
       const command = process.argv[2];
-      expect(command).toBe('observe');
+      expect(command).toBe('record');
+    });
+
+    test('should detect extract command', () => {
+      process.argv = ['node', 'main', 'extract'];
+      const command = process.argv[2];
+      expect(command).toBe('extract');
     });
 
     test('should detect unknown command', () => {
-      process.argv = ['node', 'index-cli', 'unknown-command'];
+      process.argv = ['node', 'main', 'unknown-command'];
       const command = process.argv[2];
       expect(command).toBe('unknown-command');
     });
   });
 
   describe('command routing logic', () => {
-    test('should route inject command correctly', () => {
-      const command = 'inject';
-      const shouldRouteToInject = command === 'inject';
-      expect(shouldRouteToInject).toBe(true);
+    test('should route recall command correctly', () => {
+      const command = 'recall';
+      const shouldRouteToRecall = command === 'recall';
+      expect(shouldRouteToRecall).toBe(true);
     });
 
-    test('should route observe command correctly', () => {
-      const command: string = 'observe';
-      const shouldRouteToObserve = command === 'observe';
-      expect(shouldRouteToObserve).toBe(true);
+    test('should route record command correctly', () => {
+      const command = 'record';
+      const shouldRouteToRecord = command === 'record';
+      expect(shouldRouteToRecord).toBe(true);
+    });
+
+    test('should route extract command correctly', () => {
+      const command = 'extract';
+      const shouldRouteToExtract = command === 'extract';
+      expect(shouldRouteToExtract).toBe(true);
     });
 
     test('should identify unknown command', () => {
       const command: string = 'invalid-command';
-      const isKnownCommand = command === 'inject' || command === 'observe';
+      const isKnownCommand = command === 'recall' || command === 'record' || command === 'extract';
       expect(isKnownCommand).toBe(false);
     });
   });
 
   describe('help text content', () => {
     test('should contain CLI title', () => {
-      // The help text is in the source file, verify the expected content
-      const expectedTitle = 'Conversation Memory CLI';
-      expect(expectedTitle).toBe('Conversation Memory CLI');
+      const expectedTitle = 'memmem';
+      expect(expectedTitle).toBe('memmem');
     });
 
     test('should list all commands', () => {
-      // Verify expected command names
-      const expectedCommands = ['inject', 'observe', 'search', 'show', 'stats', 'read'];
+      const expectedCommands = ['recall', 'record', 'extract'];
       expectedCommands.forEach(cmd => {
         expect(typeof cmd).toBe('string');
       });
     });
 
     test('should include environment variables section', () => {
-      // Verify environment variables are documented
       const expectedEnvVars = [
         'CONVERSATION_MEMORY_CONFIG_DIR',
         'CONVERSATION_MEMORY_DB_PATH',

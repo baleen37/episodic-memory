@@ -4,7 +4,7 @@
  * Bundles the MCP server and CLI into standalone files using Bun.build
  */
 
-import { mkdir, copyFile, readFile, writeFile } from "fs/promises";
+import { mkdir, copyFile, writeFile } from "fs/promises";
 import { join } from "path";
 
 const commonConfig = {
@@ -25,7 +25,6 @@ async function buildEntry(entrypoint, outfile) {
   const result = await Bun.build({
     ...commonConfig,
     entrypoints: [entrypoint],
-    outfile,
   });
 
   if (!result.success) {
@@ -35,10 +34,11 @@ async function buildEntry(entrypoint, outfile) {
     throw new Error(`Failed to build ${outfile}`);
   }
 
-  const built = await readFile(outfile, "utf8");
+  let built = await result.outputs[0].text();
   if (!built.startsWith("#!/usr/bin/env node")) {
-    await writeFile(outfile, `#!/usr/bin/env node\n${built}`);
+    built = `#!/usr/bin/env node\n${built}`;
   }
+  await writeFile(outfile, built);
 
   console.log(`✓ Built ${outfile}`);
 }
@@ -47,7 +47,7 @@ async function buildCli() {
   await mkdir("dist", { recursive: true });
 
   try {
-    await buildEntry("src/cli/index-cli.ts", "dist/cli-internal.mjs");
+    await buildEntry("src/cli/main.ts", "dist/cli-internal.mjs");
     await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
     await buildEntry("src/mcp/embedding-worker.ts", "dist/embedding-worker.mjs");
 

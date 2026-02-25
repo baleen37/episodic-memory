@@ -1,5 +1,5 @@
 /**
- * Batch extraction prompt for Stop hook.
+ * Batch extractor for Stop hook.
  *
  * This module provides functions to batch extract observations from tool events
  * using LLM. It's designed to be efficient by processing 10-20 events per batch
@@ -12,9 +12,9 @@ import { logDebug, logInfo, logError } from '../logger.js';
 /**
  * A compressed tool event from pending_events table.
  */
-export interface CompressedEvent {
+export interface EventSummary {
   toolName: string;
-  compressed: string;
+  summary: string;
   timestamp: number;
 }
 
@@ -65,12 +65,12 @@ Response format:
 /**
  * Build a prompt for batch extraction of observations.
  *
- * @param events - Array of compressed tool events (10-20 events)
+ * @param events - Array of event summaries (10-20 events)
  * @param previousObservations - Previous observations for deduplication context (last 3)
  * @returns Formatted prompt for LLM
  */
 export function buildBatchExtractPrompt(
-  events: CompressedEvent[],
+  events: EventSummary[],
   previousObservations: PreviousObservation[]
 ): string {
   let prompt = '';
@@ -88,7 +88,7 @@ export function buildBatchExtractPrompt(
   // Add tool events
   prompt += '<tool_events>\n';
   for (const event of events) {
-    prompt += `[${event.timestamp}] ${event.toolName}: ${event.compressed}\n`;
+    prompt += `[${event.timestamp}] ${event.toolName}: ${event.summary}\n`;
   }
   prompt += '</tool_events>\n\n';
 
@@ -194,18 +194,18 @@ export function parseBatchExtractResponse(response: string): ExtractedObservatio
  * 4. Returns empty array on any error (graceful degradation)
  *
  * @param provider - LLM provider to use for extraction
- * @param events - Array of compressed tool events
+ * @param events - Array of event summaries
  * @param previousObservations - Previous observations for deduplication context
  * @returns Array of extracted observations (empty if LLM fails or returns low-value)
  */
-export async function extractObservationsFromBatch(
+export async function extractFromBatch(
   provider: LLMProvider,
-  events: CompressedEvent[],
+  events: EventSummary[],
   previousObservations: PreviousObservation[]
 ): Promise<ExtractedObservation[]> {
   const startTime = Date.now();
 
-  logDebug('extractObservationsFromBatch: starting batch extraction', {
+  logDebug('extractFromBatch: starting batch extraction', {
     eventsCount: events.length,
     previousObservationsCount: previousObservations.length
   });
@@ -213,7 +213,7 @@ export async function extractObservationsFromBatch(
   try {
     const prompt = buildBatchExtractPrompt(events, previousObservations);
 
-    logDebug('extractObservationsFromBatch: built prompt', {
+    logDebug('extractFromBatch: built prompt', {
       promptLength: prompt.length
     });
 
@@ -225,7 +225,7 @@ export async function extractObservationsFromBatch(
     const extracted = parseBatchExtractResponse(result.text);
     const duration = Date.now() - startTime;
 
-    logInfo('extractObservationsFromBatch: successfully extracted observations', {
+    logInfo('extractFromBatch: successfully extracted observations', {
       extractedCount: extracted.length,
       responseLength: result.text.length,
       duration: `${duration}ms`
@@ -236,7 +236,7 @@ export async function extractObservationsFromBatch(
     const duration = Date.now() - startTime;
     const promptLength = events.length > 0 ? JSON.stringify(events).length : 0;
 
-    logError('extractObservationsFromBatch: batch extraction failed', error, {
+    logError('extractFromBatch: batch extraction failed', error, {
       eventsCount: events.length,
       promptLength,
       duration: `${duration}ms`

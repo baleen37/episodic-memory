@@ -2,26 +2,16 @@
  * Tests for MCP tool handlers
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
   handleGetObservations,
   handleRead,
   type SearchResult,
-  type ObservationOutput
 } from './handlers.js';
 import { initDatabase, insertObservation } from '../core/db.js';
 import { EMBEDDING_DIM } from '../core/constants.js';
-
-// Global mock factory that can be controlled per test
-let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
-
-// Set up top-level mocks
-mock.module('../core/embeddings.js', () => ({
-  initEmbeddings: mock(() => Promise.resolve()),
-  generateEmbedding: mock(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
-}));
 
 describe('handlers', () => {
   let db: Database;
@@ -29,7 +19,13 @@ describe('handlers', () => {
   beforeEach(() => {
     // Use in-memory database for testing
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
+    // Disable embedding worker to avoid socket connection attempts in CI
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     db = initDatabase();
+  });
+
+  afterEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
   });
 
   // Helper to create a EMBEDDING_DIM-dimensional test embedding
@@ -61,8 +57,6 @@ describe('handlers', () => {
 
   describe('handleSearch', () => {
     test('returns empty array when no results', async () => {
-      mockGenerateEmbedding = async () => createTestEmbedding();
-
       const results = await handleSearch(
         { query: 'nonexistent', limit: 10 },
         db,
@@ -81,8 +75,6 @@ describe('handlers', () => {
         project: 'test-project',
         timestamp: 1704067200000
       }, createTestEmbedding(1));
-
-      mockGenerateEmbedding = async () => createTestEmbedding(1);
 
       const results = await handleSearch(
         { query: 'Test', limit: 10 },

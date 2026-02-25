@@ -7,11 +7,12 @@
 
 import type { Database } from 'bun:sqlite';
 import { search } from '../core/search.js';
-import { findByIds as getObservationsByIds } from '../core/observations.js';
+import { getObservationsByIds } from '../core/db.js';
 import { readConversation } from '../core/read.js';
-import type { LLMConfig, LLMProvider } from '../core/llm/index.js';
-import { logDebug } from '../core/logger.js';
 import type { SearchInput, GetObservationsInput, ReadInput } from './schemas.js';
+import { getNormalizerProvider, type LoadConfigFn, type CreateProviderFn } from './normalizer.js';
+
+export type { LoadConfigFn, CreateProviderFn };
 
 // Types for handler outputs
 
@@ -22,88 +23,13 @@ export interface SearchResult {
   timestamp: number;
 }
 
-export interface ObservationOutput {
+interface ObservationOutput {
   id: number;
   title: string;
   content: string;
   project: string;
   timestamp: number;
   content_original?: string;
-}
-
-// Query normalizer types
-
-export type QueryNormalizerConfig = Pick<LLMConfig, 'provider' | 'model' | 'apiKey'>;
-
-export type LoadConfigFn = () => LLMConfig | null;
-export type CreateProviderFn = (config: LLMConfig) => Promise<LLMProvider>;
-
-// Query normalizer cache state
-
-let cachedProvider: LLMProvider | undefined;
-let cachedConfigKey: string | null = null;
-let inFlightProvider: Promise<LLMProvider | undefined> | null = null;
-let inFlightConfigKey: string | null = null;
-
-/**
- * Reset the query normalizer cache. For testing only.
- */
-export function resetQueryNormalizerCache(): void {
-  cachedProvider = undefined;
-  cachedConfigKey = null;
-  inFlightProvider = null;
-  inFlightConfigKey = null;
-}
-
-function getConfigCacheKey(config: QueryNormalizerConfig): string {
-  return JSON.stringify([config.provider, config.model, config.apiKey]);
-}
-
-export async function getQueryNormalizerProvider(
-  loadConfig: LoadConfigFn,
-  createProvider: CreateProviderFn
-): Promise<LLMProvider | undefined> {
-  const config = loadConfig();
-  if (!config) {
-    return undefined;
-  }
-
-  const configKey = getConfigCacheKey(config);
-
-  // Return cached provider if config matches
-  if (cachedProvider && cachedConfigKey === configKey) {
-    return cachedProvider;
-  }
-
-  // Deduplicate concurrent requests with same config
-  if (inFlightProvider && inFlightConfigKey === configKey) {
-    return inFlightProvider;
-  }
-
-  // Create new provider
-  const providerPromise = createProvider(config)
-    .then(provider => {
-      cachedProvider = provider;
-      cachedConfigKey = configKey;
-      return provider;
-    })
-    .catch(error => {
-      logDebug('query-normalizer: unavailable, falling back to original query', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return undefined;
-    })
-    .finally(() => {
-      if (inFlightConfigKey === configKey) {
-        inFlightProvider = null;
-        inFlightConfigKey = null;
-      }
-    });
-
-  inFlightProvider = providerPromise;
-  inFlightConfigKey = configKey;
-
-  return providerPromise;
 }
 
 /**
@@ -146,7 +72,7 @@ export async function handleSearch(
   loadConfig: LoadConfigFn,
   createProvider: CreateProviderFn
 ): Promise<SearchResult[]> {
-  const queryNormalizerProvider = await getQueryNormalizerProvider(loadConfig, createProvider);
+  const queryNormalizerProvider = await getNormalizerProvider(loadConfig, createProvider);
 
   const results = await search(params.query, {
     db,
@@ -175,7 +101,7 @@ export async function handleGetObservations(
     typeof id === 'string' ? parseInt(id, 10) : id
   );
 
-  const observations = await getObservationsByIds(db, numericIds);
+  const observations = getObservationsByIds(db, numericIds);
 
   return observations.map(obs => ({
     id: obs.id,

@@ -98,22 +98,22 @@ describe('hooks.json schema validation', () => {
     // Check that hooks reference the new implementations
     // This is a basic check - the actual CLI commands will be validated separately
 
-    // SessionStart should call inject command
+    // SessionStart should call recall command
     const sessionStartCommands = hooks.hooks.SessionStart.flatMap((group: any) =>
       group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
     );
-    expect(sessionStartCommands.some((cmd: string) => cmd.includes('inject'))).toBe(true);
+    expect(sessionStartCommands.some((cmd: string) => cmd.includes('recall'))).toBe(true);
 
-    // PostToolUse should call observe command (v3)
+    // PostToolUse should call record command
     const postToolUseCommands = hooks.hooks.PostToolUse.flatMap((group: any) =>
       group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
     );
-    expect(postToolUseCommands.some((cmd: string) => cmd.includes('observe'))).toBe(true);
+    expect(postToolUseCommands.some((cmd: string) => cmd.includes('record'))).toBe(true);
 
-    // Stop should call observe command with --summarize flag (v3)
+    // Stop should call extract command
     const stopCommands = hooks.hooks.Stop.flatMap((group: any) =>
       group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
     );
-    expect(stopCommands.some((cmd: string) => cmd.includes('observe') && cmd.includes('--summarize'))).toBe(true);
+    expect(stopCommands.some((cmd: string) => cmd.includes('extract'))).toBe(true);
   });
 });

@@ -2,17 +2,17 @@
  * MCP Server Handler Tests
  *
  * Tests for the exported handler functions from handlers.ts.
- * These tests execute the actual handler code with mocked dependencies.
+ * Uses real in-memory DB to avoid mock.module() cross-file leakage.
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
   handleGetObservations,
   handleRead,
-  resetQueryNormalizerCache,
 } from './handlers.js';
+import { resetNormalizerCache } from './normalizer.js';
 import {
   SearchInputSchema,
   GetObservationsInputSchema,
@@ -20,39 +20,39 @@ import {
   shouldRunAsEntrypoint,
   handleError,
 } from './server.js';
-
-const mockSearch: any = mock(async () => []);
-const mockFindByIds: any = mock(async () => []);
-const mockReadConversation: any = mock(() => null);
-const mockLoadConfig: any = mock(() => null);
-const mockCreateProvider: any = mock(async () => ({ complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })) }));
-
-// Mock the core modules
-mock.module('../core/search.js', () => ({
-  search: mockSearch,
-}));
-
-mock.module('../core/observations.js', () => ({
-  findByIds: mockFindByIds,
-}));
-
-mock.module('../core/read.js', () => ({
-  readConversation: mockReadConversation,
-}));
+import { initDatabase, insertObservation } from '../core/db.js';
 
 describe('MCP Server Handlers', () => {
-  let mockDb: Database;
+  let db: Database;
 
   beforeEach(() => {
-    mockSearch.mockClear();
-    mockFindByIds.mockClear();
-    mockReadConversation.mockClear();
-    mockLoadConfig.mockClear();
-    mockCreateProvider.mockClear();
-    resetQueryNormalizerCache();
-
-    mockDb = {} as Database;
+    process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
+    // Disable embedding worker to avoid socket connection attempts in CI
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    db = initDatabase();
+    resetNormalizerCache();
   });
+
+  afterEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+  });
+
+  function insertTestObs(opts: {
+    title: string;
+    content: string;
+    project: string;
+    timestamp: number;
+    sessionId?: string;
+  }): number {
+    return insertObservation(db, {
+      title: opts.title,
+      content: opts.content,
+      project: opts.project,
+      sessionId: opts.sessionId ?? null,
+      timestamp: opts.timestamp,
+      createdAt: opts.timestamp,
+    });
+  }
 
   describe('entrypoint guard', () => {
     test('shouldRunAsEntrypoint returns a boolean', () => {
@@ -61,140 +61,103 @@ describe('MCP Server Handlers', () => {
   });
 
   describe('handleSearch', () => {
-    test('returns SearchResult[] with valid params', async () => {
-      mockSearch.mockImplementation(async () => [
-        { id: 1, title: 'Test Result', project: 'test-project', timestamp: 1234567890 },
-        { id: 2, title: 'Another Result', project: 'test-project', timestamp: 1234567900 },
-      ]);
-
-      const params = SearchInputSchema.parse({
-        query: 'test query',
-        limit: 10,
-      });
-
-      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
-
-      expect(results).toHaveLength(2);
-      expect(results[0]).toEqual({
-        id: '1',
+    test('returns SearchResult[] with id as string', async () => {
+      insertTestObs({
         title: 'Test Result',
+        content: 'test query content here',
         project: 'test-project',
-        timestamp: 1234567890,
-      });
-    });
-
-    test('passes params correctly to search function', async () => {
-      mockSearch.mockImplementation(async () => []);
-
-      const params = SearchInputSchema.parse({
-        query: 'search term',
-        limit: 25,
-        after: '2024-01-01',
-        before: '2024-12-31',
-        projects: ['project-a', 'project-b'],
-        files: ['/path/to/file.ts'],
+        timestamp: 1234567890000,
       });
 
-      await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
+      const params = SearchInputSchema.parse({ query: 'test query content', limit: 10 });
+      const results = await handleSearch(params, db, () => null, async () => ({ complete: async () => '' }) as any);
 
-      expect(mockSearch).toHaveBeenCalledWith('search term', expect.objectContaining({
-        db: mockDb,
-        limit: 25,
-        after: '2024-01-01',
-        before: '2024-12-31',
-        projects: ['project-a', 'project-b'],
-        files: ['/path/to/file.ts'],
-      }));
-    });
-
-    test('formats results with id as string', async () => {
-      mockSearch.mockImplementation(async () => [
-        { id: 999, title: 'Numeric ID', project: 'p', timestamp: 1 },
-      ]);
-
-      const params = SearchInputSchema.parse({ query: 'test' });
-      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
-
-      expect(results[0].id).toBe('999');
+      expect(results.length).toBeGreaterThan(0);
       expect(typeof results[0].id).toBe('string');
+      expect(results[0]).toHaveProperty('title');
+      expect(results[0]).toHaveProperty('project', 'test-project');
+      expect(results[0]).toHaveProperty('timestamp');
     });
 
     test('returns empty array when no results', async () => {
-      mockSearch.mockImplementation(async () => []);
-
-      const params = SearchInputSchema.parse({ query: 'nonexistent' });
-      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
+      const params = SearchInputSchema.parse({ query: 'absolutely_nonexistent_xyz_query' });
+      const results = await handleSearch(params, db, () => null, async () => ({ complete: async () => '' }) as any);
 
       expect(results).toEqual([]);
     });
 
-    test('uses default limit when not specified', async () => {
-      mockSearch.mockImplementation(async () => []);
+    test('respects project filter', async () => {
+      insertTestObs({ title: 'A', content: 'project filter test', project: 'project-a', timestamp: 1000 });
+      insertTestObs({ title: 'B', content: 'project filter test', project: 'project-b', timestamp: 2000 });
+      insertTestObs({ title: 'C', content: 'project filter test', project: 'project-c', timestamp: 3000 });
 
-      const params = SearchInputSchema.parse({ query: 'test' });
-      await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
+      const params = SearchInputSchema.parse({
+        query: 'project filter test',
+        projects: ['project-a', 'project-b'],
+      });
+      const results = await handleSearch(params, db, () => null, async () => ({ complete: async () => '' }) as any);
 
-      expect(mockSearch).toHaveBeenCalledWith('test', expect.objectContaining({
-        limit: 10,
-      }));
+      expect(results.every(r => ['project-a', 'project-b'].includes(r.project))).toBe(true);
+      expect(results.some(r => r.project === 'project-c')).toBe(false);
+    });
+
+    test('respects limit', async () => {
+      for (let i = 0; i < 15; i++) {
+        insertTestObs({ title: `Obs ${i}`, content: 'limit test content here', project: 'p', timestamp: i * 1000 });
+      }
+
+      const params = SearchInputSchema.parse({ query: 'limit test content', limit: 5 });
+      const results = await handleSearch(params, db, () => null, async () => ({ complete: async () => '' }) as any);
+
+      expect(results.length).toBeLessThanOrEqual(5);
     });
   });
 
   describe('handleGetObservations', () => {
     test('converts string IDs to numbers', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        { id: 1, title: 'Obs 1', content: 'Content 1', project: 'p', sessionId: null, contentOriginal: null, timestamp: 1000 },
-      ]);
+      insertTestObs({ title: 'Obs 1', content: 'Content 1', project: 'p', timestamp: 1000 });
 
-      const params = GetObservationsInputSchema.parse({ ids: ['1', '2'] });
-      const results = await handleGetObservations(params, mockDb);
+      const params = GetObservationsInputSchema.parse({ ids: ['1'] });
+      const results = await handleGetObservations(params, db);
 
-      expect(mockFindByIds).toHaveBeenCalledWith(mockDb, [1, 2]);
       expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('Obs 1');
     });
 
     test('handles numeric IDs directly', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        { id: 10, title: 'Obs 10', content: 'Content 10', project: 'p', sessionId: null, contentOriginal: null, timestamp: 2000 },
-        { id: 20, title: 'Obs 20', content: 'Content 20', project: 'p', sessionId: null, contentOriginal: null, timestamp: 3000 },
-      ]);
+      insertTestObs({ title: 'Obs 1', content: 'Content 1', project: 'p1', timestamp: 1000 });
+      insertTestObs({ title: 'Obs 2', content: 'Content 2', project: 'p2', timestamp: 2000 });
 
-      const params = GetObservationsInputSchema.parse({ ids: [10, 20] });
-      const results = await handleGetObservations(params, mockDb);
+      const params = GetObservationsInputSchema.parse({ ids: [1, 2] });
+      const results = await handleGetObservations(params, db);
 
-      expect(mockFindByIds).toHaveBeenCalledWith(mockDb, [10, 20]);
       expect(results).toHaveLength(2);
     });
 
     test('handles mixed string/number IDs', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        { id: 1, title: 'Obs', content: 'C', project: 'p', sessionId: null, contentOriginal: null, timestamp: 1000 },
-      ]);
+      insertTestObs({ title: 'Obs 1', content: 'C', project: 'p', timestamp: 1000 });
+      insertTestObs({ title: 'Obs 2', content: 'C', project: 'p', timestamp: 2000 });
 
-      const params = GetObservationsInputSchema.parse({ ids: ['1', 2, '3'] });
-      await handleGetObservations(params, mockDb);
+      const params = GetObservationsInputSchema.parse({ ids: ['1', 2] });
+      const results = await handleGetObservations(params, db);
 
-      expect(mockFindByIds).toHaveBeenCalledWith(mockDb, [1, 2, 3]);
+      expect(results).toHaveLength(2);
     });
 
     test('returns observation objects with correct fields', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        {
-          id: 42,
-          title: 'Test Observation',
-          content: 'Full content here',
-          project: 'my-project',
-          sessionId: 'session-123',
-          contentOriginal: null,
-          timestamp: 1704067200000,
-        },
-      ]);
+      const id = insertTestObs({
+        title: 'Test Observation',
+        content: 'Full content here',
+        project: 'my-project',
+        sessionId: 'session-123',
+        timestamp: 1704067200000,
+      });
 
-      const params = GetObservationsInputSchema.parse({ ids: [42] });
-      const results = await handleGetObservations(params, mockDb);
+      const params = GetObservationsInputSchema.parse({ ids: [id] });
+      const results = await handleGetObservations(params, db);
 
-      expect(results[0]).toEqual({
-        id: 42,
+      expect(results[0]).toMatchObject({
+        id,
         title: 'Test Observation',
         content: 'Full content here',
         project: 'my-project',
@@ -203,23 +166,19 @@ describe('MCP Server Handlers', () => {
     });
 
     test('includes content_original when includeOriginal is true', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        {
-          id: 7,
-          title: 'Bilingual observation',
-          content: 'English canonical summary',
-          contentOriginal: '원문 텍스트',
-          project: 'my-project',
-          sessionId: 'session-123',
-          timestamp: 1704067200000,
-        },
-      ]);
+      const id = insertTestObs({
+        title: 'Bilingual observation',
+        content: 'English canonical summary',
+        project: 'my-project',
+        timestamp: 1704067200000,
+      });
+      db.prepare('UPDATE observations SET content_original = ? WHERE id = ?').run('원문 텍스트', id);
 
-      const params = GetObservationsInputSchema.parse({ ids: [7], includeOriginal: true });
-      const results = await handleGetObservations(params, mockDb);
+      const params = GetObservationsInputSchema.parse({ ids: [id], includeOriginal: true });
+      const results = await handleGetObservations(params, db);
 
-      expect(results[0]).toEqual({
-        id: 7,
+      expect(results[0]).toMatchObject({
+        id,
         title: 'Bilingual observation',
         content: 'English canonical summary',
         content_original: '원문 텍스트',
@@ -229,171 +188,137 @@ describe('MCP Server Handlers', () => {
     });
 
     test('returns empty results when no observations found', async () => {
-      mockFindByIds.mockImplementation(async () => []);
-
       const params = GetObservationsInputSchema.parse({ ids: [999] });
-      const results = await handleGetObservations(params, mockDb);
+      const results = await handleGetObservations(params, db);
 
       expect(results).toEqual([]);
     });
 
     test('handles multiple observations', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        { id: 1, title: 'First', content: 'C1', project: 'p1', sessionId: null, contentOriginal: null, timestamp: 1000 },
-        { id: 2, title: 'Second', content: 'C2', project: 'p2', sessionId: null, contentOriginal: null, timestamp: 2000 },
-        { id: 3, title: 'Third', content: 'C3', project: 'p3', sessionId: null, contentOriginal: null, timestamp: 3000 },
-      ]);
+      insertTestObs({ title: 'First', content: 'C1', project: 'p1', timestamp: 1000 });
+      insertTestObs({ title: 'Second', content: 'C2', project: 'p2', timestamp: 2000 });
+      insertTestObs({ title: 'Third', content: 'C3', project: 'p3', timestamp: 3000 });
 
       const params = GetObservationsInputSchema.parse({ ids: [1, 2, 3] });
-      const results = await handleGetObservations(params, mockDb);
+      const results = await handleGetObservations(params, db);
 
       expect(results).toHaveLength(3);
-      expect(results.map(r => r.id)).toEqual([1, 2, 3]);
+      // getObservationsByIds orders by timestamp DESC; verify all IDs present
+      expect(results.map(r => r.id).sort((a, b) => a - b)).toEqual([1, 2, 3]);
     });
 
     test('does not include content_original by default', async () => {
-      mockFindByIds.mockImplementation(async () => [
-        {
-          id: 8,
-          title: 'Default output',
-          content: 'English summary',
-          contentOriginal: '원문 텍스트',
-          project: 'my-project',
-          sessionId: null,
-          timestamp: 1704067200000,
-        },
-      ]);
-
-      const params = GetObservationsInputSchema.parse({ ids: [8] });
-      const results = await handleGetObservations(params, mockDb);
-
-      expect(results[0]).toEqual({
-        id: 8,
+      const id = insertTestObs({
         title: 'Default output',
         content: 'English summary',
         project: 'my-project',
         timestamp: 1704067200000,
       });
+      db.prepare('UPDATE observations SET content_original = ? WHERE id = ?').run('원문 텍스트', id);
+
+      const params = GetObservationsInputSchema.parse({ ids: [id] });
+      const results = await handleGetObservations(params, db);
+
       expect(results[0]).not.toHaveProperty('content_original');
     });
   });
 
   describe('handleRead', () => {
-    test('returns content for valid path', () => {
-      mockReadConversation.mockImplementation(() => '# Conversation\n\nTest content');
+    test('returns content for valid path', async () => {
+      const tempPath = `/tmp/test-read-handler-${Date.now()}.jsonl`;
+      await Bun.write(tempPath, JSON.stringify({
+        uuid: '1',
+        type: 'user',
+        timestamp: '2024-01-01T00:00:00Z',
+        message: { role: 'user', content: 'Test content' },
+      }) + '\n');
 
-      const params = ReadInputSchema.parse({ path: '/valid/path.jsonl' });
-      const result = handleRead(params);
-
-      expect(result).toBe('# Conversation\n\nTest content');
-      expect(mockReadConversation).toHaveBeenCalledWith('/valid/path.jsonl', undefined, undefined);
-    });
-
-    test('passes pagination params (startLine, endLine)', () => {
-      mockReadConversation.mockImplementation(() => '# Page content');
-
-      const params = ReadInputSchema.parse({
-        path: '/file.jsonl',
-        startLine: 10,
-        endLine: 50,
-      });
-      const result = handleRead(params);
-
-      expect(mockReadConversation).toHaveBeenCalledWith('/file.jsonl', 10, 50);
-      expect(result).toBe('# Page content');
+      try {
+        const params = ReadInputSchema.parse({ path: tempPath });
+        const result = handleRead(params);
+        expect(typeof result).toBe('string');
+      } finally {
+        await Bun.file(tempPath).delete();
+      }
     });
 
     test('throws error when file not found', () => {
-      mockReadConversation.mockImplementation(() => null);
-
       const params = ReadInputSchema.parse({ path: '/nonexistent.jsonl' });
-
       expect(() => handleRead(params)).toThrow('File not found: /nonexistent.jsonl');
     });
 
-    test('handles startLine only', () => {
-      mockReadConversation.mockImplementation(() => '# From line 10');
+    test('accepts startLine param', async () => {
+      const lines = Array.from({ length: 5 }, (_, i) => JSON.stringify({
+        uuid: String(i + 1),
+        type: 'user',
+        timestamp: '2024-01-01T00:00:00Z',
+        message: { role: 'user', content: `Message ${i + 1}` },
+      }));
+      const tempPath = `/tmp/test-startline-${Date.now()}.jsonl`;
+      await Bun.write(tempPath, lines.join('\n') + '\n');
 
-      const params = ReadInputSchema.parse({
-        path: '/file.jsonl',
-        startLine: 10,
-      });
-      handleRead(params);
-
-      expect(mockReadConversation).toHaveBeenCalledWith('/file.jsonl', 10, undefined);
+      try {
+        const params = ReadInputSchema.parse({ path: tempPath, startLine: 1 });
+        const result = handleRead(params);
+        expect(typeof result).toBe('string');
+      } finally {
+        await Bun.file(tempPath).delete();
+      }
     });
 
-    test('handles endLine only', () => {
-      mockReadConversation.mockImplementation(() => '# Until line 50');
+    test('accepts endLine param', async () => {
+      const lines = Array.from({ length: 5 }, (_, i) => JSON.stringify({
+        uuid: String(i + 1),
+        type: 'user',
+        timestamp: '2024-01-01T00:00:00Z',
+        message: { role: 'user', content: `Message ${i + 1}` },
+      }));
+      const tempPath = `/tmp/test-endline-${Date.now()}.jsonl`;
+      await Bun.write(tempPath, lines.join('\n') + '\n');
 
-      const params = ReadInputSchema.parse({
-        path: '/file.jsonl',
-        endLine: 50,
-      });
-      handleRead(params);
-
-      expect(mockReadConversation).toHaveBeenCalledWith('/file.jsonl', undefined, 50);
-    });
-
-    test('propagates empty string result', () => {
-      mockReadConversation.mockImplementation(() => '');
-
-      const params = ReadInputSchema.parse({ path: '/empty.jsonl' });
-      const result = handleRead(params);
-
-      expect(result).toBe('');
+      try {
+        const params = ReadInputSchema.parse({ path: tempPath, endLine: 3 });
+        const result = handleRead(params);
+        expect(typeof result).toBe('string');
+      } finally {
+        await Bun.file(tempPath).delete();
+      }
     });
   });
 
   describe('handleError', () => {
     test('formats Error instance', () => {
       const error = new Error('Something went wrong');
-      const result = handleError(error);
-
-      expect(result).toBe('Error: Something went wrong');
+      expect(handleError(error)).toBe('Error: Something went wrong');
     });
 
     test('formats string error', () => {
-      const result = handleError('Simple error message');
-
-      expect(result).toBe('Error: Simple error message');
+      expect(handleError('Simple error message')).toBe('Error: Simple error message');
     });
 
     test('formats number error', () => {
-      const result = handleError(404);
-
-      expect(result).toBe('Error: 404');
+      expect(handleError(404)).toBe('Error: 404');
     });
 
     test('formats object error', () => {
-      const result = handleError({ code: 'ERR_INVALID' });
-
-      expect(result).toBe('Error: [object Object]');
+      expect(handleError({ code: 'ERR_INVALID' })).toBe('Error: [object Object]');
     });
 
     test('formats null error', () => {
-      const result = handleError(null);
-
-      expect(result).toBe('Error: null');
+      expect(handleError(null)).toBe('Error: null');
     });
 
     test('formats undefined error', () => {
-      const result = handleError(undefined);
-
-      expect(result).toBe('Error: undefined');
+      expect(handleError(undefined)).toBe('Error: undefined');
     });
 
     test('formats array error', () => {
-      const result = handleError(['error1', 'error2']);
-
-      expect(result).toBe('Error: error1,error2');
+      expect(handleError(['error1', 'error2'])).toBe('Error: error1,error2');
     });
 
     test('preserves Error message with colon', () => {
       const error = new Error('Validation failed: field is required');
-      const result = handleError(error);
-
-      expect(result).toBe('Error: Validation failed: field is required');
+      expect(handleError(error)).toBe('Error: Validation failed: field is required');
     });
   });
 });

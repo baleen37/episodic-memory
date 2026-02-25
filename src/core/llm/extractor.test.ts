@@ -1,11 +1,11 @@
 /**
- * Tests for batch-extract-prompt
+ * Tests for extractor
  *
  * These tests use mocking to avoid actual API calls while verifying correct behavior.
  */
 
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { buildBatchExtractPrompt, parseBatchExtractResponse, extractObservationsFromBatch } from './batch-extract-prompt.js';
+import { buildBatchExtractPrompt, parseBatchExtractResponse, extractFromBatch } from './extractor.js';
 import type { LLMProvider } from './types.js';
 
 // Mock the LLM provider
@@ -13,7 +13,7 @@ const mockLLMProvider = {
   complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })),
 } as unknown as LLMProvider;
 
-describe('batch-extract-prompt', () => {
+describe('extractor', () => {
   beforeEach(() => {
     // Reset mock
     mockLLMProvider.complete = mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } }));
@@ -22,8 +22,8 @@ describe('batch-extract-prompt', () => {
   describe('buildBatchExtractPrompt', () => {
     it('should build prompt with events and previous observations', () => {
       const events = [
-        { toolName: 'Read', compressed: 'Read /src/auth.ts (245 lines)', timestamp: 1234567890 },
-        { toolName: 'Edit', compressed: 'Edited /src/auth.ts: const auth = true → const auth = false', timestamp: 1234567891 },
+        { toolName: 'Read', summary: 'Read /src/auth.ts (245 lines)', timestamp: 1234567890 },
+        { toolName: 'Edit', summary: 'Edited /src/auth.ts: const auth = true → const auth = false', timestamp: 1234567891 },
       ];
 
       const previousObservations = [
@@ -44,7 +44,7 @@ describe('batch-extract-prompt', () => {
 
     it('should build prompt without previous observations when none provided', () => {
       const events = [
-        { toolName: 'Bash', compressed: 'Ran `npm test` → exit 0', timestamp: 1234567890 },
+        { toolName: 'Bash', summary: 'Ran `npm test` → exit 0', timestamp: 1234567890 },
       ];
 
       const prompt = buildBatchExtractPrompt(events, []);
@@ -56,7 +56,7 @@ describe('batch-extract-prompt', () => {
 
     it('should include instructions to return empty array for low-value batches', () => {
       const events = [
-        { toolName: 'Read', compressed: 'Read package.json', timestamp: 1234567890 },
+        { toolName: 'Read', summary: 'Read package.json', timestamp: 1234567890 },
       ];
 
       const prompt = buildBatchExtractPrompt(events, []);
@@ -66,7 +66,7 @@ describe('batch-extract-prompt', () => {
     });
 
     it('should limit previous observations to last 3', () => {
-      const events = [{ toolName: 'Write', compressed: 'Created test.ts', timestamp: 1234567890 }];
+      const events = [{ toolName: 'Write', summary: 'Created test.ts', timestamp: 1234567890 }];
 
       const previousObservations = [
         { title: 'Obs 1', content: 'Content 1' },
@@ -180,7 +180,7 @@ describe('batch-extract-prompt', () => {
     });
   });
 
-  describe('extractObservationsFromBatch', () => {
+  describe('extractFromBatch', () => {
     it('should call LLM provider with built prompt', async () => {
       const mockComplete = mock(async () => ({
         text: JSON.stringify([{ title: 'Test', content: 'Content' }]),
@@ -190,12 +190,12 @@ describe('batch-extract-prompt', () => {
       mockLLMProvider.complete = mockComplete;
 
       const events = [
-        { toolName: 'Read', compressed: 'Read file.ts', timestamp: 1234567890 },
+        { toolName: 'Read', summary: 'Read file.ts', timestamp: 1234567890 },
       ];
 
       const previousObservations = [{ title: 'Previous', content: 'Previous content' }];
 
-      const result = await extractObservationsFromBatch(
+      const result = await extractFromBatch(
         mockLLMProvider,
         events,
         previousObservations
@@ -227,9 +227,9 @@ describe('batch-extract-prompt', () => {
 
       mockLLMProvider.complete = mockComplete;
 
-      const events = [{ toolName: 'Bash', compressed: 'Ran echo test', timestamp: 1234567890 }];
+      const events = [{ toolName: 'Bash', summary: 'Ran echo test', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -239,9 +239,9 @@ describe('batch-extract-prompt', () => {
 
       mockLLMProvider.complete = mockComplete;
 
-      const events = [{ toolName: 'Read', compressed: 'Read file', timestamp: 1234567890 }];
+      const events = [{ toolName: 'Read', summary: 'Read file', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -254,9 +254,9 @@ describe('batch-extract-prompt', () => {
 
       mockLLMProvider.complete = mockComplete;
 
-      const events = [{ toolName: 'Edit', compressed: 'Edited file', timestamp: 1234567890 }];
+      const events = [{ toolName: 'Edit', summary: 'Edited file', timestamp: 1234567890 }];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });
@@ -269,9 +269,9 @@ describe('batch-extract-prompt', () => {
 
       mockLLMProvider.complete = mockComplete;
 
-      const events = [{ toolName: 'Write', compressed: 'Created file', timestamp: 1234567890 }];
+      const events = [{ toolName: 'Write', summary: 'Created file', timestamp: 1234567890 }];
 
-      await extractObservationsFromBatch(mockLLMProvider, events, []);
+      await extractFromBatch(mockLLMProvider, events, []);
 
       expect(mockComplete).toHaveBeenCalledWith(
         expect.any(String),
@@ -301,18 +301,18 @@ describe('batch-extract-prompt', () => {
       mockLLMProvider.complete = mockComplete;
 
       const events = [
-        { toolName: 'Read', compressed: 'Read /src/auth/login.ts', timestamp: 1234567890 },
-        { toolName: 'Edit', compressed: 'Edited /src/auth/login.ts: added JWT verify', timestamp: 1234567891 },
-        { toolName: 'Bash', compressed: 'Ran `npm test` → exit 0', timestamp: 1234567892 },
-        { toolName: 'Read', compressed: 'Read /src/event/handler.ts', timestamp: 1234567893 },
-        { toolName: 'Edit', compressed: 'Edited /src/event/handler.ts: fixed cleanup', timestamp: 1234567894 },
+        { toolName: 'Read', summary: 'Read /src/auth/login.ts', timestamp: 1234567890 },
+        { toolName: 'Edit', summary: 'Edited /src/auth/login.ts: added JWT verify', timestamp: 1234567891 },
+        { toolName: 'Bash', summary: 'Ran `npm test` → exit 0', timestamp: 1234567892 },
+        { toolName: 'Read', summary: 'Read /src/event/handler.ts', timestamp: 1234567893 },
+        { toolName: 'Edit', summary: 'Edited /src/event/handler.ts: fixed cleanup', timestamp: 1234567894 },
       ];
 
       const previousObservations = [
         { title: 'Started auth implementation', content: 'Began work on authentication system' },
       ];
 
-      const result = await extractObservationsFromBatch(
+      const result = await extractFromBatch(
         mockLLMProvider,
         events,
         previousObservations
@@ -332,11 +332,11 @@ describe('batch-extract-prompt', () => {
       mockLLMProvider.complete = mockComplete;
 
       const events = [
-        { toolName: 'Bash', compressed: 'Ran `git status`', timestamp: 1234567890 },
-        { toolName: 'Bash', compressed: 'Ran `ls -la`', timestamp: 1234567891 },
+        { toolName: 'Bash', summary: 'Ran `git status`', timestamp: 1234567890 },
+        { toolName: 'Bash', summary: 'Ran `ls -la`', timestamp: 1234567891 },
       ];
 
-      const result = await extractObservationsFromBatch(mockLLMProvider, events, []);
+      const result = await extractFromBatch(mockLLMProvider, events, []);
 
       expect(result).toEqual([]);
     });

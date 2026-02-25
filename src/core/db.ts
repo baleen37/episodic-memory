@@ -20,6 +20,7 @@ import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
+import { generateEmbedding, initEmbeddings } from './embeddings.js';
 
 // macOS: Apple's default SQLite disables extensions; use Homebrew SQLite
 // Only set custom SQLite in production, not in test environment
@@ -34,26 +35,16 @@ if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV 
   }
 }
 
-export interface PendingEvent {
+export interface BufferedEvent {
   sessionId: string;
   project: string;
   toolName: string;
-  compressed: string;
+  summary: string;
   timestamp: number;
   createdAt: number;
 }
 
 export interface Observation {
-  title: string;
-  content: string;
-  contentOriginal?: string | null;
-  project: string;
-  sessionId?: string;
-  timestamp: number;
-  createdAt: number;
-}
-
-export interface ObservationResult {
   id: number;
   title: string;
   content: string;
@@ -62,6 +53,12 @@ export interface ObservationResult {
   sessionId: string | null;
   timestamp: number;
   createdAt: number;
+}
+
+interface RecentObservationsOptions {
+  project?: string;
+  after?: number;
+  limit?: number;
 }
 
 interface SearchOptions {
@@ -127,7 +124,7 @@ function createDatabase(wipe: boolean): Database {
         session_id TEXT NOT NULL,
         project TEXT NOT NULL,
         tool_name TEXT NOT NULL,
-        compressed TEXT NOT NULL,
+        summary TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         created_at INTEGER NOT NULL
       )
@@ -168,6 +165,15 @@ function createDatabase(wipe: boolean): Database {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
 
+  // Migrate pending_events: rename compressed → summary
+  const pendingColumns = db.query(`
+    SELECT name FROM pragma_table_info('pending_events')
+  `).all() as Array<{ name: string }>;
+  const hasCompressed = pendingColumns.some(c => c.name === 'compressed');
+  if (hasCompressed) {
+    db.exec('ALTER TABLE pending_events RENAME COLUMN compressed TO summary');
+  }
+
   // Create vector table if not exists
   if (!tableNames.has('vec_observations')) {
     db.exec(`
@@ -182,20 +188,20 @@ function createDatabase(wipe: boolean): Database {
 }
 
 /**
- * Insert a pending event into the database
+ * Insert a buffered event into the database
  */
-export function insertPendingEvent(
+export function insertBufferedEvent(
   db: Database,
-  event: PendingEvent
+  event: BufferedEvent
 ): number {
   const result = db.query(`
-    INSERT INTO pending_events (session_id, project, tool_name, compressed, timestamp, created_at)
+    INSERT INTO pending_events (session_id, project, tool_name, summary, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     event.sessionId,
     event.project,
     event.toolName,
-    event.compressed,
+    event.summary,
     event.timestamp,
     event.createdAt
   );
@@ -204,12 +210,15 @@ export function insertPendingEvent(
 }
 
 /**
- * Insert an observation into the database
- * Optionally includes vector embedding for semantic search
+ * Insert an observation into the database.
+ * Optionally includes vector embedding for semantic search.
  */
 export function insertObservation(
   db: Database,
-  observation: Observation,
+  observation: Omit<Observation, 'id' | 'contentOriginal' | 'sessionId'> & {
+    contentOriginal?: string | null;
+    sessionId?: string | null;
+  },
   embedding?: number[]
 ): number {
   // Insert into main table
@@ -241,28 +250,96 @@ export function insertObservation(
 }
 
 /**
- * Get all pending events for a session (no limit).
- * Used by Stop hook for batch extraction.
+ * Create a new observation with embedding.
+ *
+ * Generates an embedding from title + content and stores both
+ * the observation and its vector in the database.
  */
-export function getAllPendingEvents(
+export async function createObservation(
   db: Database,
-  sessionId: string
-): Array<PendingEvent & { id: number }> {
-  return db.query(`
-    SELECT id, session_id as sessionId, project, tool_name as toolName, compressed, timestamp, created_at as createdAt
-    FROM pending_events
-    WHERE session_id = ?
-    ORDER BY created_at ASC
-  `).all(sessionId) as Array<PendingEvent & { id: number }>;
+  title: string,
+  content: string,
+  project: string,
+  sessionId?: string,
+  timestamp?: number,
+  contentOriginal?: string
+): Promise<number> {
+  const now = Date.now();
+  const observation: Omit<Observation, 'id'> = {
+    title,
+    content,
+    contentOriginal: contentOriginal ?? null,
+    project,
+    sessionId: sessionId ?? null,
+    timestamp: timestamp ?? now,
+    createdAt: now,
+  };
+
+  await initEmbeddings();
+  const embedding = await generateEmbedding(`${title}\n${content}`);
+
+  return insertObservation(db, observation, embedding ?? undefined);
 }
 
 /**
- * Search observations with filters
+ * Get all buffered events for a session (no limit).
+ * Used by Stop hook for batch extraction.
+ */
+export function getAllBufferedEvents(
+  db: Database,
+  sessionId: string
+): Array<BufferedEvent & { id: number }> {
+  return db.query(`
+    SELECT id, session_id as sessionId, project, tool_name as toolName,
+           summary, timestamp, created_at as createdAt
+    FROM pending_events
+    WHERE session_id = ?
+    ORDER BY created_at ASC
+  `).all(sessionId) as Array<BufferedEvent & { id: number }>;
+}
+
+/**
+ * Get recent observations with optional filters.
+ * Used by SessionStart hook to load recent context.
+ */
+export function getRecentObservations(
+  db: Database,
+  options: RecentObservationsOptions = {}
+): Observation[] {
+  const { project, after, limit = 100 } = options;
+
+  const params: any[] = [];
+
+  let sql = `
+    SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
+    FROM observations
+    WHERE 1=1
+  `;
+
+  if (project) {
+    sql += ' AND project = ?';
+    params.push(project);
+  }
+
+  if (after) {
+    sql += ' AND timestamp >= ?';
+    params.push(after);
+  }
+
+  sql += ' ORDER BY timestamp DESC LIMIT ?';
+  params.push(limit);
+
+  return db.query(sql).all(...params) as Observation[];
+}
+
+/**
+ * Search observations with filters.
+ * Used by db.test.ts for backward compatibility.
  */
 export function searchObservations(
   db: Database,
   options: SearchOptions = {}
-): ObservationResult[] {
+): Observation[] {
   const { project, sessionId, after, before, limit = 100 } = options;
 
   const params: any[] = [];
@@ -297,21 +374,46 @@ export function searchObservations(
   sql += ' ORDER BY timestamp DESC LIMIT ?';
   params.push(limit);
 
-  return db.query(sql).all(...params) as ObservationResult[];
+  return db.query(sql).all(...params) as Observation[];
 }
 
 /**
- * Get a single observation by ID
+ * Get a single observation by ID.
  */
-export function getObservation(
+export function getObservationById(
   db: Database,
   id: number
-): ObservationResult | null {
+): Observation | null {
   const result = db.query(`
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
     FROM observations
     WHERE id = ?
-  `).get(id) as ObservationResult | undefined;
+  `).get(id) as Observation | undefined;
 
   return result ?? null;
+}
+
+/**
+ * Get a single observation by ID.
+ * @deprecated Use getObservationById instead.
+ */
+export function getObservation(
+  db: Database,
+  id: number
+): Observation | null {
+  return getObservationById(db, id);
+}
+
+/**
+ * Find multiple observations by IDs.
+ */
+export function getObservationsByIds(db: Database, ids: number[]): Observation[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return db.query(`
+    SELECT id, title, content, content_original as contentOriginal,
+           project, session_id as sessionId, timestamp, created_at as createdAt
+    FROM observations WHERE id IN (${placeholders})
+    ORDER BY timestamp DESC
+  `).all(...ids) as Observation[];
 }

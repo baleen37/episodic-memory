@@ -1,5 +1,5 @@
 /**
- * Integration tests for observe-cli session_id handling.
+ * Integration tests for record.ts session_id handling.
  *
  * These tests run the actual CLI binary to verify that session_id from stdin
  * JSON is used when environment variables are not set.
@@ -15,12 +15,11 @@ import { initDatabase } from '../core/db.js';
 
 const CLI_PATH = new URL('../../dist/cli.mjs', import.meta.url).pathname;
 
-describe('observe-cli session_id integration', () => {
+describe('record session_id integration', () => {
   let dbPath: string;
   let tempDir: string;
 
   beforeAll(() => {
-    // Debug: verify CLI exists
     if (!fs.existsSync(CLI_PATH)) {
       throw new Error(`CLI not found at ${CLI_PATH}. Run 'npm run build' first.`);
     }
@@ -29,7 +28,6 @@ describe('observe-cli session_id integration', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memmem-test-'));
     dbPath = path.join(tempDir, 'conversations.db');
-    // Set env vars BEFORE calling initDatabase so it uses our test path
     process.env.CONVERSATION_MEMORY_DB_PATH = dbPath;
     process.env.MEMMEM_DB_PATH = dbPath;
     const db = initDatabase();
@@ -51,20 +49,18 @@ describe('observe-cli session_id integration', () => {
       session_id: sessionId,
     });
 
-    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'record'], {
       input: stdinPayload,
       env: {
         ...process.env,
         CONVERSATION_MEMORY_DB_PATH: dbPath,
         MEMMEM_DB_PATH: dbPath,
-        // Explicitly unset session env vars
         CLAUDE_SESSION_ID: undefined,
         CLAUDE_SESSION: undefined,
       },
       encoding: 'utf8',
     });
 
-    // Debug: always log CLI output
     console.log('CLI stdout:', result.stdout);
     console.log('CLI stderr:', result.stderr);
     console.log('CLI status:', result.status);
@@ -90,7 +86,7 @@ describe('observe-cli session_id integration', () => {
       session_id: 'real-session-xyz',
     });
 
-    const result = spawnSync('bun', [CLI_PATH, 'observe'], {
+    const result = spawnSync('bun', [CLI_PATH, 'record'], {
       input: stdinPayload,
       env: {
         ...process.env,
@@ -102,7 +98,6 @@ describe('observe-cli session_id integration', () => {
       encoding: 'utf8',
     });
 
-    // Debug: always log CLI output
     console.log('CLI stdout:', result.stdout);
     console.log('CLI stderr:', result.stderr);
     console.log('CLI status:', result.status);
