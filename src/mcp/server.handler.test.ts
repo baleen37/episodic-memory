@@ -1,7 +1,7 @@
 /**
  * MCP Server Handler Tests
  *
- * Tests for the exported handler functions in server.ts.
+ * Tests for the exported handler functions from handlers.ts.
  * These tests execute the actual handler code with mocked dependencies.
  */
 
@@ -11,14 +11,14 @@ import {
   handleSearch,
   handleGetObservations,
   handleRead,
+} from './handlers.js';
+import {
   handleError,
   SearchInputSchema,
   GetObservationsInputSchema,
   ReadInputSchema,
-  __setServerHandlerDepsForTests,
   shouldRunAsEntrypoint,
 } from './server.js';
-import { resetQueryNormalizerCache } from './query-normalizer.js';
 
 const mockSearch: any = mock(async () => []);
 const mockFindByIds: any = mock(async () => []);
@@ -26,19 +26,28 @@ const mockReadConversation: any = mock(() => null);
 const mockLoadConfig: any = mock(() => null);
 const mockCreateProvider: any = mock(async () => ({ complete: mock(async () => ({ text: '', usage: { input_tokens: 0, output_tokens: 0 } })) }));
 
+// Mock the core modules
+mock.module('../core/search.js', () => ({
+  search: mockSearch,
+}));
+
+mock.module('../core/observations.js', () => ({
+  findByIds: mockFindByIds,
+}));
+
+mock.module('../core/read.js', () => ({
+  readConversation: mockReadConversation,
+}));
+
+mock.module('./query-normalizer.js', () => ({
+  getQueryNormalizerProvider: mock(async () => null),
+  resetQueryNormalizerCache: mock(() => {}),
+}));
+
 describe('MCP Server Handlers', () => {
   let mockDb: Database;
 
   beforeEach(() => {
-    resetQueryNormalizerCache();
-    __setServerHandlerDepsForTests({
-      searchFn: mockSearch as any,
-      findByIdsFn: mockFindByIds as any,
-      readConversationFn: mockReadConversation as any,
-      loadConfigFn: mockLoadConfig as any,
-      createProviderFn: mockCreateProvider as any,
-    });
-
     mockSearch.mockClear();
     mockFindByIds.mockClear();
     mockReadConversation.mockClear();
@@ -66,7 +75,7 @@ describe('MCP Server Handlers', () => {
         limit: 10,
       });
 
-      const results = await handleSearch(params, mockDb);
+      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
 
       expect(results).toHaveLength(2);
       expect(results[0]).toEqual({
@@ -89,7 +98,7 @@ describe('MCP Server Handlers', () => {
         files: ['/path/to/file.ts'],
       });
 
-      await handleSearch(params, mockDb);
+      await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
 
       expect(mockSearch).toHaveBeenCalledWith('search term', expect.objectContaining({
         db: mockDb,
@@ -107,7 +116,7 @@ describe('MCP Server Handlers', () => {
       ]);
 
       const params = SearchInputSchema.parse({ query: 'test' });
-      const results = await handleSearch(params, mockDb);
+      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
 
       expect(results[0].id).toBe('999');
       expect(typeof results[0].id).toBe('string');
@@ -117,7 +126,7 @@ describe('MCP Server Handlers', () => {
       mockSearch.mockImplementation(async () => []);
 
       const params = SearchInputSchema.parse({ query: 'nonexistent' });
-      const results = await handleSearch(params, mockDb);
+      const results = await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
 
       expect(results).toEqual([]);
     });
@@ -126,7 +135,7 @@ describe('MCP Server Handlers', () => {
       mockSearch.mockImplementation(async () => []);
 
       const params = SearchInputSchema.parse({ query: 'test' });
-      await handleSearch(params, mockDb);
+      await handleSearch(params, mockDb, mockLoadConfig, mockCreateProvider);
 
       expect(mockSearch).toHaveBeenCalledWith('test', expect.objectContaining({
         limit: 10,

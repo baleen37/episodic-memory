@@ -18,16 +18,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import type { Database } from 'bun:sqlite';
-import { search } from '../core/search.js';
-import { findByIds as getObservationsByIds } from '../core/observations.js';
-import { readConversation } from '../core/read.js';
 import { openDatabase } from '../core/db.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
-import {
-  getQueryNormalizerProvider,
-  resetQueryNormalizerCache,
-} from './query-normalizer.js';
 import {
   SearchInputSchema,
   GetObservationsInputSchema,
@@ -36,10 +28,20 @@ import {
   type GetObservationsInput,
   type ReadInput,
 } from './schemas.js';
+import {
+  handleSearch,
+  handleGetObservations,
+  handleRead,
+  type SearchResult,
+  type ObservationOutput,
+} from './handlers.js';
 
 // Re-export schemas for backward compatibility
 export { SearchInputSchema, GetObservationsInputSchema, ReadInputSchema };
 export type { SearchInput, GetObservationsInput, ReadInput };
+
+// Re-export handler types for backward compatibility
+export type { SearchResult, ObservationOutput };
 
 // Error Handling Utility
 
@@ -48,103 +50,6 @@ export function handleError(error: unknown): string {
     return `Error: ${error.message}`;
   }
   return `Error: ${String(error)}`;
-}
-
-// Handler Functions (exported for testing)
-
-export interface SearchResult {
-  id: string;
-  title: string;
-  project: string;
-  timestamp: number;
-}
-
-type ServerHandlerDeps = {
-  searchFn: typeof search;
-  findByIdsFn: typeof getObservationsByIds;
-  readConversationFn: typeof readConversation;
-  loadConfigFn: typeof loadConfig;
-  createProviderFn: typeof createProvider;
-};
-
-const defaultServerHandlerDeps: ServerHandlerDeps = {
-  searchFn: search,
-  findByIdsFn: getObservationsByIds,
-  readConversationFn: readConversation,
-  loadConfigFn: loadConfig,
-  createProviderFn: createProvider,
-};
-
-let serverHandlerDeps: ServerHandlerDeps = defaultServerHandlerDeps;
-
-export function __setServerHandlerDepsForTests(deps: Partial<ServerHandlerDeps> | null): void {
-  serverHandlerDeps = deps ? { ...defaultServerHandlerDeps, ...deps } : defaultServerHandlerDeps;
-  resetQueryNormalizerCache();
-}
-
-export async function handleSearch(
-  params: SearchInput,
-  db: Database
-): Promise<SearchResult[]> {
-  const queryNormalizerProvider = await getQueryNormalizerProvider(
-    serverHandlerDeps.loadConfigFn,
-    serverHandlerDeps.createProviderFn
-  );
-
-  const results = await serverHandlerDeps.searchFn(params.query, {
-    db,
-    limit: params.limit,
-    after: params.after,
-    before: params.before,
-    projects: params.projects,
-    files: params.files,
-    queryNormalizerProvider,
-  });
-
-  return results.map(r => ({
-    id: String(r.id),
-    title: r.title,
-    project: r.project,
-    timestamp: r.timestamp,
-  }));
-}
-
-export interface ObservationOutput {
-  id: number;
-  title: string;
-  content: string;
-  project: string;
-  timestamp: number;
-  content_original?: string;
-}
-
-export async function handleGetObservations(
-  params: GetObservationsInput,
-  db: Database
-): Promise<ObservationOutput[]> {
-  // Convert string IDs to numbers
-  const numericIds = params.ids.map(id =>
-    typeof id === 'string' ? parseInt(id, 10) : id
-  );
-
-  const observations = await serverHandlerDeps.findByIdsFn(db, numericIds);
-
-  return observations.map(obs => ({
-    id: obs.id,
-    title: obs.title,
-    content: obs.content,
-    project: obs.project,
-    timestamp: obs.timestamp,
-    ...(params.includeOriginal && obs.contentOriginal ? { content_original: obs.contentOriginal } : {}),
-  }));
-}
-
-export function handleRead(params: ReadInput): string {
-  const result = serverHandlerDeps.readConversationFn(params.path, params.startLine, params.endLine);
-  if (result === null) {
-    throw new Error(`File not found: ${params.path}`);
-  }
-  return result;
 }
 
 // Create MCP Server
@@ -295,7 +200,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Open database (persistent storage)
       const db = openDatabase();
       try {
-        const results = await handleSearch(params, db);
+        const results = await handleSearch(params, db, loadConfig, createProvider);
 
         // Return compact observations as JSON
         return {
