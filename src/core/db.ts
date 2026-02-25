@@ -35,7 +35,7 @@ if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV 
   }
 }
 
-export interface BufferedEvent {
+export interface PendingEvent {
   sessionId: string;
   project: string;
   toolName: string;
@@ -188,11 +188,11 @@ function createDatabase(wipe: boolean): Database {
 }
 
 /**
- * Insert a buffered event into the database
+ * Insert a pending event into the database
  */
-export function insertBufferedEvent(
+export function insertPendingEvent(
   db: Database,
-  event: BufferedEvent
+  event: PendingEvent
 ): number {
   const result = db.query(`
     INSERT INTO pending_events (session_id, project, tool_name, summary, timestamp, created_at)
@@ -282,20 +282,20 @@ export async function createObservation(
 }
 
 /**
- * Get all buffered events for a session (no limit).
+ * Get all pending events for a session (no limit).
  * Used by Stop hook for batch extraction.
  */
-export function getAllBufferedEvents(
+export function getAllPendingEvents(
   db: Database,
   sessionId: string
-): Array<BufferedEvent & { id: number }> {
+): Array<PendingEvent & { id: number }> {
   return db.query(`
     SELECT id, session_id as sessionId, project, tool_name as toolName,
            summary, timestamp, created_at as createdAt
     FROM pending_events
     WHERE session_id = ?
     ORDER BY created_at ASC
-  `).all(sessionId) as Array<BufferedEvent & { id: number }>;
+  `).all(sessionId) as Array<PendingEvent & { id: number }>;
 }
 
 /**

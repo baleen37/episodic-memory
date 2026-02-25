@@ -4,7 +4,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { openDatabase, insertBufferedEvent, type BufferedEvent } from '../core/db.js';
+import { openDatabase, insertPendingEvent, type PendingEvent } from '../core/db.js';
 import { compressEvent } from '../core/compress.js';
 
 // ── Core logic ────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ export function recordEvent(
   if (summary === null) return;
 
   const now = Date.now();
-  const event: BufferedEvent = {
+  const event: PendingEvent = {
     sessionId,
     project,
     toolName,
@@ -28,7 +28,7 @@ export function recordEvent(
     timestamp: now,
     createdAt: now,
   };
-  insertBufferedEvent(db, event);
+  insertPendingEvent(db, event);
 }
 
 // ── Input parsing ─────────────────────────────────────────────────────────────
