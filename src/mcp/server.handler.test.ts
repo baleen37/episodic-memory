@@ -11,8 +11,8 @@ import {
   handleSearch,
   handleGetObservations,
   handleRead,
-  resetQueryNormalizerCache,
 } from './handlers.js';
+import { resetNormalizerCache } from './normalizer.js';
 import {
   SearchInputSchema,
   GetObservationsInputSchema,
@@ -49,7 +49,7 @@ describe('MCP Server Handlers', () => {
     mockReadConversation.mockClear();
     mockLoadConfig.mockClear();
     mockCreateProvider.mockClear();
-    resetQueryNormalizerCache();
+    resetNormalizerCache();
 
     mockDb = {} as Database;
   });
