@@ -9,7 +9,6 @@ import {
   handleGetObservations,
   handleRead,
   type SearchResult,
-  type ObservationOutput
 } from './handlers.js';
 import { initDatabase, insertObservation } from '../core/db.js';
 import { EMBEDDING_DIM } from '../core/constants.js';

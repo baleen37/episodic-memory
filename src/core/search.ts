@@ -20,7 +20,7 @@ interface SearchOptions {
 /**
  * Compact observation result (Layer 1 of progressive disclosure)
  */
-interface CompactObservationResult {
+export interface ObservationSummary {
   id: number;
   title: string;
   project: string;
@@ -143,7 +143,7 @@ function buildSharedFilterParts(
 async function vector_search(
   query: string,
   options: SearchOptions & { db: Database }
-): Promise<CompactObservationResult[]> {
+): Promise<ObservationSummary[]> {
   const { db, limit = 10, after, before, projects, files } = options;
   const {
     timeClause,
@@ -191,13 +191,13 @@ async function vector_search(
     limit
   ];
 
-  return stmt.all(...vectorParams) as CompactObservationResult[];
+  return stmt.all(...vectorParams) as ObservationSummary[];
 }
 
 function keyword_search(
   query: string,
   options: SearchOptions & { db: Database }
-): CompactObservationResult[] {
+): ObservationSummary[] {
   const { db, limit = 10, after, before, projects, files } = options;
   const {
     timeClause,
@@ -231,7 +231,7 @@ function keyword_search(
     limit
   ];
 
-  return stmt.all(...keywordParams) as CompactObservationResult[];
+  return stmt.all(...keywordParams) as ObservationSummary[];
 }
 
 /**
@@ -246,7 +246,7 @@ function keyword_search(
 export async function search(
   query: string,
   options: SearchOptions & { db: Database }
-): Promise<CompactObservationResult[]> {
+): Promise<ObservationSummary[]> {
   const { db, limit = 10, after, before, projects, files, queryNormalizerProvider } = options;
 
   if (after) validateISODate(after, '--after');
@@ -268,7 +268,7 @@ export async function search(
     files
   });
 
-  const combined: CompactObservationResult[] = [...vectorResults];
+  const combined: ObservationSummary[] = [...vectorResults];
   const seenIds = new Set(vectorResults.map(result => result.id));
 
   for (const result of keywordResults) {

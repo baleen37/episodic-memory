@@ -23,7 +23,7 @@ export interface SearchResult {
   timestamp: number;
 }
 
-export interface ObservationOutput {
+interface ObservationOutput {
   id: number;
   title: string;
   content: string;

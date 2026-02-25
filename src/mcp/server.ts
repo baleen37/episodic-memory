@@ -34,7 +34,6 @@ import {
   handleRead,
   formatObservations,
   type SearchResult,
-  type ObservationOutput,
 } from './handlers.js';
 import { allTools } from './tools.js';
 
@@ -47,7 +46,7 @@ export { SearchInputSchema, GetObservationsInputSchema, ReadInputSchema };
 export type { SearchInput, GetObservationsInput, ReadInput };
 
 // Re-export handler types for backward compatibility
-export type { SearchResult, ObservationOutput };
+export type { SearchResult };
 
 // Create MCP Server
 
