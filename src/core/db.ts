@@ -168,19 +168,6 @@ function createDatabase(wipe: boolean): Database {
     db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
   }
 
-  // Migration: check if vec_observations has wrong dimension (768 -> 384)
-  if (tableNames.has('vec_observations')) {
-    const schemaResult = db.query(
-      "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_observations'"
-    ).get() as { sql: string } | undefined;
-
-    if (schemaResult?.sql?.includes('float[768]')) {
-      console.log('Migrating vec_observations from 768-dim to 384-dim (embeddings will be re-indexed)...');
-      db.exec(`DROP TABLE IF EXISTS vec_observations`);
-      tableNames.delete('vec_observations');
-    }
-  }
-
   // Create vector table if not exists
   if (!tableNames.has('vec_observations')) {
     db.exec(`
