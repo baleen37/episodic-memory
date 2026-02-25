@@ -132,7 +132,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-async function main() {
+export async function runRecallCli(): Promise<void> {
   try {
     const stdinData = await readStdin();
     await runRecallMain(stdinData);
@@ -141,9 +141,3 @@ async function main() {
     process.exit(1);
   }
 }
-
-function shouldRunAsEntrypoint(): boolean {
-  return process.env.VITEST !== 'true' && !(import.meta as ImportMeta & { test?: boolean }).test;
-}
-
-if (shouldRunAsEntrypoint()) main();

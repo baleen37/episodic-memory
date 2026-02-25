@@ -93,7 +93,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-async function main() {
+export async function runRecordCli(): Promise<void> {
   try {
     const stdinData = await readStdin();
     await runRecord(stdinData);
@@ -102,9 +102,3 @@ async function main() {
     process.exit(0);  // Silent failure for async hooks
   }
 }
-
-function shouldRunAsEntrypoint(): boolean {
-  return process.env.VITEST !== 'true' && !(import.meta as ImportMeta & { test?: boolean }).test;
-}
-
-if (shouldRunAsEntrypoint()) main();

@@ -162,7 +162,7 @@ export async function runExtract(stdinData: string, deps: ExtractCliDeps = defau
   }
 }
 
-async function main() {
+export async function runExtractCli(): Promise<void> {
   try {
     const stdinData = await new Promise<string>((resolve) => {
       let data = '';
@@ -175,9 +175,3 @@ async function main() {
     process.exit(0);
   }
 }
-
-function shouldRunAsEntrypoint(): boolean {
-  return process.env.VITEST !== 'true' && !(import.meta as ImportMeta & { test?: boolean }).test;
-}
-
-if (shouldRunAsEntrypoint()) main();

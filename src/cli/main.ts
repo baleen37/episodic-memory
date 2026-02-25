@@ -1,3 +1,7 @@
+import { runRecordCli } from './record.js';
+import { runRecallCli } from './recall.js';
+import { runExtractCli } from './extract.js';
+
 const command = process.argv[2];
 
 if (!command || command === '--help' || command === '-h') {
@@ -24,13 +28,13 @@ ENVIRONMENT VARIABLES:
 async function main() {
   switch (command) {
     case 'recall':
-      await import('./recall.js');
+      await runRecallCli();
       break;
     case 'record':
-      await import('./record.js');
+      await runRecordCli();
       break;
     case 'extract':
-      await import('./extract.js');
+      await runExtractCli();
       break;
     default:
       console.error(`Unknown command: ${command}`);
