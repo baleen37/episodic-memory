@@ -5,7 +5,7 @@
  * Uses real in-memory DB to avoid mock.module() cross-file leakage.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
@@ -27,8 +27,14 @@ describe('MCP Server Handlers', () => {
 
   beforeEach(() => {
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
+    // Disable embedding worker to avoid socket connection attempts in CI
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     db = initDatabase();
     resetNormalizerCache();
+  });
+
+  afterEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
   });
 
   function insertTestObs(opts: {
@@ -197,7 +203,8 @@ describe('MCP Server Handlers', () => {
       const results = await handleGetObservations(params, db);
 
       expect(results).toHaveLength(3);
-      expect(results.map(r => r.id)).toEqual([1, 2, 3]);
+      // getObservationsByIds orders by timestamp DESC; verify all IDs present
+      expect(results.map(r => r.id).sort((a, b) => a - b)).toEqual([1, 2, 3]);
     });
 
     test('does not include content_original by default', async () => {

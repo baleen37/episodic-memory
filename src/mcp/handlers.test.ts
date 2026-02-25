@@ -2,7 +2,7 @@
  * Tests for MCP tool handlers
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import {
   handleSearch,
@@ -19,7 +19,13 @@ describe('handlers', () => {
   beforeEach(() => {
     // Use in-memory database for testing
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
+    // Disable embedding worker to avoid socket connection attempts in CI
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     db = initDatabase();
+  });
+
+  afterEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
   });
 
   // Helper to create a EMBEDDING_DIM-dimensional test embedding
