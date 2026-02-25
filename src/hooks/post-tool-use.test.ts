@@ -10,7 +10,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { compressToolData } from '../core/compress.js';
+import { summarizeEvent } from '../core/summarize.js';
 import { initDatabase, getAllPendingEvents } from '../core/db.js';
 import { handlePostToolUse } from './post-tool-use.js';
 
@@ -218,19 +218,19 @@ describe('PostToolUse Hook', () => {
 
     test('compresses tool data correctly for all supported tools', () => {
       // Test the compression function directly
-      expect(compressToolData('Read', { file_path: '/test.ts', lines: 100 }))
+      expect(summarizeEvent('Read', { file_path: '/test.ts', lines: 100 }))
         .toBe('Read /test.ts (100 lines)');
 
-      expect(compressToolData('Glob', { pattern: '*.ts' }))
+      expect(summarizeEvent('Glob', { pattern: '*.ts' }))
         .toBeNull(); // Skipped
 
-      expect(compressToolData('Edit', {
+      expect(summarizeEvent('Edit', {
         file_path: '/test.ts',
         old_string: 'old',
         new_string: 'new'
       })).toContain('Edited /test.ts:');
 
-      expect(compressToolData('Bash', {
+      expect(summarizeEvent('Bash', {
         command: 'ls',
         exitCode: 0
       })).toBe('Ran `ls` → exit 0');
@@ -238,12 +238,12 @@ describe('PostToolUse Hook', () => {
 
     test('handles edge cases in compression', () => {
       // Empty file path
-      expect(compressToolData('Read', {}))
+      expect(summarizeEvent('Read', {}))
         .toBe('Read');
 
       // Very long strings should be truncated
       const longString = 'a'.repeat(200);
-      const result = compressToolData('Edit', {
+      const result = summarizeEvent('Edit', {
         file_path: '/test.ts',
         old_string: longString,
         new_string: longString

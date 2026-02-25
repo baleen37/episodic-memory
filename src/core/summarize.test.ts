@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { compressToolData } from './compress.js';
+import { summarizeEvent } from './summarize.js';
 
-describe('compressToolData', () => {
+describe('summarizeEvent', () => {
   describe('Read tool compression', () => {
     test('compresses Read tool result with file content', () => {
       const toolData = {
@@ -9,7 +9,7 @@ describe('compressToolData', () => {
         content: 'export function authenticate() {\n  return true;\n}\n',
         lines: 245
       };
-      const result = compressToolData('Read', toolData);
+      const result = summarizeEvent('Read', toolData);
       expect(result).toBe('Read /src/auth.ts (245 lines)');
     });
 
@@ -18,7 +18,7 @@ describe('compressToolData', () => {
         file_path: '/src/config.ts',
         content: 'config data'
       };
-      const result = compressToolData('Read', toolData);
+      const result = summarizeEvent('Read', toolData);
       expect(result).toBe('Read /src/config.ts');
     });
 
@@ -26,17 +26,17 @@ describe('compressToolData', () => {
       const toolData = {
         content: 'some content'
       };
-      const result = compressToolData('Read', toolData);
+      const result = summarizeEvent('Read', toolData);
       expect(result).toBe('Read');
     });
 
     test('handles Read with null data', () => {
-      const result = compressToolData('Read', null);
+      const result = summarizeEvent('Read', null);
       expect(result).toBe('Read');
     });
 
     test('handles Read with undefined data', () => {
-      const result = compressToolData('Read', undefined);
+      const result = summarizeEvent('Read', undefined);
       expect(result).toBe('Read');
     });
   });
@@ -48,7 +48,7 @@ describe('compressToolData', () => {
         old_string: 'export function hello() {\n  console.log("hi");\n}',
         new_string: 'export function hello() {\n  console.log("bye");\n}'
       };
-      const result = compressToolData('Edit', toolData);
+      const result = summarizeEvent('Edit', toolData);
       expect(result).toBe('Edited /src/auth.ts: export function hello() { → export function hello() {');
     });
 
@@ -59,7 +59,7 @@ describe('compressToolData', () => {
         old_string: longString,
         new_string: longString
       };
-      const result = compressToolData('Edit', toolData);
+      const result = summarizeEvent('Edit', toolData);
       expect(result).toBe(`Edited /test.ts: ${'a'.repeat(37)}... → ${'a'.repeat(37)}...`);
     });
 
@@ -68,7 +68,7 @@ describe('compressToolData', () => {
         file_path: '/src/test.ts',
         old_string: 'old content'
       };
-      const result = compressToolData('Edit', toolData);
+      const result = summarizeEvent('Edit', toolData);
       expect(result).toBe('Edited /src/test.ts: old content → (no new string)');
     });
 
@@ -77,7 +77,7 @@ describe('compressToolData', () => {
         file_path: '/src/test.ts',
         new_string: 'new content'
       };
-      const result = compressToolData('Edit', toolData);
+      const result = summarizeEvent('Edit', toolData);
       expect(result).toBe('Edited /src/test.ts: (no old string) → new content');
     });
 
@@ -86,12 +86,12 @@ describe('compressToolData', () => {
         old_string: 'old',
         new_string: 'new'
       };
-      const result = compressToolData('Edit', toolData);
+      const result = summarizeEvent('Edit', toolData);
       expect(result).toBe('Edited unknown file: old → new');
     });
 
     test('handles Edit with null data', () => {
-      const result = compressToolData('Edit', null);
+      const result = summarizeEvent('Edit', null);
       expect(result).toBe('Edited');
     });
   });
@@ -102,7 +102,7 @@ describe('compressToolData', () => {
         file_path: '/src/auth.ts',
         lines: 120
       };
-      const result = compressToolData('Write', toolData);
+      const result = summarizeEvent('Write', toolData);
       expect(result).toBe('Created /src/auth.ts (120 lines)');
     });
 
@@ -110,7 +110,7 @@ describe('compressToolData', () => {
       const toolData = {
         file_path: '/src/config.ts'
       };
-      const result = compressToolData('Write', toolData);
+      const result = summarizeEvent('Write', toolData);
       expect(result).toBe('Created /src/config.ts');
     });
 
@@ -118,12 +118,12 @@ describe('compressToolData', () => {
       const toolData = {
         lines: 50
       };
-      const result = compressToolData('Write', toolData);
+      const result = summarizeEvent('Write', toolData);
       expect(result).toBe('Created (50 lines)');
     });
 
     test('handles Write with null data', () => {
-      const result = compressToolData('Write', null);
+      const result = summarizeEvent('Write', null);
       expect(result).toBe('Created');
     });
   });
@@ -136,7 +136,7 @@ describe('compressToolData', () => {
         stdout: 'PASS test suite',
         stderr: ''
       };
-      const result = compressToolData('Bash', toolData);
+      const result = summarizeEvent('Bash', toolData);
       expect(result).toBe('Ran `npm test` → exit 0');
     });
 
@@ -147,7 +147,7 @@ describe('compressToolData', () => {
         stdout: 'FAIL',
         stderr: 'Error: Test failed\n  at test.js:10'
       };
-      const result = compressToolData('Bash', toolData);
+      const result = summarizeEvent('Bash', toolData);
       expect(result).toBe('Ran `npm test` → exit 1: Error: Test failed');
     });
 
@@ -158,7 +158,7 @@ describe('compressToolData', () => {
         exitCode: 1,
         stderr: longError
       };
-      const result = compressToolData('Bash', toolData);
+      const result = summarizeEvent('Bash', toolData);
       expect(result).toBe(`Ran \`npm test\` → exit 1: ${longError.substring(0, 97)}...`);
     });
 
@@ -167,7 +167,7 @@ describe('compressToolData', () => {
         command: 'npm test',
         exitCode: 1
       };
-      const result = compressToolData('Bash', toolData);
+      const result = summarizeEvent('Bash', toolData);
       expect(result).toBe('Ran `npm test` → exit 1');
     });
 
@@ -175,12 +175,12 @@ describe('compressToolData', () => {
       const toolData = {
         exitCode: 0
       };
-      const result = compressToolData('Bash', toolData);
+      const result = summarizeEvent('Bash', toolData);
       expect(result).toBe('Ran `command` → exit 0');
     });
 
     test('handles Bash with null data', () => {
-      const result = compressToolData('Bash', null);
+      const result = summarizeEvent('Bash', null);
       expect(result).toBe('Ran');
     });
   });
@@ -196,7 +196,7 @@ describe('compressToolData', () => {
         ],
         count: 5
       };
-      const result = compressToolData('Grep', toolData);
+      const result = summarizeEvent('Grep', toolData);
       expect(result).toBe('Searched \'TODO\' in /src → 5 matches');
     });
 
@@ -206,7 +206,7 @@ describe('compressToolData', () => {
         path: '/src',
         count: 3
       };
-      const result = compressToolData('Grep', toolData);
+      const result = summarizeEvent('Grep', toolData);
       expect(result).toBe('Searched \'FIXME\' in /src → 3 matches');
     });
 
@@ -216,7 +216,7 @@ describe('compressToolData', () => {
         path: '/src',
         matches: [{ line: 1 }, { line: 2 }, { line: 3 }]
       };
-      const result = compressToolData('Grep', toolData);
+      const result = summarizeEvent('Grep', toolData);
       expect(result).toBe('Searched \'BUG\' in /src → 3 matches');
     });
 
@@ -227,7 +227,7 @@ describe('compressToolData', () => {
         matches: [],
         count: 0
       };
-      const result = compressToolData('Grep', toolData);
+      const result = summarizeEvent('Grep', toolData);
       expect(result).toBe('Searched \'NOMATCH\' in /src → 0 matches');
     });
 
@@ -236,12 +236,12 @@ describe('compressToolData', () => {
         pattern: 'TODO',
         count: 5
       };
-      const result = compressToolData('Grep', toolData);
+      const result = summarizeEvent('Grep', toolData);
       expect(result).toBe('Searched \'TODO\' → 5 matches');
     });
 
     test('handles Grep with null data', () => {
-      const result = compressToolData('Grep', null);
+      const result = summarizeEvent('Grep', null);
       expect(result).toBe('Searched');
     });
   });
@@ -254,7 +254,7 @@ describe('compressToolData', () => {
           { title: 'React Docs', url: 'https://react.dev' }
         ]
       };
-      const result = compressToolData('WebSearch', toolData);
+      const result = summarizeEvent('WebSearch', toolData);
       expect(result).toBe('Searched: latest React documentation');
     });
 
@@ -262,12 +262,12 @@ describe('compressToolData', () => {
       const toolData = {
         results: []
       };
-      const result = compressToolData('WebSearch', toolData);
+      const result = summarizeEvent('WebSearch', toolData);
       expect(result).toBe('Searched: ');
     });
 
     test('handles WebSearch with null data', () => {
-      const result = compressToolData('WebSearch', null);
+      const result = summarizeEvent('WebSearch', null);
       expect(result).toBe('Searched:');
     });
   });
@@ -278,7 +278,7 @@ describe('compressToolData', () => {
         url: 'https://example.com',
         content: 'page content'
       };
-      const result = compressToolData('WebFetch', toolData);
+      const result = summarizeEvent('WebFetch', toolData);
       expect(result).toBe('Fetched https://example.com');
     });
 
@@ -286,74 +286,74 @@ describe('compressToolData', () => {
       const toolData = {
         content: 'some content'
       };
-      const result = compressToolData('WebFetch', toolData);
+      const result = summarizeEvent('WebFetch', toolData);
       expect(result).toBe('Fetched');
     });
 
     test('handles WebFetch with null data', () => {
-      const result = compressToolData('WebFetch', null);
+      const result = summarizeEvent('WebFetch', null);
       expect(result).toBe('Fetched');
     });
   });
 
   describe('Skipped tools (return null)', () => {
     test('returns null for Glob tool', () => {
-      const result = compressToolData('Glob', { pattern: '*.ts' });
+      const result = summarizeEvent('Glob', { pattern: '*.ts' });
       expect(result).toBeNull();
     });
 
     test('returns null for LSP tool', () => {
-      const result = compressToolData('LSP', { operation: 'goToDefinition' });
+      const result = summarizeEvent('LSP', { operation: 'goToDefinition' });
       expect(result).toBeNull();
     });
 
     test('returns null for TodoWrite tool', () => {
-      const result = compressToolData('TodoWrite', { content: 'todo' });
+      const result = summarizeEvent('TodoWrite', { content: 'todo' });
       expect(result).toBeNull();
     });
 
     test('returns null for TaskCreate tool', () => {
-      const result = compressToolData('TaskCreate', { subject: 'task' });
+      const result = summarizeEvent('TaskCreate', { subject: 'task' });
       expect(result).toBeNull();
     });
 
     test('returns null for TaskUpdate tool', () => {
-      const result = compressToolData('TaskUpdate', { taskId: '1' });
+      const result = summarizeEvent('TaskUpdate', { taskId: '1' });
       expect(result).toBeNull();
     });
 
     test('returns null for TaskList tool', () => {
-      const result = compressToolData('TaskList', {});
+      const result = summarizeEvent('TaskList', {});
       expect(result).toBeNull();
     });
 
     test('returns null for TaskGet tool', () => {
-      const result = compressToolData('TaskGet', { taskId: '1' });
+      const result = summarizeEvent('TaskGet', { taskId: '1' });
       expect(result).toBeNull();
     });
 
     test('returns null for AskUserQuestion tool', () => {
-      const result = compressToolData('AskUserQuestion', { question: '?' });
+      const result = summarizeEvent('AskUserQuestion', { question: '?' });
       expect(result).toBeNull();
     });
 
     test('returns null for EnterPlanMode tool', () => {
-      const result = compressToolData('EnterPlanMode', {});
+      const result = summarizeEvent('EnterPlanMode', {});
       expect(result).toBeNull();
     });
 
     test('returns null for ExitPlanMode tool', () => {
-      const result = compressToolData('ExitPlanMode', {});
+      const result = summarizeEvent('ExitPlanMode', {});
       expect(result).toBeNull();
     });
 
     test('returns null for NotebookEdit tool', () => {
-      const result = compressToolData('NotebookEdit', { notebook_path: 'test.ipynb' });
+      const result = summarizeEvent('NotebookEdit', { notebook_path: 'test.ipynb' });
       expect(result).toBeNull();
     });
 
     test('returns null for Skill tool', () => {
-      const result = compressToolData('Skill', { skill: 'test' });
+      const result = summarizeEvent('Skill', { skill: 'test' });
       expect(result).toBeNull();
     });
   });
@@ -361,39 +361,39 @@ describe('compressToolData', () => {
   describe('Unknown tools', () => {
     test('handles unknown tool with basic format', () => {
       const toolData = { param: 'value' };
-      const result = compressToolData('UnknownTool', toolData);
+      const result = summarizeEvent('UnknownTool', toolData);
       expect(result).toBe('UnknownTool');
     });
 
     test('handles unknown tool with null data', () => {
-      const result = compressToolData('UnknownTool', null);
+      const result = summarizeEvent('UnknownTool', null);
       expect(result).toBe('UnknownTool');
     });
   });
 
   describe('Edge cases', () => {
     test('handles empty object data', () => {
-      const result = compressToolData('Read', {});
+      const result = summarizeEvent('Read', {});
       expect(result).toBe('Read');
     });
 
     test('handles primitive string data', () => {
-      const result = compressToolData('Read', 'just a string');
+      const result = summarizeEvent('Read', 'just a string');
       expect(result).toBe('Read');
     });
 
     test('handles array data', () => {
-      const result = compressToolData('Read', ['item1', 'item2']);
+      const result = summarizeEvent('Read', ['item1', 'item2']);
       expect(result).toBe('Read');
     });
 
     test('handles number data', () => {
-      const result = compressToolData('Read', 42);
+      const result = summarizeEvent('Read', 42);
       expect(result).toBe('Read');
     });
 
     test('handles boolean data', () => {
-      const result = compressToolData('Read', true);
+      const result = summarizeEvent('Read', true);
       expect(result).toBe('Read');
     });
   });

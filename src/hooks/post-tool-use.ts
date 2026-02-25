@@ -2,14 +2,14 @@
  * PostToolUse Hook - Store compressed tool events in pending_events table.
  *
  * This hook is triggered after every tool use and:
- * 1. Gets compressed tool data using compress.ts
+ * 1. Gets compressed tool data using summarize.ts
  * 2. Skips tools that return null (low value tools)
  * 3. Stores in pending_events table with session_id, project, tool_name, compressed, timestamp
  * 4. Runs async (non-blocking)
  */
 
 import { Database } from 'bun:sqlite';
-import { compressToolData } from '../core/compress.js';
+import { summarizeEvent } from '../core/summarize.js';
 import { insertPendingEvent, type PendingEvent } from '../core/db.js';
 
 /**
@@ -28,8 +28,8 @@ export function handlePostToolUse(
   toolName: string,
   toolData: unknown
 ): void {
-  // Step 1: Get compressed tool data
-  const compressed = compressToolData(toolName, toolData);
+  // Step 1: Get summarized tool data
+  const compressed = summarizeEvent(toolName, toolData);
 
   // Step 2: Skip if compression returned null (low value tool)
   if (compressed === null) {
