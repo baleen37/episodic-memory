@@ -1,0 +1,32 @@
+name: On Release
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  dispatch-marketplace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch update-plugin to baleen-marketplace
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
+          VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          gh api repos/baleen37/baleen-marketplace/dispatches \
+            -f event_type=update-plugin \
+            -f client_payload[plugin]=memmem \
+            -f client_payload[version]="$VERSION"
+
+  dispatch-self:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch update_versions to self
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/dispatches \
+            -f event_type=update_versions
