@@ -1,6 +1,7 @@
 import { runRecordCli } from './record.js';
 import { runRecallCli } from './recall.js';
 import { runExtractCli } from './extract.js';
+import { runSyncCli } from './sync.js';
 
 const command = process.argv[2];
 
@@ -15,6 +16,7 @@ COMMANDS:
   recall    SessionStart hook — inject recent context into session
   record    PostToolUse hook — buffer tool event
   extract   Stop hook — extract observations from buffered events
+  sync      Reindex missing embeddings into vec_observations
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory
@@ -35,6 +37,9 @@ async function main() {
       break;
     case 'extract':
       await runExtractCli();
+      break;
+    case 'sync':
+      await runSyncCli();
       break;
     default:
       console.error(`Unknown command: ${command}`);
