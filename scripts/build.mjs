@@ -49,8 +49,6 @@ async function buildCli() {
   try {
     await buildEntry("src/cli/main.ts", "dist/cli-internal.mjs");
     await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
-    await buildEntry("src/mcp/embedding-worker.ts", "dist/embedding-worker.mjs");
-
     await copyFile(join("src", "cli-graceful.mjs"), join("dist", "cli.mjs"));
     console.log("✓ Copied dist/cli.mjs (graceful wrapper)");
 
