@@ -2,40 +2,40 @@
  * Tests for observation search
  */
 
-import { describe, test, expect, beforeEach, afterEach, afterAll, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { initDatabase, insertObservation } from './db.js';
 import { search } from './search.js';
 import { EMBEDDING_DIM } from './constants.js';
-import * as realEmbeddingsModule from './embeddings.js';
+import { __setModelForTests } from './embeddings.js';
+import { resetRateLimiters, __setLoadConfigForTests } from './ratelimiter.js';
 
 // Global mock factory that can be controlled per test
 let mockGenerateEmbedding: (() => Promise<number[]>) | null = null;
-
-// Set up top-level mocks (spread real exports to avoid leaking into other test files)
-mock.module('./embeddings.js', () => ({
-  ...realEmbeddingsModule,
-  initEmbeddings: mock(() => Promise.resolve()),
-  generateEmbedding: mock(() => Promise.resolve(mockGenerateEmbedding?.() ?? []))
-}));
-
-// Restore real embeddings module after all tests in this file
-afterAll(() => {
-  mock.module('./embeddings.js', () => ({ ...realEmbeddingsModule }));
-});
 
 describe('search - observation search', () => {
   let db: Database;
 
   beforeEach(() => {
-    // Use in-memory database for testing
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
     db = initDatabase();
+    __setModelForTests(
+      async () => {},
+      async () => mockGenerateEmbedding?.() ?? [],
+    );
+    __setLoadConfigForTests(() => ({
+      provider: 'gemini', apiKey: 'test',
+      ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
+    }) as any);
+    resetRateLimiters();
   });
 
   afterEach(() => {
     db.close();
     mockGenerateEmbedding = null;
+    __setModelForTests(null, null);
+    __setLoadConfigForTests(null);
+    resetRateLimiters();
   });
 
   // Helper to create a EMBEDDING_DIM-dimensional test embedding

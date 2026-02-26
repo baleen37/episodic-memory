@@ -19,13 +19,9 @@ import { getObservationsByIds } from './core/db.js';
 import type { LLMProvider } from './core/llm/index.js';
 import { EMBEDDING_DIM } from './core/constants.js';
 import { resetRateLimiters, __setLoadConfigForTests } from './core/ratelimiter.js';
+import { __setModelForTests } from './core/embeddings.js';
 
 const MOCK_EMBEDDING = Array.from({ length: EMBEDDING_DIM }, () => 0.1);
-
-mock.module('./core/embeddings-model.js', () => ({
-  initModel: mock(async () => undefined),
-  generateEmbeddingFromModel: mock(async () => MOCK_EMBEDDING),
-}));
 
 // Mock LLM provider
 const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_tokens: number; output_tokens: number } }>) => {
@@ -68,6 +64,10 @@ describe('Integration Tests', () => {
   beforeEach(() => {
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
     db = initDatabase();
+    __setModelForTests(
+      async () => undefined,
+      async () => MOCK_EMBEDDING,
+    );
     __setLoadConfigForTests(() => ({
       provider: 'gemini', apiKey: 'test',
       ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
@@ -76,6 +76,7 @@ describe('Integration Tests', () => {
   });
 
   afterEach(() => {
+    __setModelForTests(null, null);
     __setLoadConfigForTests(null);
     resetRateLimiters();
     if (db) {
