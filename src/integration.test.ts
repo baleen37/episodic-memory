@@ -16,10 +16,16 @@ import { extractObservations, type ExtractOptions } from './cli/extract.js';
 import { recallContext, type RecallConfig } from './cli/recall.js';
 import { search } from './core/search.js';
 import { getObservationsByIds } from './core/db.js';
-import { __setWorkerConnectorForTests } from './core/embeddings.js';
 import type { LLMProvider } from './core/llm/index.js';
-import net from 'net';
-import EventEmitter from 'events';
+import { EMBEDDING_DIM } from './core/constants.js';
+import { resetRateLimiters, __setLoadConfigForTests } from './core/ratelimiter.js';
+
+const MOCK_EMBEDDING = Array.from({ length: EMBEDDING_DIM }, () => 0.1);
+
+mock.module('./core/embeddings-model.js', () => ({
+  initModel: mock(async () => undefined),
+  generateEmbeddingFromModel: mock(async () => MOCK_EMBEDDING),
+}));
 
 // Mock LLM provider
 const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_tokens: number; output_tokens: number } }>) => {
@@ -35,24 +41,6 @@ const createMockLLMProvider = (responses: Array<{ text: string; usage?: { input_
   } as unknown as LLMProvider & { __mockFn: ReturnType<typeof mock> };
 };
 
-const MOCK_EMBEDDING = new Float32Array(384).fill(0.1);
-
-function createMockEmbeddingSocket(): net.Socket {
-  const emitter = new EventEmitter() as any;
-  emitter.write = (data: any) => {
-    const req = JSON.parse(data.toString().trim());
-    setImmediate(() => emitter.emit('data', JSON.stringify({ id: req.id, embedding: Array.from(MOCK_EMBEDDING) }) + '\n'));
-    return true;
-  };
-  emitter.destroyed = false;
-  emitter.destroy = () => {
-    emitter.destroyed = true;
-    return emitter;
-  };
-  emitter.end = () => emitter;
-  return emitter as net.Socket;
-}
-
 async function runStop(db: Database, options: Omit<ExtractOptions, 'createObservationFn'>): Promise<void> {
   await extractObservations(db, {
     ...options,
@@ -67,7 +55,7 @@ async function runStop(db: Database, options: Omit<ExtractOptions, 'createObserv
       db.prepare(`
         INSERT INTO vec_observations (id, embedding)
         VALUES (?, ?)
-      `).run(String(rowid), Buffer.from(MOCK_EMBEDDING.buffer));
+      `).run(String(rowid), Buffer.from(new Float32Array(MOCK_EMBEDDING).buffer));
 
       return rowid;
     },
@@ -80,11 +68,16 @@ describe('Integration Tests', () => {
   beforeEach(() => {
     process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
     db = initDatabase();
-    __setWorkerConnectorForTests(() => Promise.resolve(createMockEmbeddingSocket()));
+    __setLoadConfigForTests(() => ({
+      provider: 'gemini', apiKey: 'test',
+      ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
+    }) as any);
+    resetRateLimiters();
   });
 
   afterEach(() => {
-    __setWorkerConnectorForTests(null);
+    __setLoadConfigForTests(null);
+    resetRateLimiters();
     if (db) {
       db.close();
     }
