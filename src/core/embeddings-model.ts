@@ -1,6 +1,6 @@
 /**
- * Direct in-process embedding model loading via HuggingFace transformers.
- * Used only by the embedding worker process. Do NOT import this from other modules.
+ * In-process embedding model loading via HuggingFace transformers.
+ * Lazy-loaded singleton: first call to initModel() loads the model.
  */
 import { pipeline, FeatureExtractionPipeline, env } from '@huggingface/transformers';
 
