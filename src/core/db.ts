@@ -1,19 +1,3 @@
-/**
- * Database Schema
- *
- * Clean slate redesign with simplified architecture:
- * - pending_events: Temporary storage for tool events before LLM extraction
- * - observations: Long-term storage for extracted insights
- * - vec_observations: Vector embeddings for semantic search
- *
- * Removed tables (no migration):
- * - exchanges (use conversation-archive directly)
- * - vec_exchanges (no longer needed)
- * - tool_calls (no longer needed)
- * - session_summaries (moved to observations)
- * - observations_fts (full-text search removed - use vector search only)
- */
-
 import { Database } from 'bun:sqlite';
 import path from 'path';
 import fs from 'fs';
@@ -22,17 +6,43 @@ import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
 import { generateEmbedding, initEmbeddings } from './embeddings.js';
 
-// macOS: Apple's default SQLite disables extensions; use Homebrew SQLite
-// Only set custom SQLite in production, not in test environment
-// (bun:test uses its own SQLite that may not support extensions the same way)
 // @ts-ignore - import.meta.test is set by bun test
 const isTestEnvironment = typeof import.meta !== 'undefined' && import.meta.test;
 if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV !== 'test') {
   try {
     Database.setCustomSQLite('/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib');
   } catch {
-    // Ignore if SQLite is already loaded or not available
   }
+}
+
+export const CURRENT_EMBEDDING_VERSION = 1;
+
+export interface ExchangeInsert {
+  archivePath: string;
+  lineStart: number;
+  lineEnd: number;
+  sourceKind: string;
+  sessionId: string | null;
+  project: string | null;
+  cwd: string | null;
+  gitBranch: string | null;
+  model: string | null;
+  provider: string | null;
+  metadataJson: string | null;
+  timestamp: number | null;
+  userText: string;
+  assistantText: string;
+  embeddingText: string;
+  embeddingVersion: number;
+}
+
+export interface ToolCallInsert {
+  exchangeId: number;
+  toolName: string | null;
+  callId: string | null;
+  input: string | null;
+  output: string | null;
+  status: string | null;
 }
 
 export interface PendingEvent {
@@ -69,131 +79,170 @@ interface SearchOptions {
   limit?: number;
 }
 
-/**
- * Initialize database with schema
- * Deletes old database file if it exists (clean slate)
- */
 export function initDatabase(): Database {
   return createDatabase(true);
 }
 
-/**
- * Open existing database or create new one if not exists.
- * Does not delete existing database.
- */
 export function openDatabase(): Database {
   return createDatabase(false);
 }
 
-/**
- * Create or open database.
- * @param wipe Whether to delete existing database file first
- */
 function createDatabase(wipe: boolean): Database {
   const dbPath = getDbPath();
-
-  // Ensure directory exists
   const dbDir = path.dirname(dbPath);
-  if (!fs.existsSync(dbDir)) {
+
+  if (dbPath !== ':memory:' && !fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  // Delete old database file if wipe is true (only if not in-memory)
-  if (wipe && dbPath !== ':memory:' && fs.existsSync(dbPath)) {
-    console.log('Deleting old database file for clean slate...');
-    fs.unlinkSync(dbPath);
+  if (wipe && dbPath !== ':memory:') {
+    for (const suffix of ['', '-wal', '-shm']) {
+      const filePath = `${dbPath}${suffix}`;
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
   }
 
   const db = new Database(dbPath);
-
-  // Load sqlite-vec extension
   sqliteVec.load(db);
-
-  // Enable WAL mode for better concurrency
+  db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA journal_mode = WAL');
-
-  // Check if tables exist, create if not
-  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
-  const tableNames = new Set(tables.map(t => t.name));
-
-  // Create pending_events table if not exists
-  if (!tableNames.has('pending_events')) {
-    db.exec(`
-      CREATE TABLE pending_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        project TEXT NOT NULL,
-        tool_name TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      )
-    `);
-    db.exec(`CREATE INDEX idx_pending_session ON pending_events(session_id)`);
-    db.exec(`CREATE INDEX idx_pending_project ON pending_events(project)`);
-    db.exec(`CREATE INDEX idx_pending_timestamp ON pending_events(timestamp)`);
-  }
-
-  // Create observations table if not exists
-  if (!tableNames.has('observations')) {
-    db.exec(`
-      CREATE TABLE observations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        content_original TEXT,
-        project TEXT NOT NULL,
-        session_id TEXT,
-        timestamp INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      )
-    `);
-    db.exec(`CREATE INDEX idx_observations_project ON observations(project)`);
-    db.exec(`CREATE INDEX idx_observations_session ON observations(session_id)`);
-    db.exec(`CREATE INDEX idx_observations_timestamp ON observations(timestamp DESC)`);
-  }
-
-  // Upgrade observations schema for existing databases
-  // Add content_original column if missing
-  const observationColumns = db.query(`
-    SELECT name FROM pragma_table_info('observations')
-  `).all() as Array<{ name: string }>;
-  const hasContentOriginal = observationColumns.some(
-    column => column.name.toLowerCase() === 'content_original'
-  );
-  if (!hasContentOriginal) {
-    db.exec(`ALTER TABLE observations ADD COLUMN content_original TEXT`);
-  }
-
-  // Migrate pending_events: rename compressed → summary
-  const pendingColumns = db.query(`
-    SELECT name FROM pragma_table_info('pending_events')
-  `).all() as Array<{ name: string }>;
-  const hasCompressed = pendingColumns.some(c => c.name === 'compressed');
-  if (hasCompressed) {
-    db.exec('ALTER TABLE pending_events RENAME COLUMN compressed TO summary');
-  }
-
-  // Create vector table if not exists
-  if (!tableNames.has('vec_observations')) {
-    db.exec(`
-      CREATE VIRTUAL TABLE vec_observations USING vec0(
-        id TEXT PRIMARY KEY,
-        embedding float[${EMBEDDING_DIM}]
-      )
-    `);
-  }
+  createSchema(db);
 
   return db;
 }
 
-/**
- * Insert a pending event into the database
- */
-export function insertPendingEvent(
-  db: Database,
-  event: PendingEvent
-): number {
+function createSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS exchanges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      archive_path TEXT NOT NULL,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER NOT NULL,
+      source_kind TEXT NOT NULL,
+      session_id TEXT,
+      project TEXT,
+      cwd TEXT,
+      git_branch TEXT,
+      model TEXT,
+      provider TEXT,
+      metadata_json TEXT,
+      timestamp INTEGER,
+      user_text TEXT NOT NULL,
+      assistant_text TEXT NOT NULL,
+      embedding_text TEXT NOT NULL,
+      embedding_version INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(archive_path, line_start, line_end)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_archive_path ON exchanges(archive_path)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_source_kind ON exchanges(source_kind)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_timestamp ON exchanges(timestamp DESC)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exchange_id INTEGER NOT NULL REFERENCES exchanges(id) ON DELETE CASCADE,
+      tool_name TEXT,
+      call_id TEXT,
+      input TEXT,
+      output TEXT,
+      status TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_exchanges USING vec0(
+      embedding float[${EMBEDDING_DIM}]
+    )
+  `);
+}
+
+export function insertExchange(db: Database, exchange: ExchangeInsert): number {
+  const now = Date.now();
+  const result = db.query(`
+    INSERT INTO exchanges (
+      archive_path, line_start, line_end, source_kind, session_id, project, cwd,
+      git_branch, model, provider, metadata_json, timestamp, user_text,
+      assistant_text, embedding_text, embedding_version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    exchange.archivePath,
+    exchange.lineStart,
+    exchange.lineEnd,
+    exchange.sourceKind,
+    exchange.sessionId,
+    exchange.project,
+    exchange.cwd,
+    exchange.gitBranch,
+    exchange.model,
+    exchange.provider,
+    exchange.metadataJson,
+    exchange.timestamp,
+    exchange.userText,
+    exchange.assistantText,
+    exchange.embeddingText,
+    exchange.embeddingVersion,
+    now,
+    now
+  );
+
+  return result.lastInsertRowid as number;
+}
+
+export function insertToolCall(db: Database, toolCall: ToolCallInsert): number {
+  const result = db.query(`
+    INSERT INTO tool_calls (exchange_id, tool_name, call_id, input, output, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    toolCall.exchangeId,
+    toolCall.toolName,
+    toolCall.callId,
+    toolCall.input,
+    toolCall.output,
+    toolCall.status,
+    Date.now()
+  );
+
+  return result.lastInsertRowid as number;
+}
+
+export function deleteExchangeIndexForArchivePath(db: Database, archivePath: string): void {
+  const rows = db.query('SELECT id FROM exchanges WHERE archive_path = ?').all(archivePath) as Array<{ id: number }>;
+  const ids = rows.map(row => row.id);
+
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    db.query(`DELETE FROM vec_exchanges WHERE rowid IN (${placeholders})`).run(...ids);
+  }
+
+  db.query('DELETE FROM exchanges WHERE archive_path = ?').run(archivePath);
+}
+
+export function getArchivePathsNeedingReindex(db: Database, archivePaths: string[]): string[] {
+  const paths = new Set<string>();
+  const stmt = db.query(`
+    SELECT COUNT(*) AS count,
+           SUM(CASE WHEN embedding_version != ? THEN 1 ELSE 0 END) AS staleCount
+    FROM exchanges
+    WHERE archive_path = ?
+  `);
+
+  for (const archivePath of archivePaths) {
+    const row = stmt.get(CURRENT_EMBEDDING_VERSION, archivePath) as { count: number; staleCount: number | null };
+    if (row.count === 0 || (row.staleCount ?? 0) > 0) {
+      paths.add(archivePath);
+    }
+  }
+
+  return [...paths];
+}
+
+export function insertPendingEvent(db: Database, event: PendingEvent): number {
   const result = db.query(`
     INSERT INTO pending_events (session_id, project, tool_name, summary, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -209,10 +258,6 @@ export function insertPendingEvent(
   return result.lastInsertRowid as number;
 }
 
-/**
- * Insert an observation into the database.
- * Optionally includes vector embedding for semantic search.
- */
 export function insertObservation(
   db: Database,
   observation: Omit<Observation, 'id' | 'contentOriginal' | 'sessionId'> & {
@@ -221,7 +266,6 @@ export function insertObservation(
   },
   embedding?: number[]
 ): number {
-  // Insert into main table
   const result = db.query(`
     INSERT INTO observations (title, content, content_original, project, session_id, timestamp, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -237,8 +281,6 @@ export function insertObservation(
 
   const rowid = result.lastInsertRowid as number;
 
-  // Insert into vector table if embedding provided
-  // Use the string id to link the tables
   if (embedding) {
     db.query(`
       INSERT INTO vec_observations (id, embedding)
@@ -249,12 +291,6 @@ export function insertObservation(
   return rowid;
 }
 
-/**
- * Create a new observation with embedding.
- *
- * Generates an embedding from title + content and stores both
- * the observation and its vector in the database.
- */
 export async function createObservation(
   db: Database,
   title: string,
@@ -281,10 +317,6 @@ export async function createObservation(
   return insertObservation(db, observation, embedding ?? undefined);
 }
 
-/**
- * Get all pending events for a session (no limit).
- * Used by Stop hook for batch extraction.
- */
 export function getAllPendingEvents(
   db: Database,
   sessionId: string
@@ -298,16 +330,11 @@ export function getAllPendingEvents(
   `).all(sessionId) as Array<PendingEvent & { id: number }>;
 }
 
-/**
- * Get recent observations with optional filters.
- * Used by SessionStart hook to load recent context.
- */
 export function getRecentObservations(
   db: Database,
   options: RecentObservationsOptions = {}
 ): Observation[] {
   const { project, after, limit = 100 } = options;
-
   const params: any[] = [];
 
   let sql = `
@@ -332,19 +359,13 @@ export function getRecentObservations(
   return db.query(sql).all(...params) as Observation[];
 }
 
-/**
- * Search observations with filters.
- * Used by db.test.ts for backward compatibility.
- */
 export function searchObservations(
   db: Database,
   options: SearchOptions = {}
 ): Observation[] {
   const { project, sessionId, after, before, limit = 100 } = options;
-
   const params: any[] = [];
 
-  // Build query with optional filters
   let sql = `
     SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
     FROM observations
@@ -377,9 +398,6 @@ export function searchObservations(
   return db.query(sql).all(...params) as Observation[];
 }
 
-/**
- * Get a single observation by ID.
- */
 export function getObservationById(
   db: Database,
   id: number
@@ -393,10 +411,6 @@ export function getObservationById(
   return result ?? null;
 }
 
-/**
- * Get a single observation by ID.
- * @deprecated Use getObservationById instead.
- */
 export function getObservation(
   db: Database,
   id: number
@@ -404,9 +418,6 @@ export function getObservation(
   return getObservationById(db, id);
 }
 
-/**
- * Find multiple observations by IDs.
- */
 export function getObservationsByIds(db: Database, ids: number[]): Observation[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => '?').join(',');
