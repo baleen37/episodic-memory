@@ -4,7 +4,6 @@ import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
-import { generateEmbedding, initEmbeddings } from './embeddings.js';
 
 // @ts-ignore - import.meta.test is set by bun test
 const isTestEnvironment = typeof import.meta !== 'undefined' && import.meta.test;
@@ -154,6 +153,7 @@ function createSchema(db: Database): void {
       created_at INTEGER NOT NULL
     )
   `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_exchange_id ON tool_calls(exchange_id)');
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS vec_exchanges USING vec0(
@@ -226,10 +226,11 @@ export function deleteExchangeIndexForArchivePath(db: Database, archivePath: str
 export function getArchivePathsNeedingReindex(db: Database, archivePaths: string[]): string[] {
   const paths = new Set<string>();
   const stmt = db.query(`
-    SELECT COUNT(*) AS count,
-           SUM(CASE WHEN embedding_version != ? THEN 1 ELSE 0 END) AS staleCount
+    SELECT COUNT(exchanges.id) AS count,
+           SUM(CASE WHEN exchanges.embedding_version != ? OR vec_exchanges.rowid IS NULL THEN 1 ELSE 0 END) AS staleCount
     FROM exchanges
-    WHERE archive_path = ?
+    LEFT JOIN vec_exchanges ON vec_exchanges.rowid = exchanges.id
+    WHERE exchanges.archive_path = ?
   `);
 
   for (const archivePath of archivePaths) {
@@ -242,20 +243,14 @@ export function getArchivePathsNeedingReindex(db: Database, archivePaths: string
   return [...paths];
 }
 
-export function insertPendingEvent(db: Database, event: PendingEvent): number {
-  const result = db.query(`
-    INSERT INTO pending_events (session_id, project, tool_name, summary, timestamp, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    event.sessionId,
-    event.project,
-    event.toolName,
-    event.summary,
-    event.timestamp,
-    event.createdAt
-  );
+function throwObservationSchemaRemoved(): never {
+  throw new Error('Observation schema has been removed; use exchange schema APIs instead');
+}
 
-  return result.lastInsertRowid as number;
+export function insertPendingEvent(db: Database, event: PendingEvent): number {
+  void db;
+  void event;
+  throwObservationSchemaRemoved();
 }
 
 export function insertObservation(
@@ -266,29 +261,10 @@ export function insertObservation(
   },
   embedding?: number[]
 ): number {
-  const result = db.query(`
-    INSERT INTO observations (title, content, content_original, project, session_id, timestamp, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    observation.title,
-    observation.content,
-    observation.contentOriginal ?? null,
-    observation.project,
-    observation.sessionId ?? null,
-    observation.timestamp,
-    observation.createdAt
-  );
-
-  const rowid = result.lastInsertRowid as number;
-
-  if (embedding) {
-    db.query(`
-      INSERT INTO vec_observations (id, embedding)
-      VALUES (?, ?)
-    `).run(String(rowid), Buffer.from(new Float32Array(embedding).buffer));
-  }
-
-  return rowid;
+  void db;
+  void observation;
+  void embedding;
+  throwObservationSchemaRemoved();
 }
 
 export async function createObservation(
@@ -300,115 +276,50 @@ export async function createObservation(
   timestamp?: number,
   contentOriginal?: string
 ): Promise<number> {
-  const now = Date.now();
-  const observation: Omit<Observation, 'id'> = {
-    title,
-    content,
-    contentOriginal: contentOriginal ?? null,
-    project,
-    sessionId: sessionId ?? null,
-    timestamp: timestamp ?? now,
-    createdAt: now,
-  };
-
-  await initEmbeddings();
-  const embedding = await generateEmbedding(`${title}\n${content}`);
-
-  return insertObservation(db, observation, embedding ?? undefined);
+  void db;
+  void title;
+  void content;
+  void project;
+  void sessionId;
+  void timestamp;
+  void contentOriginal;
+  throwObservationSchemaRemoved();
 }
 
 export function getAllPendingEvents(
   db: Database,
   sessionId: string
 ): Array<PendingEvent & { id: number }> {
-  return db.query(`
-    SELECT id, session_id as sessionId, project, tool_name as toolName,
-           summary, timestamp, created_at as createdAt
-    FROM pending_events
-    WHERE session_id = ?
-    ORDER BY created_at ASC
-  `).all(sessionId) as Array<PendingEvent & { id: number }>;
+  void db;
+  void sessionId;
+  throwObservationSchemaRemoved();
 }
 
 export function getRecentObservations(
   db: Database,
   options: RecentObservationsOptions = {}
 ): Observation[] {
-  const { project, after, limit = 100 } = options;
-  const params: any[] = [];
-
-  let sql = `
-    SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
-    FROM observations
-    WHERE 1=1
-  `;
-
-  if (project) {
-    sql += ' AND project = ?';
-    params.push(project);
-  }
-
-  if (after) {
-    sql += ' AND timestamp >= ?';
-    params.push(after);
-  }
-
-  sql += ' ORDER BY timestamp DESC LIMIT ?';
-  params.push(limit);
-
-  return db.query(sql).all(...params) as Observation[];
+  void db;
+  void options;
+  throwObservationSchemaRemoved();
 }
 
 export function searchObservations(
   db: Database,
   options: SearchOptions = {}
 ): Observation[] {
-  const { project, sessionId, after, before, limit = 100 } = options;
-  const params: any[] = [];
-
-  let sql = `
-    SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
-    FROM observations
-    WHERE 1=1
-  `;
-
-  if (project) {
-    sql += ' AND project = ?';
-    params.push(project);
-  }
-
-  if (sessionId) {
-    sql += ' AND session_id = ?';
-    params.push(sessionId);
-  }
-
-  if (after) {
-    sql += ' AND timestamp >= ?';
-    params.push(after);
-  }
-
-  if (before) {
-    sql += ' AND timestamp <= ?';
-    params.push(before);
-  }
-
-  sql += ' ORDER BY timestamp DESC LIMIT ?';
-  params.push(limit);
-
-  return db.query(sql).all(...params) as Observation[];
+  void db;
+  void options;
+  throwObservationSchemaRemoved();
 }
 
 export function getObservationById(
   db: Database,
   id: number
 ): Observation | null {
-  const result = db.query(`
-    SELECT id, title, content, content_original as contentOriginal, project, session_id as sessionId, timestamp, created_at as createdAt
-    FROM observations
-    WHERE id = ?
-  `).get(id) as Observation | undefined;
-
-  return result ?? null;
+  void db;
+  void id;
+  throwObservationSchemaRemoved();
 }
 
 export function getObservation(
@@ -419,12 +330,7 @@ export function getObservation(
 }
 
 export function getObservationsByIds(db: Database, ids: number[]): Observation[] {
-  if (ids.length === 0) return [];
-  const placeholders = ids.map(() => '?').join(',');
-  return db.query(`
-    SELECT id, title, content, content_original as contentOriginal,
-           project, session_id as sessionId, timestamp, created_at as createdAt
-    FROM observations WHERE id IN (${placeholders})
-    ORDER BY timestamp DESC
-  `).all(...ids) as Observation[];
+  void db;
+  void ids;
+  throwObservationSchemaRemoved();
 }
