@@ -61,7 +61,11 @@ Codex source:
 
 Testing may override sources with a dedicated test source directory.
 
-Only existing source directories are scanned. Source relative paths are preserved under the archive so nested project/session structure remains stable.
+Only existing source directories are scanned. Archive paths include a source-kind prefix before the source-relative path so sources cannot collide:
+
+- `claude-projects/<relative path>`
+- `claude-transcripts/<relative path>`
+- `codex-sessions/<relative path>`
 
 ## Archive behavior
 
@@ -71,22 +75,21 @@ Sync behavior:
 
 - Skip unchanged files by comparing destination mtime with source mtime.
 - Copy changed files through a temporary file and atomic rename.
-- Copy excluded files when appropriate, but do not index them.
-- Preserve nested relative paths to avoid collisions and keep source provenance.
+- Do not copy path-excluded files.
+- Copy marker-excluded files to the archive, but do not index them.
+- Preserve nested source-relative paths under the source-kind prefix to avoid collisions and keep source provenance.
 - Run under a lock so concurrent syncs do not corrupt archive or index state.
 - Exit successfully when another sync already holds the lock.
 
-A reentrancy guard prevents sync loops from assistant subprocesses or future summarizer flows.
+A reentrancy guard prevents sync loops from assistant subprocesses or future summarizer flows. The guard variable is `MEMMEM_SYNC_GUARD=1`. Sync exits successfully without doing work when this variable is present in its own environment. Normal Claude and Codex SessionStart hook invocations do not set the guard on the top-level sync process; they set it only on child assistant/summarizer subprocess environments.
 
 ## Exclusion rules
 
 Do not index transcripts when any of these apply:
 
-- A top-level or nested path component matches configured excluded projects.
-- The transcript contains `DO NOT INDEX THIS CHAT`.
-- The transcript is a generated summarizer/search context conversation that should not become memory.
-
-Excluded files may still be archived for completeness, but no exchange rows or vectors are created for them.
+- A top-level or nested path component matches configured excluded projects. Path-excluded files are not copied to the archive.
+- The transcript contains `DO NOT INDEX THIS CHAT`. Marker-excluded files are copied to the archive but not indexed.
+- The transcript is a generated summarizer/search context conversation that should not become memory. Generated context files are copied only if they came from a normal transcript source; they are never indexed.
 
 ## Database schema
 
@@ -186,7 +189,7 @@ Codex tool calls and outputs are matched by call ID across supported shapes, inc
 
 ## Indexing behavior
 
-`memmem sync` indexes only archived files that were newly copied or modified. `memmem index` may later be added for manual full-index or cleanup workflows.
+`memmem sync` indexes archived files that need database work, not only files copied during the current run. A file needs indexing when it was newly copied, modified, missing from the `exchanges` table, or has stale embeddings. This lets users delete the database and rebuild from the existing archive with `memmem sync`.
 
 For each archive file:
 
@@ -318,7 +321,7 @@ Add a `.codex-plugin/plugin.json` that exposes:
 
 Keep package version references synchronized across `package.json`, Claude plugin metadata, Codex plugin metadata, and marketplace metadata.
 
-Codex SessionStart hook should run the same background-safe sync command as Claude integration. The command must support `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` so the same hook works in Codex and Claude plugin environments.
+Codex SessionStart hook should run the same background-safe sync command as Claude integration. The command must support `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` so the same hook works in Codex and Claude plugin environments. Hook-launched top-level sync must not receive `MEMMEM_SYNC_GUARD=1`; only child assistant/summarizer subprocess environments receive it.
 
 Codex support requires doctor checks for:
 
