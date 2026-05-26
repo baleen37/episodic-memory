@@ -4,7 +4,7 @@
 
 Replace memmem's current observation-based memory system with an episodic-memory-style transcript-centric system.
 
-The new system indexes Claude Code and Codex transcripts directly, stores searchable exchanges and tool calls in SQLite, and exposes semantic/text search plus transcript reading through CLI and MCP tools.
+The new system indexes transcripts through source adapters, stores searchable exchanges and tool calls in SQLite, and exposes search plus transcript reading through CLI and MCP tools. Claude Code and Codex are the first built-in adapters; future harnesses should plug in without changing the index/search schema.
 
 This is a breaking redesign. Existing observation data and schema compatibility are not preserved. Users can delete the old database and run `memmem sync` to rebuild the new index.
 
@@ -14,6 +14,8 @@ This is a breaking redesign. Existing observation data and schema compatibility 
 - Keep Stop-hook LLM observation extraction.
 - Add a new multilingual embedding model in this phase.
 - Add summarization as a required indexing dependency.
+- Recreate episodic-memory's full doctor/plugin trust surface in this phase.
+- Expose separate vector/text/both mode flags in this phase.
 
 ## Embedding
 
@@ -27,14 +29,14 @@ The archive is the source of truth. `sync` discovers source transcripts, copies 
 
 Main modules:
 
-- `core/paths`: resolve config, archive, index, log, Claude, and Codex paths.
-- `core/sync`: discover transcript sources, copy changed files atomically, enforce single-instance sync.
-- `core/parser`: parse Claude Code JSONL and Codex rollout JSONL into normalized exchanges.
-- `core/indexer`: append-only incremental indexing from archive files into SQLite.
+- `core/sources`: source adapter interface plus built-in Claude Code and Codex adapters.
+- `core/sync`: discover transcripts through adapters and copy changed files atomically.
+- `core/parser`: dispatch archived files to the matching adapter parser and return normalized exchanges.
+- `core/indexer`: index archived files into SQLite; reindex a file from scratch when needed.
 - `core/embeddings`: load `gte-small` lazily and embed exchange text.
-- `core/search`: vector, text, both, and multi-concept search over exchanges.
+- `core/search`: default hybrid search over exchanges.
 - `core/read`: render archived transcript files or line ranges as markdown.
-- `cli`: `sync`, `search`, `show`, `stats`, and later `doctor`.
+- `cli`: `sync`, `search`, and `read`.
 - `mcp`: `search` and `read` tools only.
 
 Remove the existing hook-driven observation flow:
@@ -48,24 +50,20 @@ Remove the existing hook-driven observation flow:
 
 ## Transcript sources
 
-`memmem sync` treats Claude Code and Codex as first-class sources.
+Sources are adapters. Each adapter declares:
 
-Claude Code sources:
+- `kind`: stable source namespace used in archive paths, such as `claude-projects`, `claude-transcripts`, or `codex-sessions`
+- `roots`: directories to scan
+- `detect(file)`: whether the adapter can parse a file
+- `parse(file)`: normalized exchange extraction
 
-- `CLAUDE_CONFIG_DIR || ~/.claude` / `projects`
-- `CLAUDE_CONFIG_DIR || ~/.claude` / `transcripts`
+Built-in adapters:
 
-Codex source:
+- Claude Code projects: `CLAUDE_CONFIG_DIR || ~/.claude` / `projects`
+- Claude Code transcripts: `CLAUDE_CONFIG_DIR || ~/.claude` / `transcripts`
+- Codex sessions: `CODEX_HOME || ~/.codex` / `sessions`
 
-- `CODEX_HOME || ~/.codex` / `sessions`
-
-Testing may override sources with a dedicated test source directory.
-
-Only existing source directories are scanned. Archive paths include a source-kind prefix before the source-relative path so sources cannot collide:
-
-- `claude-projects/<relative path>`
-- `claude-transcripts/<relative path>`
-- `codex-sessions/<relative path>`
+Only existing roots are scanned. Archive paths are always `<kind>/<relative path>` so future harnesses can be added without path collisions or schema changes.
 
 ## Archive behavior
 
@@ -75,21 +73,10 @@ Sync behavior:
 
 - Skip unchanged files by comparing destination mtime with source mtime.
 - Copy changed files through a temporary file and atomic rename.
-- Do not copy path-excluded files.
-- Copy marker-excluded files to the archive, but do not index them.
-- Preserve nested source-relative paths under the source-kind prefix to avoid collisions and keep source provenance.
-- Run under a lock so concurrent syncs do not corrupt archive or index state.
-- Exit successfully when another sync already holds the lock.
+- Preserve nested source-relative paths under the adapter `kind` prefix.
+- Use a single sync lock; if another sync is running, exit successfully.
 
-A reentrancy guard prevents sync loops from assistant subprocesses or future summarizer flows. The guard variable is `MEMMEM_SYNC_GUARD=1`. Sync exits successfully without doing work when this variable is present in its own environment. Normal Claude and Codex SessionStart hook invocations do not set the guard on the top-level sync process; they set it only on child assistant/summarizer subprocess environments.
-
-## Exclusion rules
-
-Do not index transcripts when any of these apply:
-
-- A top-level or nested path component matches configured excluded projects. Path-excluded files are not copied to the archive.
-- The transcript contains `DO NOT INDEX THIS CHAT`. Marker-excluded files are copied to the archive but not indexed.
-- The transcript is a generated summarizer/search context conversation that should not become memory. Generated context files are copied only if they came from a normal transcript source; they are never indexed.
+Exclusion is intentionally minimal in this phase: if a transcript contains `DO NOT INDEX THIS CHAT`, archive it but do not index it. Project/path exclusion lists and generated-summary special cases are out of scope for the first implementation.
 
 ## Database schema
 
@@ -105,7 +92,7 @@ Important columns:
 - `archive_path TEXT NOT NULL`
 - `line_start INTEGER NOT NULL`
 - `line_end INTEGER NOT NULL`
-- `harness TEXT NOT NULL` (`claude` or `codex`)
+- `source_kind TEXT NOT NULL`
 - `session_id TEXT`
 - `project TEXT`
 - `cwd TEXT`
@@ -117,7 +104,6 @@ Important columns:
 - `user_text TEXT NOT NULL`
 - `assistant_text TEXT NOT NULL`
 - `embedding_text TEXT NOT NULL`
-- `is_sidechain INTEGER NOT NULL DEFAULT 0`
 - `embedding_version INTEGER NOT NULL DEFAULT 0`
 - `created_at INTEGER NOT NULL`
 - `updated_at INTEGER NOT NULL`
@@ -126,7 +112,7 @@ Important columns:
 
 Add a unique index on `(archive_path, line_start, line_end)` to make repeated syncs idempotent. `vec_exchanges.id` stores `String(exchanges.id)` and joins with `CAST(exchanges.id AS TEXT)`.
 
-The indexer uses `archive_path` plus `MAX(line_end)` as the high-water mark only when the archived file is append-only. If a source file modification changes existing content, the sync/index flow deletes all rows for that `archive_path` and reindexes the archived file from line 1.
+The indexer keeps the implementation simple: when an archived file needs indexing, delete existing rows for that `archive_path` and reindex the file from line 1. Append-only high-water indexing is an optimization to add later only if needed.
 
 ### `tool_calls`
 
@@ -174,11 +160,11 @@ The parser detects Codex rollout files from records such as:
 - `event_msg`
 - `compacted`
 
-Harness values are normalized to `claude` and `codex`.
+Adapters preserve their `source_kind`.
 
 Codex metadata to preserve:
 
-- harness: `codex`
+- source kind: `codex-sessions`
 - session ID, including rollout filename UUID fallback
 - cwd and project
 - git branch
@@ -191,87 +177,54 @@ Codex tool calls and outputs are matched by call ID across supported shapes, inc
 
 `memmem sync` indexes archived files that need database work, not only files copied during the current run. A file needs indexing when it was newly copied, modified, missing from the `exchanges` table, or has stale embeddings. This lets users delete the database and rebuild from the existing archive with `memmem sync`.
 
-For each archive file:
+For each archive file that needs indexing:
 
-1. Decide whether the file is append-only by comparing previous indexed line count/content metadata with the refreshed archive.
-2. If append-only, determine the high-water mark from `MAX(line_end)` for that `archive_path`.
-3. If not append-only, delete existing `exchanges` for that `archive_path`; `tool_calls` cascade and vector rows are removed in the same cleanup transaction.
-4. Parse exchanges from the archived file.
-5. For append-only files, keep only exchanges with `line_start > maxIndexedLine`; for rewritten files, keep all exchanges.
-6. Generate embedding for each exchange's `embedding_text`.
-7. Insert exchange row, tool call rows, and vector row in a transaction.
-8. Stamp the current `embedding_version`.
+1. Delete existing `exchanges` for that `archive_path`; `tool_calls` cascade and vector rows are removed in the same cleanup transaction.
+2. Ask the matching source adapter to parse normalized exchanges.
+3. Generate embedding for each exchange's `embedding_text`.
+4. Insert exchange row, tool call rows, and vector row in a transaction.
+5. Stamp the current `embedding_version`.
 
-Embedding migration runs at the end of `sync` after newly indexed files are processed. It re-embeds rows where `embedding_version` is stale in batches of 100 behind an embedding-migration lock in the index directory. Failures leave rows stale so the next sync can resume.
+Embedding migration is simple in this phase: rows with stale `embedding_version` are treated as needing reindex for their `archive_path`. Batch migration locks can be added later if the full-file reindex becomes too slow.
 
 ## Search behavior
 
-The default search mode is `both`.
-
-Supported modes:
-
-- `vector`: KNN search over `vec_exchanges`, ordered by vector distance converted to similarity.
-- `text`: SQL `LIKE` search over user and assistant text, ordered by timestamp descending.
-- `both`: vector results first, then text results appended with ID de-duplication.
+Search has one default behavior in this phase: hybrid search. It runs vector search first, then appends text matches with ID de-duplication. Separate `vector`, `text`, and `both` user-facing flags are out of scope until there is a proven need.
 
 Filters use bound SQL parameters and AND semantics:
 
 - `after` (`YYYY-MM-DD`)
 - `before` (`YYYY-MM-DD`)
-- `project`
-- `session_id`
-- `git_branch`
+- `source_kind`
 
-Sidechain exchanges are excluded by default.
+Additional metadata filters such as project, session, and branch are out of scope for the first implementation.
 
 Search results are compact cards:
 
 - project and date
-- `score` for vector-backed matches, omitted for text-only matches
-- `mode`: `vector`, `text`, or `both`
-- snippet chosen from the first matching text field; text search prefers the field containing the matched term, vector search prefers assistant text with user text fallback
+- score when the result came from vector search
+- short snippet
 - archive path
 - line range
-- concept scores and concept ranges for multi-concept search
 
-## Multi-concept search
-
-A query may be a string array or multiple CLI query arguments.
-
-For each concept:
-
-1. Run vector-only search with a wider candidate limit, such as `limit * 5`.
-2. Group candidates by `archive_path`.
-3. Keep only transcripts where every concept appears.
-4. Rank by average similarity across concepts.
-5. Return transcript-level results with per-concept scores and per-concept representative ranges.
-
-The aggregation unit is transcript/archive path, not exchange ID. A multi-concept result includes `concepts: [{ query, score, lineStart, lineEnd, exchangeId }]` rather than a single ambiguous line range.
+Multi-concept search is out of scope for the first implementation. A later version can add it on top of the same `archive_path` and line-range metadata without changing the schema.
 
 ## CLI surface
 
 Primary commands:
 
 - `memmem sync`
-- `memmem search <query...>`
-- `memmem show <archive_path>`
+- `memmem search <query>`
 - `memmem read <archive_path>`
-- `memmem stats`
 
 Search options:
 
-- `--vector`
-- `--text`
-- `--both`
-- `--json`
 - `--after YYYY-MM-DD`
 - `--before YYYY-MM-DD`
-- `--project <name>`
-- `--session-id <id>`
-- `--git-branch <branch>`
+- `--source-kind <kind>`
 - `--limit <n>`
 
-`show` is an alias for `read`. Both render archived transcripts as markdown and accept `--start-line` and `--end-line`. HTML output is out of scope for this phase.
+`read` renders archived transcripts as markdown and accepts `--start-line` and `--end-line`. `show`, JSON output, HTML output, and mode flags are out of scope for this phase.
 
 ## MCP surface
 
@@ -281,18 +234,15 @@ Expose two MCP tools.
 
 Input:
 
-- `query`: string or string array
-- `mode`: `vector`, `text`, or `both`, default `both`
+- `query`: string
 - `limit`
 - `after`
 - `before`
-- `project`
-- `session_id`
-- `git_branch`
+- `source_kind`
 
 Output:
 
-- JSON search results with compact metadata, snippets, archive path, line range, and multi-concept details when applicable.
+- JSON search results with compact metadata, snippets, archive path, and line range.
 
 MCP search is JSON-only in this phase. Markdown formatting belongs to the CLI.
 
@@ -308,30 +258,11 @@ Output:
 
 - Markdown-rendered transcript or line range.
 
-## Codex plugin support
+## Adapter and plugin support
 
-Codex is part of the first design, not a later add-on.
+Codex is included because it is one of the first built-in source adapters, not because the core should become Codex-specific.
 
-Add a `.codex-plugin/plugin.json` that exposes:
-
-- MCP server config through `.mcp.json` with relative `cwd` resolved from the plugin root
-- required environment passthrough for config, Codex home, and logging paths
-- memory/search skill files
-- hook configuration
-
-Keep package version references synchronized across `package.json`, Claude plugin metadata, Codex plugin metadata, and marketplace metadata.
-
-Codex SessionStart hook should run the same background-safe sync command as Claude integration. The command must support `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}` so the same hook works in Codex and Claude plugin environments. Hook-launched top-level sync must not receive `MEMMEM_SYNC_GUARD=1`; only child assistant/summarizer subprocess environments receive it.
-
-Codex support requires doctor checks for:
-
-- minimum `codex-cli` version
-- `plugins` feature enabled
-- `plugin_hooks` feature enabled
-- MCP server registration
-- sessions directory exists
-- hook trust state: trusted, untrusted, modified, not found, or unknown
-- sync log path and database path
+The first implementation needs adapter tests for Claude Code and Codex. Plugin manifests, hook trust checks, and doctor commands are out of scope for this phase. They can be added later without changing the archive, parser, index, search, or MCP contracts.
 
 ## Testing strategy
 
@@ -339,22 +270,19 @@ Use `bun test` for this project.
 
 Required tests:
 
+- Source adapter discovery for Claude Code and Codex.
 - Claude transcript parser fixtures.
 - Codex rollout parser fixtures.
-- Source discovery for Claude and Codex paths.
 - Sync idempotency and atomic copy behavior.
 - Single-instance sync lock behavior.
-- Reentrancy guard behavior.
-- Exclusion by path and transcript marker.
-- Append-only incremental indexing by `MAX(line_end)`.
+- Marker exclusion with `DO NOT INDEX THIS CHAT`.
+- Full-file reindex when an archived file needs indexing.
 - `tool_calls` cascade delete.
-- Embedding version stale-row reindexing.
-- Search mode behavior for vector, text, and both.
-- Multi-concept transcript-level aggregation.
+- Stale `embedding_version` triggers archive-path reindex.
+- Default hybrid search behavior.
 - MCP `search` and `read` schema/handler behavior.
-- Codex plugin manifest and doctor checks.
 
-Optional live E2E tests can cover Claude Code and Codex plugin behavior, but unit and integration fixtures should prove the core behavior without requiring live tools.
+Optional live E2E tests can cover Claude Code and Codex plugin behavior later, but unit and integration fixtures should prove the core behavior without requiring live tools.
 
 ## Rollout
 
@@ -364,9 +292,9 @@ Implementation should remove the old observation path and replace it with the tr
 
 The first implementation plan should be split into these milestones:
 
-1. Schema and parser replacement.
-2. Sync/archive/index flow.
-3. Search/read CLI.
-4. MCP search/read replacement.
-5. Codex plugin and doctor support.
+1. Schema and source adapter interfaces.
+2. Claude Code and Codex parser adapters.
+3. Sync/archive/full-file index flow.
+4. Default search and read CLI.
+5. MCP search/read replacement.
 6. Removal of old observation hooks and tests.
