@@ -13,9 +13,10 @@ interface CodexMeta {
   provider: string | null;
 }
 
-interface PendingCodexExchange {
+interface PendingCodexExchange extends CodexMeta {
   lineStart: number;
   lineEnd: number;
+  timestamp: number | null;
   userText: string;
   assistantTexts: string[];
   toolCalls: ToolCallRecord[];
@@ -36,14 +37,14 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         lineStart: current.lineStart,
         lineEnd: current.lineEnd,
         sourceKind: context.sourceKind,
-        sessionId: meta.sessionId,
+        sessionId: current.sessionId,
         project: null,
-        cwd: meta.cwd,
-        gitBranch: meta.gitBranch,
-        model: meta.model,
-        provider: meta.provider,
+        cwd: current.cwd,
+        gitBranch: current.gitBranch,
+        model: current.model,
+        provider: current.provider,
         metadataJson: JSON.stringify({ source: 'codex' }),
-        timestamp: null,
+        timestamp: current.timestamp,
         userText: current.userText,
         assistantText,
         embeddingText: [current.userText, assistantText].filter(Boolean).join('\n'),
@@ -95,6 +96,12 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         current = {
           lineStart: lineNumber,
           lineEnd: lineNumber,
+          sessionId: meta.sessionId,
+          cwd: meta.cwd,
+          gitBranch: meta.gitBranch,
+          model: meta.model,
+          provider: meta.provider,
+          timestamp: parseTimestamp(item.timestamp),
           userText: extractText(payload.content).trim(),
           assistantTexts: [],
           toolCalls: [],
@@ -104,6 +111,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
 
       if (role === 'assistant' && current) {
         current.lineEnd = lineNumber;
+        current.timestamp ??= parseTimestamp(item.timestamp);
         const text = extractText(payload.content).trim();
         if (text) current.assistantTexts.push(text);
       }
@@ -112,6 +120,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
 
     if (!current) continue;
     current.lineEnd = lineNumber;
+    current.timestamp ??= parseTimestamp(item.timestamp);
 
     if (isToolCallType(payload.type)) {
       current.toolCalls.push({
@@ -192,6 +201,12 @@ function asObject(value: unknown): JsonObject | null {
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+function parseTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
 }
 
 function stringifyValue(value: unknown): string | null {
