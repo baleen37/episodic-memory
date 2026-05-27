@@ -124,7 +124,7 @@ function createClaudeAdapter(kind: string, dirname: string): SourceAdapter {
   return {
     kind,
     roots() {
-      const root = path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), dirname);
+      const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), dirname);
       return existsSync(root) ? [root] : [];
     },
     detect(filePath: string) {
