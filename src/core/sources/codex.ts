@@ -68,7 +68,17 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         meta.cwd = asString(payload.cwd);
         meta.gitBranch = asString(asObject(payload.git)?.branch);
         meta.model = asString(payload.model);
-        meta.provider = asString(payload.provider);
+        meta.provider = asString(payload.provider) ?? asString(payload.model_provider);
+      }
+      continue;
+    }
+
+    if (item.type === 'turn_context') {
+      const payload = asObject(item.payload);
+      if (payload) {
+        meta.cwd = asString(payload.cwd) ?? meta.cwd;
+        meta.model = asString(payload.model) ?? meta.model;
+        meta.provider = asString(payload.provider) ?? asString(payload.model_provider) ?? meta.provider;
       }
       continue;
     }
@@ -103,19 +113,19 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
     if (!current) continue;
     current.lineEnd = lineNumber;
 
-    if (payload.type === 'function_call') {
+    if (isToolCallType(payload.type)) {
       current.toolCalls.push({
-        toolName: asString(payload.name),
-        callId: asString(payload.call_id),
-        input: asString(payload.arguments),
+        toolName: asString(payload.name) ?? asString(payload.toolName) ?? asString(payload.type),
+        callId: asString(payload.call_id) ?? asString(payload.id),
+        input: stringifyValue(payload.arguments ?? payload.input ?? payload.action ?? payload.query),
         output: null,
         status: null,
       });
       continue;
     }
 
-    if (payload.type === 'function_call_output') {
-      const callId = asString(payload.call_id);
+    if (isToolOutputType(payload.type)) {
+      const callId = asString(payload.call_id) ?? asString(payload.id);
       const existing = current.toolCalls.find(call => call.callId === callId && call.output === null);
       const output = stringifyValue(payload.output);
       if (existing) {
@@ -158,6 +168,14 @@ function extractText(value: unknown): string {
     })
     .filter(Boolean)
     .join('\n');
+}
+
+function isToolCallType(value: unknown): boolean {
+  return value === 'function_call' || value === 'custom_tool_call' || value === 'tool_search_call' || value === 'local_shell_call';
+}
+
+function isToolOutputType(value: unknown): boolean {
+  return value === 'function_call_output' || value === 'custom_tool_call_output' || value === 'tool_search_call_output' || value === 'local_shell_call_output';
 }
 
 function parseJsonObject(line: string): JsonObject | null {

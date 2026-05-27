@@ -70,6 +70,14 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
     const messageContent = message && 'content' in message ? message.content : undefined;
 
     if (role === 'user') {
+      if (isToolResultContent(messageContent)) {
+        if (current) {
+          current.lineEnd = lineNumber;
+          applyToolResults(current.toolCalls, messageContent);
+        }
+        continue;
+      }
+
       flushCurrent();
       const userText = extractText(messageContent).trim();
       current = {
@@ -102,6 +110,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
     current.provider ??= asString(item.provider);
 
     if (role === 'assistant') {
+      current.model ??= asString(message?.model);
       const text = extractText(messageContent).trim();
       if (text) current.assistantTexts.push(text);
       current.toolCalls.push(...extractToolCalls(messageContent));
@@ -170,20 +179,37 @@ function extractToolCalls(value: unknown): ToolCallRecord[] {
     }
 
     if (object.type === 'tool_result') {
-      const callId = asString(object.tool_use_id);
-      const existing = calls.find(call => call.callId === callId && call.output === null);
-      const output = stringifyValue(object.content);
-      const status = object.is_error === true ? 'error' : 'success';
-      if (existing) {
-        existing.output = output;
-        existing.status = status;
-      } else {
-        calls.push({ toolName: null, callId, input: null, output, status });
-      }
+      applyToolResult(calls, object);
     }
   }
 
   return calls;
+}
+
+function isToolResultContent(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(block => asObject(block)?.type === 'tool_result');
+}
+
+function applyToolResults(calls: ToolCallRecord[], value: unknown): void {
+  if (!Array.isArray(value)) return;
+  for (const block of value) {
+    const object = asObject(block);
+    if (object?.type === 'tool_result') applyToolResult(calls, object);
+  }
+}
+
+function applyToolResult(calls: ToolCallRecord[], object: JsonObject): void {
+  const callId = asString(object.tool_use_id);
+  const existing = calls.find(call => call.callId === callId && call.output === null);
+  const output = stringifyValue(object.content);
+  const status = object.is_error === true ? 'error' : 'success';
+  if (existing) {
+    existing.output = output;
+    existing.status = status;
+  } else {
+    calls.push({ toolName: null, callId, input: null, output, status });
+  }
 }
 
 function parseJsonObject(line: string): JsonObject | null {
