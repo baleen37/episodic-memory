@@ -49,4 +49,31 @@ describe('exchange search', () => {
     expect(results).toHaveLength(1);
     expect(results[0].sourceKind).toBe('codex-sessions');
   });
+
+  test('preserves null project and timestamp without legacy title', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+
+    insertExchange(db, {
+      archivePath: '/archive/claude-projects/nulls.jsonl', lineStart: 5, lineEnd: 6, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: null, userText: 'null shape', assistantText: 'result', embeddingText: 'null shape result', embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+
+    const results = await search('null shape', { db, limit: 10 });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].project).toBeNull();
+    expect(results[0].timestamp).toBeNull();
+    expect(Object.keys(results[0]).sort()).toEqual([
+      'archivePath',
+      'id',
+      'lineEnd',
+      'lineStart',
+      'project',
+      'snippet',
+      'sourceKind',
+      'timestamp',
+    ]);
+    expect(results[0]).not.toHaveProperty('title');
+  });
 });

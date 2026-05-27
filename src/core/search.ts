@@ -24,12 +24,6 @@ export interface ExchangeSearchResult {
   score?: number;
 }
 
-type SearchResult = ExchangeSearchResult & {
-  title: string;
-  project: string;
-  timestamp: number;
-};
-
 function isValidCalendarDate(dateStr: string): boolean {
   const [year, month, day] = dateStr.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -102,18 +96,16 @@ function mapRow(row: {
   userText: string;
   assistantText: string;
   distance?: number;
-}): SearchResult {
-  const snippet = makeSnippet(row.userText, row.assistantText);
-  const result: SearchResult = {
+}): ExchangeSearchResult {
+  const result: ExchangeSearchResult = {
     id: row.id,
     archivePath: row.archivePath,
     lineStart: row.lineStart,
     lineEnd: row.lineEnd,
     sourceKind: row.sourceKind,
-    project: row.project ?? '',
-    timestamp: row.timestamp ?? 0,
-    snippet,
-    title: snippet,
+    project: row.project,
+    timestamp: row.timestamp,
+    snippet: makeSnippet(row.userText, row.assistantText),
   };
 
   if (row.distance !== undefined) {
@@ -123,7 +115,7 @@ function mapRow(row: {
   return result;
 }
 
-async function vectorSearch(query: string, options: SearchOptions): Promise<SearchResult[]> {
+async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
   const { db, limit = 10, after, before, sourceKind } = options;
   const embedding = await generateEmbedding(query);
 
@@ -163,7 +155,7 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Sear
   return rows.map(mapRow);
 }
 
-function textSearch(query: string, options: SearchOptions): SearchResult[] {
+function textSearch(query: string, options: SearchOptions): ExchangeSearchResult[] {
   const { db, limit = 10, after, before, sourceKind } = options;
   const filterParts = buildFilterParts(after, before, sourceKind);
   const stmt = db.query(`
@@ -198,14 +190,14 @@ function textSearch(query: string, options: SearchOptions): SearchResult[] {
 export async function search(
   query: string,
   options: SearchOptions
-): Promise<SearchResult[]> {
+): Promise<ExchangeSearchResult[]> {
   const { limit = 10, after, before } = options;
 
   if (after) validateISODate(after, '--after');
   if (before) validateISODate(before, '--before');
 
   const vectorResults = await vectorSearch(query, options);
-  const combined: SearchResult[] = [...vectorResults];
+  const combined: ExchangeSearchResult[] = [...vectorResults];
   const seenIds = new Set(vectorResults.map(result => result.id));
 
   if (combined.length < limit) {

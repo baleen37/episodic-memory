@@ -6,7 +6,7 @@
  */
 
 import type { Database } from 'bun:sqlite';
-import { search } from '../core/search.js';
+import { search, type ExchangeSearchResult } from '../core/search.js';
 import { getObservationsByIds } from '../core/db.js';
 import { readConversation } from '../core/read.js';
 import type { SearchInput, GetObservationsInput, ReadInput } from './schemas.js';
@@ -16,9 +16,8 @@ export type { LoadConfigFn, CreateProviderFn };
 
 // Types for handler outputs
 
-export interface SearchResult {
+export interface SearchResult extends Omit<ExchangeSearchResult, 'id' | 'project' | 'timestamp'> {
   id: string;
-  title: string;
   project: string;
   timestamp: number;
 }
@@ -86,9 +85,14 @@ export async function handleSearch(
 
   return results.map(r => ({
     id: String(r.id),
-    title: r.title,
-    project: r.project,
-    timestamp: r.timestamp,
+    archivePath: r.archivePath,
+    lineStart: r.lineStart,
+    lineEnd: r.lineEnd,
+    sourceKind: r.sourceKind,
+    project: r.project ?? '',
+    timestamp: r.timestamp ?? 0,
+    snippet: r.snippet,
+    ...(r.score !== undefined ? { score: r.score } : {}),
   }));
 }
 
