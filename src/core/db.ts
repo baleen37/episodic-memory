@@ -211,6 +211,11 @@ export function insertToolCall(db: Database, toolCall: ToolCallInsert): number {
   return result.lastInsertRowid as number;
 }
 
+export function insertExchangeVector(db: Database, exchangeId: number, embedding: number[]): void {
+  db.query('INSERT OR REPLACE INTO vec_exchanges(rowid, embedding) VALUES (?, ?)')
+    .run(exchangeId, Buffer.from(new Float32Array(embedding).buffer));
+}
+
 export function deleteExchangeIndexForArchivePath(db: Database, archivePath: string): void {
   const rows = db.query('SELECT id FROM exchanges WHERE archive_path = ?').all(archivePath) as Array<{ id: number }>;
   const ids = rows.map(row => row.id);
