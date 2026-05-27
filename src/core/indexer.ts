@@ -19,25 +19,34 @@ export async function reindexArchiveFile(
   }
 
   const exchanges = parser(content, { archivePath, sourceKind });
-  deleteExchangeIndexForArchivePath(db, archivePath);
-
-  let indexed = 0;
+  const embeddings: Array<number[] | null> = [];
   for (const exchange of exchanges) {
-    const embedding = await generateEmbedding(exchange.embeddingText);
-    const exchangeId = insertExchange(db, {
-      ...exchange,
-      embeddingVersion: CURRENT_EMBEDDING_VERSION,
-    });
-
-    for (const toolCall of exchange.toolCalls) {
-      insertToolCall(db, { exchangeId, ...toolCall });
-    }
-
-    if (embedding) {
-      insertExchangeVector(db, exchangeId, embedding);
-    }
-    indexed++;
+    embeddings.push(await generateEmbedding(exchange.embeddingText));
   }
 
-  return indexed;
+  const replaceIndex = db.transaction(() => {
+    deleteExchangeIndexForArchivePath(db, archivePath);
+
+    let indexed = 0;
+    for (const [index, exchange] of exchanges.entries()) {
+      const exchangeId = insertExchange(db, {
+        ...exchange,
+        embeddingVersion: CURRENT_EMBEDDING_VERSION,
+      });
+
+      for (const toolCall of exchange.toolCalls) {
+        insertToolCall(db, { exchangeId, ...toolCall });
+      }
+
+      const embedding = embeddings[index];
+      if (embedding) {
+        insertExchangeVector(db, exchangeId, embedding);
+      }
+      indexed++;
+    }
+
+    return indexed;
+  });
+
+  return replaceIndex();
 }
