@@ -15,17 +15,20 @@ const PREFIX = {
 
 const MAX_CONTENT_CHARS = 8000;
 
+const MODEL_ID = 'dragonkue/multilingual-e5-small-ko-v2';
+
 export async function initModel(): Promise<void> {
   if (!embeddingPipeline) {
     const { pipeline, env } = await import('@huggingface/transformers');
-    console.log('Loading embedding model (first run may take time)...');
+    console.log(`Loading embedding model ${MODEL_ID} (first run downloads ~150MB, may take 1-2 min)...`);
     env.cacheDir = './.cache';
+    const start = Date.now();
     embeddingPipeline = await pipeline(
       'feature-extraction',
-      'dragonkue/multilingual-e5-small-ko-v2',
+      MODEL_ID,
       { dtype: 'fp16' } as any
     );
-    console.log('Embedding model loaded');
+    console.log(`Embedding model loaded in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   }
 }
 

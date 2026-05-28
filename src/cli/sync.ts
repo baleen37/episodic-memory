@@ -49,10 +49,19 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
     }
   }
 
+  const total = archiveFiles.size;
+  if (total > 0) {
+    console.log(`Indexing ${total} archive file${total === 1 ? '' : 's'}...`);
+  }
+
   let indexed = 0;
+  const progressInterval = Math.max(1, Math.floor(total / 20));
   for (const file of archiveFiles.values()) {
     await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse);
     indexed++;
+    if (indexed % progressInterval === 0 || indexed === total) {
+      console.log(`  ${indexed}/${total} indexed`);
+    }
   }
 
   return {
