@@ -6,68 +6,68 @@ Build and wrapper scripts for the memmem plugin.
 
 This directory contains scripts for:
 
-- Building the plugin with esbuild
-- Wrapping executables with dependency checking
+- Building the plugin with Bun.build
+- Wrapping executables with dependency and build checks
 
 ## Files
 
 ### build.mjs
 
-Main build script using esbuild to bundle the CLI and MCP server into standalone files.
+Main Bun build script that bundles the CLI and MCP server into standalone files.
 
 **Usage:**
 
 ```bash
-npm run build
+bun run build
 # or directly:
-node scripts/build.mjs
+bun scripts/build.mjs
 ```
 
 **Output:**
 
-- `dist/cli-internal.mjs` - Bundled CLI (actual implementation)
-- `dist/cli.mjs` - Graceful wrapper (copied from `src/cli-graceful.mjs`)
+- `dist/cli-internal.mjs` - Bundled CLI implementation
+- `dist/cli.mjs` - Bun CLI wrapper copied from `src/cli-graceful.mjs`
 - `dist/mcp-server.mjs` - Bundled MCP server
-- `dist/mcp-wrapper.mjs` - MCP wrapper (copied from `scripts/mcp-server-wrapper.mjs`)
+- `dist/mcp-wrapper.mjs` - Bun MCP wrapper copied from `scripts/mcp-server-wrapper.mjs`
 - `dist/lib/check-dependencies.mjs` - Shared dependency logic
 
 **External Dependencies (not bundled):**
 
-The following packages are marked as external and must be installed separately:
+The following packages/runtime modules are marked as external and must be available at runtime:
 
 - `@huggingface/transformers` - Embedding model
-- `better-sqlite3` - SQLite database with native bindings
-- `sharp` - Image processing
+- `bun:sqlite` - SQLite database access from the Bun runtime
+- `sharp` - Image processing dependency used by transformer tooling
 - `onnxruntime-node` - ONNX runtime for ML models
 - `sqlite-vec` - Vector similarity search
 
 ### mcp-server-wrapper.mjs
 
-Cross-platform wrapper script for the MCP server that ensures dependencies are installed and the build is up-to-date before starting.
+Bun wrapper script for the MCP server that ensures dependencies are installed and the build is up-to-date before starting.
 
 **Usage:**
 
 ```bash
 # Typically invoked via Claude Code MCP configuration:
-node scripts/mcp-server-wrapper.mjs
+bun scripts/mcp-server-wrapper.mjs
 ```
 
 **Behavior:**
 
-1. Checks if `node_modules` exists
-2. If missing, runs `npm install` with progress output
-3. Checks if `dist/mcp-server.mjs` exists or is outdated
-4. If needed, runs `npm run build`
-5. Spawns the actual MCP server (`dist/mcp-server.mjs`)
-6. Forwards signals (SIGTERM, SIGINT) to child process
-7. Exits with same exit code as child
+1. Checks if dependencies are installed.
+2. If missing, runs `bun install` with progress output.
+3. Checks if `dist/mcp-server.mjs` exists or is outdated.
+4. If needed, runs `bun run build`.
+5. Spawns the actual MCP server with Bun (`dist/mcp-server.mjs`).
+6. Forwards signals (SIGTERM, SIGINT) to the child process.
+7. Exits with the same exit code as the child.
 
 **Error Handling:**
 
 - Provides helpful error messages for common issues:
-  - Permission denied -> Suggests `chown` command
-  - Disk space full -> Suggests freeing space
-  - Network errors -> Suggests checking connection
+  - Permission denied -> Check project directory and Bun cache permissions
+  - Disk space full -> Free up disk space or clear Bun cache
+  - Network errors -> Check registry/proxy access and internet connection
 
 ### lib/check-dependencies.mjs
 
@@ -82,13 +82,13 @@ checkDependencies() -> { installed: boolean, missing: string[] }
 // Check if build is needed
 checkBuildNeeded() -> { needsBuild: boolean, reason: string }
 
-// Install dependencies (returns Promise)
+// Install dependencies with Bun (returns Promise)
 installDependencies(silent: boolean) -> Promise<void>
 
-// Run build (returns Promise)
+// Run build with Bun (returns Promise)
 runBuild() -> Promise<void>
 
-// Analyze npm error and suggest fix
+// Analyze Bun/runtime errors and suggest fixes
 analyzeError(error: Error) -> { cause: string, fix: string }
 ```
 
@@ -107,7 +107,7 @@ if (!installed) {
 
 ## Two-Layer Wrapper Pattern
 
-The plugin uses a two-layer wrapper pattern for both CLI and MCP server to ensure dependencies are always available without blocking execution.
+The plugin uses a two-layer wrapper pattern for both CLI and MCP server to ensure dependencies are available without surprising startup failures.
 
 ### Layer 1: Graceful Wrapper
 
@@ -115,18 +115,18 @@ The outer layer that handles missing dependencies gracefully.
 
 **CLI Wrapper (`src/cli-graceful.mjs` -> `dist/cli.mjs`):**
 
-```
-User runs: cli.mjs (graceful wrapper)
+```text
+User runs: cli.mjs (Bun wrapper)
     |
     v
 Check dependencies
     |
-    +-- Not installed --> Trigger background npm install
+    +-- Not installed --> Trigger background bun install
     |
     v
 Import cli-internal.mjs (actual CLI)
     |
-    +-- MODULE_NOT_FOUND --> Show helpful error, exit 1
+    +-- missing module --> Show helpful error, exit 1
     |
     v
 CLI runs normally
@@ -140,24 +140,24 @@ The inner layer used by MCP server that blocks until ready.
 
 **MCP Wrapper (`scripts/mcp-server-wrapper.mjs` -> `dist/mcp-wrapper.mjs`):**
 
-```
+```text
 Claude Code starts MCP server
     |
     v
-mcp-wrapper.mjs (blocking wrapper)
+mcp-wrapper.mjs (Bun blocking wrapper)
     |
     v
 Check dependencies
     |
-    +-- Not installed --> Run npm install (blocking, with progress)
+    +-- Not installed --> Run bun install (blocking, with progress)
     |
     v
 Check if build needed
     |
-    +-- Outdated/missing --> Run npm run build (blocking)
+    +-- Outdated/missing --> Run bun run build (blocking)
     |
     v
-Spawn mcp-server.mjs (actual MCP server)
+Spawn mcp-server.mjs with Bun (actual MCP server)
     |
     v
 Forward signals, exit with child's code
@@ -175,23 +175,23 @@ Forward signals, exit with child's code
 | Error handling | Show error, exit | Detailed error analysis |
 | Use case | User commands | Claude Code integration |
 
-**CLI** needs to be responsive. Users typing commands expect immediate feedback even if deps are missing.
+**CLI** needs to be responsive. Users typing commands expect immediate feedback even if dependencies are missing.
 
 **MCP** must be fully functional. Claude Code expects the MCP server to work correctly on first call.
 
 ### Benefits of the Wrapper Pattern
 
-1. **Zero-Config First Run**: Plugin works immediately after clone without manual `npm install`
-2. **Auto-Rebuild**: MCP wrapper detects when rebuild is needed (e.g., after `git pull`)
-3. **Cross-Platform**: Works on Windows, macOS, and Linux
-4. **Helpful Errors**: Translates npm errors into actionable suggestions
-5. **Graceful Degradation**: CLI continues even with missing deps (shows helpful message)
+1. **Zero-Config First Run**: Plugin works after clone without manual `bun install`.
+2. **Auto-Rebuild**: MCP wrapper detects when rebuild is needed (for example, after `git pull`).
+3. **Cross-Platform**: Works on Windows, macOS, and Linux where Bun is available.
+4. **Helpful Errors**: Translates common runtime errors into actionable suggestions.
+5. **Graceful Degradation**: CLI continues even with missing dependencies and shows a helpful message.
 
 ### Implementation Notes
 
 **Environment Variable:**
 
-Both wrappers respect `CLAUDE_PLUGIN_ROOT` environment variable for finding the plugin root directory. This allows the wrappers to work when copied to `dist/` for cached plugins.
+Both wrappers respect `CLAUDE_PLUGIN_ROOT` for finding the plugin root directory. This allows wrappers to work when copied to `dist/` for cached plugins.
 
 ```javascript
 const ROOT = process.env.CLAUDE_PLUGIN_ROOT || resolve(__dirname, '..');
@@ -210,11 +210,11 @@ This ensures clean shutdown when Claude Code terminates.
 
 **Error Analysis:**
 
-The `analyzeError()` function translates common npm errors:
+The `analyzeError()` function translates common Bun/runtime errors:
 
 | Error Code | Cause | Suggested Fix |
 | ---------- | ----- | ------------- |
-| EACCES | Permission denied | `sudo chown -R $(whoami) ~/.npm` |
-| ENOSPC | Disk space full | Free up disk space |
-| ETIMEDOUT | Network error | Check internet connection |
-| ECONNRESET | Network error | Check internet connection |
+| EACCES | Permission denied | Check project directory and Bun cache permissions |
+| ENOSPC | Disk space full | Free up disk space or clear Bun cache |
+| ETIMEDOUT | Network error | Check internet connection or registry/proxy access |
+| ECONNRESET | Network error | Check internet connection or registry/proxy access |
