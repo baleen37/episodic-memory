@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Cross-platform wrapper script for MCP server that ensures dependencies are installed
  * This runs before the MCP server starts and works on Windows, macOS, and Linux
@@ -66,12 +66,12 @@ async function main() {
 
     if (!existsSync(mcpServerPath)) {
       console.error(`[memmem] ERROR: MCP server not found at ${mcpServerPath}`);
-      console.error('Please run: npm run build');
+      console.error('Please run: bun run build');
       process.exit(1);
     }
 
-    // Spawn the MCP server
-    const child = spawn(process.execPath, [mcpServerPath], {
+    // Spawn the MCP server with Bun because it imports bun:sqlite.
+    const child = spawn('bun', [mcpServerPath], {
       stdio: 'inherit',
       shell: false
     });

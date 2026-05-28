@@ -1,8 +1,8 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Graceful CLI wrapper - checks dependencies before running actual CLI.
  * Prevents ERR_MODULE_NOT_FOUND errors on first run by silently skipping
- * and triggering background npm install.
+ * and triggering background bun install.
  */
 
 import { checkDependencies, installDependencies } from '../scripts/lib/check-dependencies.mjs';
@@ -28,7 +28,7 @@ async function main() {
   } catch (error) {
     if (error.code === 'MODULE_NOT_FOUND') {
       console.error('Error: Missing dependencies. Installing now...');
-      console.error('Please run: npm install');
+      console.error('Please run: bun install');
       if (missing.length > 0) {
         console.error(`Missing: ${missing.join(', ')}`);
       }

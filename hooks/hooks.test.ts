@@ -12,6 +12,10 @@ function loadHooksJson(): any {
   return JSON.parse(hooksContent);
 }
 
+function readRepoFile(relativePath: string): string {
+  return fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf-8');
+}
+
 function getCommandHooks(hooks: any): string[] {
   return Object.values(hooks.hooks).flatMap((hookGroups: any) =>
     hookGroups.flatMap((group: any) =>
@@ -57,5 +61,33 @@ describe('hooks.json sync-only hook configuration', () => {
       expect(command).not.toContain('extract');
       expect(command).not.toContain('observe');
     }
+  });
+
+  it('runs Bun-only CLI entrypoints with bun', () => {
+    const runner = readRepoFile('hooks/run.sh');
+    const cliWrapper = readRepoFile('src/cli-graceful.mjs');
+
+    expect(runner).toContain('bun "$PLUGIN_ROOT/dist/cli.mjs" "$@"');
+    expect(runner).not.toContain('node "$PLUGIN_ROOT/dist/cli.mjs"');
+    expect(cliWrapper.startsWith('#!/usr/bin/env bun')).toBe(true);
+  });
+
+  it('runs the MCP server bundle with bun', () => {
+    const mcpConfig = JSON.parse(readRepoFile('.mcp.json'));
+    const wrapper = readRepoFile('scripts/mcp-server-wrapper.mjs');
+
+    expect(mcpConfig.mcpServers.memmem.command).toBe('bun');
+    expect(mcpConfig.mcpServers.memmem.args).toEqual(['scripts/mcp-server-wrapper.mjs']);
+    expect(wrapper).toContain("spawn('bun', [mcpServerPath]");
+    expect(wrapper).not.toContain('spawn(process.execPath, [mcpServerPath]');
+  });
+
+  it('uses bun for wrapper dependency installation and builds', () => {
+    const dependencyChecker = readRepoFile('scripts/lib/check-dependencies.mjs');
+
+    expect(dependencyChecker.startsWith('#!/usr/bin/env bun')).toBe(true);
+    expect(dependencyChecker).toContain("spawn(bunCommand, ['install'");
+    expect(dependencyChecker).toContain("spawn(bunCommand, ['run', 'build'");
+    expect(dependencyChecker).not.toContain("spawn(npmCommand");
   });
 });

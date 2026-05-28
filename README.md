@@ -184,8 +184,10 @@ bun run build
 
 Bundles:
 
+- `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI implementation)
+- `src/cli-graceful.mjs` → `dist/cli.mjs` (Bun CLI wrapper)
 - `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server)
-- `src/cli/index-cli.ts` → `dist/cli.mjs` (CLI for hooks)
+- `scripts/mcp-server-wrapper.mjs` → `dist/mcp-wrapper.mjs` (Bun MCP wrapper)
 
 ### Type Check
 
@@ -248,17 +250,17 @@ plugins/memmem/
 
 ### Runtime
 
-- `@google/generative-ai`: ^0.24.1 - For conversation summarization (Gemini API)
-- `@modelcontextprotocol/sdk`: ^1.0.4 - MCP protocol implementation
-- `@huggingface/transformers`: ^3.8.1 - ML embeddings (Transformers.js v3)
-- `better-sqlite3`: ^9.6.0 - SQLite database
-- `sqlite-vec`: ^0.1.6 - Vector similarity search extension
-- `zod`: ^3.22.4 - Schema validation
+- Bun runtime with `bun:sqlite` for SQLite access
+- `@modelcontextprotocol/sdk`: MCP protocol implementation
+- `@huggingface/transformers`: gte-small embeddings
+- `sqlite-vec`: Vector similarity search extension
+- `zod`: Schema validation
+- `marked`: Markdown rendering
 
 ### Development Dependencies
 
-- `typescript`: ^5.3.3
-- `node`: For build and test runtime (Node.js 18+)
+- `typescript`: Type checking
+- `bun-types`: Bun runtime and test types
 
 ## Upgrading to the transcript index
 
@@ -368,13 +370,10 @@ bun run build
 - **Based on @obra/episodic-memory**: Forked and integrated into Claude Code plugin ecosystem
 - **Storage Location**: `~/.config/memmem/` (not `.claude/`)
 - **Naming**: All public interfaces use `memmem` for clarity
-- **Embedding Model**: Google EmbeddingGemma-300M (ONNX, Q4 quantized)
-  - 768 dimensions (Matryoshka-enabled: 128-768)
-  - 100+ languages including Korean (MRR@10: 83.86 on XTREME-UP)
-  - Model size: ~197MB (Q4 quantization)
-  - Memory usage: < 200MB RAM
-  - MTEB Multilingual score: 60.62
-  - Task prefix: "title: none | text: ..." (automatically applied)
+- **Embedding Model**: `Supabase/gte-small`
+  - 384 dimensions
+  - Loaded through `@huggingface/transformers`
+  - Stored in `sqlite-vec` virtual tables
 
 ## Future Enhancements
 
