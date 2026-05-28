@@ -33,7 +33,7 @@ bun run typecheck               # tsc --noEmit
 | `src/core/indexer.ts` | Full-file archive reindexing into exchanges, tool calls, and vectors |
 | `src/core/search.ts` | Hybrid vector-first + text fallback exchange search |
 | `src/core/read.ts` | Archived transcript line reading/rendering |
-| `src/core/embeddings.ts` | gte-small embeddings (384-dim, fp16) |
+| `src/core/embeddings.ts` | multilingual-e5-small-ko-v2 embeddings (384-dim, fp16) with passage/query prefix routing |
 | `src/core/ratelimiter.ts` | Token bucket rate limiter (singleton, configurable) |
 | `src/cli/sync.ts` | CLI sync command: copy transcripts to archive and index changed files |
 | `src/cli/search.ts` | CLI search command |

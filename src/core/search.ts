@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
-import { generateEmbedding } from './embeddings.js';
+import { embedQuery } from './embeddings.js';
+import { log } from './logger.js';
 
 interface QueryNormalizerProvider {
   complete(prompt: string): Promise<{ text: string }>;
@@ -171,7 +172,9 @@ function mapRow(row: {
 
 async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
   const { db, limit = 10 } = options;
-  const embedding = await generateEmbedding(query);
+  log.debug('vector search start', { query, limit });
+  const vecStart = Date.now();
+  const embedding = await embedQuery(query);
 
   if (!embedding) {
     return [];
@@ -209,6 +212,7 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
     limit,
   ) as Array<Parameters<typeof mapRow>[0]>;
 
+  log.debug('vector results', { count: rows.length, ms: Date.now() - vecStart });
   return rows.map(mapRow);
 }
 
@@ -264,6 +268,7 @@ export async function search(
   if (combined.length < limit) {
     const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
     const textResults = textSearch(textQueries, options);
+    log.debug('text fallback', { queries: textQueries, count: textResults.length });
     for (const result of textResults) {
       if (combined.length >= limit) {
         break;

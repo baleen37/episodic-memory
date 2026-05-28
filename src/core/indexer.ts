@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import type { Database } from 'bun:sqlite';
 import { CURRENT_EMBEDDING_VERSION, deleteExchangeIndexForArchivePath, insertExchange, insertToolCall, insertExchangeVector } from './db.js';
-import { generateEmbedding } from './embeddings.js';
+import { embedPassage } from './embeddings.js';
 import type { ParseContext, ParsedExchange } from './sources/types.js';
 
 export type ArchiveParser = (content: string, context: ParseContext) => ParsedExchange[];
@@ -32,7 +32,7 @@ export async function reindexArchiveFile(
   const exchanges = parser(content, { archivePath, sourceKind });
   const embeddings: Array<number[] | null> = [];
   for (const exchange of exchanges) {
-    embeddings.push(await generateEmbedding(exchange.embeddingText));
+    embeddings.push(await embedPassage(exchange.embeddingText));
   }
 
   const replaceIndex = db.transaction(() => {

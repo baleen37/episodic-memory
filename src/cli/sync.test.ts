@@ -185,7 +185,7 @@ function setupEnv(claudeDir: string, codexDir: string, archiveDir: string): void
 }
 
 function setGoodEmbeddingModel(): void {
-  __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+  __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 }
 
 function writeClaudeTranscript(filePath: string, userText: string, assistantText: string): void {

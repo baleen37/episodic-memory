@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, s
 import path from 'path';
 import { deleteExchangeIndexForArchivePathPrefix, openDatabase } from '../core/db.js';
 import { reindexArchiveFile } from '../core/indexer.js';
+import { log } from '../core/logger.js';
 import { getArchiveDir } from '../core/paths.js';
 import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/index.js';
 
@@ -49,10 +50,19 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
     }
   }
 
+  const total = archiveFiles.size;
+  if (total > 0) {
+    log.info(`Indexing ${total} archive file${total === 1 ? '' : 's'}...`);
+  }
+
   let indexed = 0;
+  const progressInterval = Math.max(1, Math.floor(total / 20));
   for (const file of archiveFiles.values()) {
     await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse);
     indexed++;
+    if (indexed % progressInterval === 0 || indexed === total) {
+      log.info(`  ${indexed}/${total} indexed`);
+    }
   }
 
   return {
@@ -66,7 +76,7 @@ export async function runSyncCli(): Promise<void> {
   const db = openDatabase();
   try {
     const result = await syncTranscripts(db);
-    console.log(`Done. copied=${result.copied} indexed=${result.indexed} skipped=${result.skipped}`);
+    log.info(`Done.`, { copied: result.copied, indexed: result.indexed, skipped: result.skipped });
   } finally {
     db.close();
   }
