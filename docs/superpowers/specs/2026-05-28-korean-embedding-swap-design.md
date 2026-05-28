@@ -71,22 +71,19 @@ prefix는 8자 남짓이라 8000자 예산에서 빼지 않고 prefix를 항상 
 
 ### 자동 재인덱싱
 
-기존 인프라를 그대로 사용한다.
+현재 `sync`는 archive에 있는 모든 파일을 매번 `reindexArchiveFile`로 통과시킨다. 이 동작 자체는 모델 교체와 무관하게 모든 exchange를 다시 임베딩하므로 별도의 마이그레이션 로직은 필요하지 않다.
 
-- `CURRENT_EMBEDDING_VERSION = 1` → `2`로 bump
-- `getArchivePathsNeedingReindex`가 이미 `embedding_version != ?` 조건으로 stale archive를 감지
-- 다음 sync 실행 시 모든 archive가 stale로 잡혀서 자동 재처리
+- `CURRENT_EMBEDDING_VERSION = 1` → `2`로 bump (메타데이터 정확성)
+- 모델 교체된 빌드를 사용자가 받으면, 다음 SessionStart 훅의 sync에서 모든 archive가 새 모델로 재인덱싱된다
 - 재처리 경로(`deleteExchangeIndexForArchivePath` → `insertExchange`)는 변경 없음
+
+`CURRENT_EMBEDDING_VERSION`은 인덱싱된 exchange의 메타데이터로 남아 있어 디버깅과 향후 stale 감지 기능에 사용될 수 있다. `getArchivePathsNeedingReindex`는 현재 sync 경로에서 호출되지 않으므로 동작에 직접 영향을 주지 않는다 (테스트에서만 사용 중).
 
 ### 사용자 안내
 
-첫 sync는 모든 transcript 재인덱싱이라 평소보다 오래 걸린다. `sync` CLI 시작 부분에 안내를 한 줄 추가:
+이 작업은 `sync` CLI에 안내 메시지를 추가하지 않는다. 매 sync마다 동일한 양의 작업이 일어나므로 "모델이 업데이트되어 재인덱싱"이라는 일회성 메시지는 의미가 없다.
 
-```
-임베딩 모델이 업데이트되어 N개 파일을 재인덱싱합니다.
-```
-
-stale 파일 수가 0이면 안내 생략.
+대신 모델이 처음 로드될 때 출력되는 기존 메시지(`embeddings-model.ts`의 `'Loading embedding model (first run may take time)...'`)가 첫 실행 안내 역할을 한다. 모델 이름은 메시지에 노출되지 않으므로 사용자 입장에서 이전과 동일한 경험이다.
 
 ## 변경 파일
 
@@ -97,9 +94,8 @@ stale 파일 수가 0이면 안내 생략.
 | `src/core/db.ts` | `CURRENT_EMBEDDING_VERSION = 2` |
 | `src/core/indexer.ts` | 호출부 → `embedPassage` |
 | `src/core/search.ts` | 호출부 → `embedQuery` |
-| `src/cli/sync.ts` | stale archive 수가 0보다 크면 재인덱싱 안내 한 줄 출력 |
 | `src/core/embeddings.test.ts` | mock 시그니처 갱신, prefix 의도가 호출부에서 올바르게 전달되는지 검증하는 단위 테스트 추가 |
-| `src/core/indexer.test.ts`, `src/core/search.test.ts`, `src/cli/sync.test.ts`, MCP 핸들러 테스트 | `__setModelForTests` mock 시그니처를 `(kind, text) => vector`로 갱신 |
+| `src/core/indexer.test.ts`, `src/core/search.test.ts`, `src/cli/sync.test.ts` | `__setModelForTests` mock 시그니처를 `(kind, text) => vector`로 갱신 |
 | `CLAUDE.md` | `embeddings.ts` 설명 줄을 새 모델 기준으로 갱신 |
 
 ## 테스트 전략
@@ -121,7 +117,7 @@ stale 파일 수가 0이면 안내 생략.
 | 리스크 | 영향 | 완화 |
 |---|---|---|
 | `dragonkue/multilingual-e5-small-ko-v2`의 ONNX 빌드가 Transformers.js에서 실패 | 모델 로드 안 됨, 사용자가 검색 못함 | 첫 실행에서 명확한 에러 노출. 폴백 없음. 실패 시 `Xenova/multilingual-e5-small`(베이스 e5-small)로 임시 전환 가능 — 한국어 향상폭은 작아지지만 ONNX 호환 보장. |
-| 첫 sync가 사용자 transcript 양만큼 오래 걸림 | 첫 실행시 SessionStart 훅이 평소보다 느림 | 시작 시 안내 한 줄. 이후 sync는 변경 파일만 재처리하므로 정상 속도. |
+| 첫 sync가 사용자 transcript 양만큼 오래 걸림 | 첫 실행시 SessionStart 훅이 평소보다 느림 | 현재도 매 sync마다 모든 archive를 통과시키므로 행위 변화는 없음. 모델 로드 시 출력되는 기존 메시지가 사용자 안내 역할. |
 | prefix를 빠뜨린 옛 호출부가 남음 | 검색 품질 저하 | `generateEmbedding`을 완전히 제거해서 컴파일 에러로 강제 검출. grep으로 잔존 호출 확인. |
 | 테스트 mock이 prefix 검증을 안 함 | 회귀가 테스트로 안 잡힘 | `embeddings.test.ts`에 prefix 정확성 단위 테스트 신규 추가. |
 
