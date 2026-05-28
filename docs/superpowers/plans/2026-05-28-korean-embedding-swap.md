@@ -575,7 +575,7 @@ Expected: One commit showing the file list from Step 2.
 
 ## Task 7: Manual smoke test against real transcripts
 
-This is the final gate. Automated tests verify the wiring; only a real sync verifies that `dragonkue/multilingual-e5-small-ko-v2` actually loads in Transformers.js. If it does not, see the rollback note at the end.
+Final gate after the commit. Run real sync, run a Korean query, verify DB version. No rollback steps — if the model fails to load, surface the error to the user.
 
 - [ ] **Step 1: Run a real sync**
 
@@ -585,12 +585,10 @@ Expected output:
 - A line `Loading embedding model (first run may take time)...` followed (after the model download, which may take a minute on first run) by `Embedding model loaded`.
 - A final line of the form `Done. copied=<N> indexed=<M> skipped=0`.
 
-If the model load fails (network error, ONNX format mismatch, missing files), see the rollback note. Do not proceed.
-
 - [ ] **Step 2: Run a Korean search**
 
 Run: `bun dist/cli.mjs search "메모리 누수 디버깅"`
-Expected: Returns up to 10 results, each with `archive_path`, `line_start`, `line_end`, snippet. Spot-check that snippets are at least topically related to memory/debugging. (This is qualitative — there is no automated pass/fail here.)
+Expected: Returns up to 10 results, each with `archive_path`, `line_start`, `line_end`, snippet. Spot-check that snippets are at least topically related to memory/debugging. (Qualitative.)
 
 - [ ] **Step 3: Run an English search**
 
@@ -600,21 +598,7 @@ Expected: Returns results; spot-check that English retrieval still works.
 - [ ] **Step 4: Confirm DB version is 2**
 
 Run: `sqlite3 ~/.config/memmem/conversation-index/conversations.db 'SELECT DISTINCT embedding_version FROM exchanges;'`
-Expected output: a single line containing `2`. (If you see both `1` and `2`, a sync was interrupted — re-run Step 1.)
-
----
-
-## Rollback note
-
-If `dragonkue/multilingual-e5-small-ko-v2` fails to load in Transformers.js at Task 7 Step 1, the fallback is `Xenova/multilingual-e5-small` (the upstream e5-small with a community-built Transformers.js ONNX). Korean improvement is smaller but the model is known to load.
-
-To roll back to the fallback without redoing the rest of the work:
-
-1. In `src/core/embeddings-model.ts`, replace `'dragonkue/multilingual-e5-small-ko-v2'` with `'Xenova/multilingual-e5-small'`.
-2. Re-run `bun run build && bun dist/cli.mjs sync`.
-3. All other changes (API split, version bump, tests) remain valid — they target the e5 family, not a specific repo path.
-
-If neither model loads, revert the commit from Task 6 with `git revert HEAD` and re-open the model selection.
+Expected output: a single line containing `2`.
 
 ---
 
