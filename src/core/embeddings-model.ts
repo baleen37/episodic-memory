@@ -7,6 +7,7 @@
 import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 
 let embeddingPipeline: FeatureExtractionPipeline | null = null;
+let loadingPromise: Promise<FeatureExtractionPipeline> | null = null;
 
 const PREFIX = {
   passage: 'passage: ',
@@ -17,19 +18,26 @@ const MAX_CONTENT_CHARS = 8000;
 
 const MODEL_ID = 'dragonkue/multilingual-e5-small-ko-v2';
 
+async function loadPipeline(): Promise<FeatureExtractionPipeline> {
+  const { pipeline, env } = await import('@huggingface/transformers');
+  console.log(`Loading embedding model ${MODEL_ID} (first run downloads ~150MB, may take 1-2 min)...`);
+  env.cacheDir = './.cache';
+  const start = Date.now();
+  const result = await pipeline(
+    'feature-extraction',
+    MODEL_ID,
+    { dtype: 'fp16' } as any
+  );
+  console.log(`Embedding model loaded in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+  return result;
+}
+
 export async function initModel(): Promise<void> {
-  if (!embeddingPipeline) {
-    const { pipeline, env } = await import('@huggingface/transformers');
-    console.log(`Loading embedding model ${MODEL_ID} (first run downloads ~150MB, may take 1-2 min)...`);
-    env.cacheDir = './.cache';
-    const start = Date.now();
-    embeddingPipeline = await pipeline(
-      'feature-extraction',
-      MODEL_ID,
-      { dtype: 'fp16' } as any
-    );
-    console.log(`Embedding model loaded in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+  if (embeddingPipeline) return;
+  if (!loadingPromise) {
+    loadingPromise = loadPipeline();
   }
+  embeddingPipeline = await loadingPromise;
 }
 
 export async function generateEmbeddingFromModel(
