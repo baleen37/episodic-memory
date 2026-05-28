@@ -3,6 +3,7 @@
  * Model is lazy-loaded on first use and stays in memory.
  */
 import { initModel as defaultInitModel, generateEmbeddingFromModel as defaultGenerate } from './embeddings-model.js';
+import { log } from './logger.js';
 import { getEmbeddingRateLimiter } from './ratelimiter.js';
 
 type EmbeddingKind = 'passage' | 'query';
@@ -44,7 +45,8 @@ async function run(kind: EmbeddingKind, text: string): Promise<number[] | null> 
   try {
     await getEmbeddingRateLimiter().acquire();
     return await generateFn(kind, text);
-  } catch {
+  } catch (err) {
+    log.warn(`embedding failed (${kind})`, { error: (err as Error).message });
     return null;
   }
 }

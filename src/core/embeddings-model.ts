@@ -18,7 +18,7 @@ const PREFIX = {
 
 const MAX_CONTENT_CHARS = 8000;
 
-const MODEL_ID = 'dragonkue/multilingual-e5-small-ko-v2';
+const MODEL_ID = 'Xenova/multilingual-e5-small';
 
 async function loadPipeline(): Promise<FeatureExtractionPipeline> {
   const { pipeline, env } = await import('@huggingface/transformers');
