@@ -1,6 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { generateEmbedding } from './embeddings.js';
 
+interface QueryNormalizerProvider {
+  complete(prompt: string): Promise<{ text: string }>;
+}
+
 interface SearchOptions {
   db: Database;
   limit?: number;
@@ -9,7 +13,7 @@ interface SearchOptions {
   sourceKind?: string;
   projects?: string[];
   files?: string[];
-  queryNormalizerProvider?: unknown;
+  queryNormalizerProvider?: QueryNormalizerProvider;
 }
 
 export interface ExchangeSearchResult {
@@ -52,9 +56,19 @@ function isoToTimestamp(isoDate: string): number {
 interface FilterParts {
   clause: string;
   params: Array<string | number>;
+  hasFilters: boolean;
 }
 
-function buildFilterParts(after?: string, before?: string, sourceKind?: string): FilterParts {
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+function makeLikePattern(value: string): string {
+  return `%${escapeLikePattern(value)}%`;
+}
+
+function buildFilterParts(options: Pick<SearchOptions, 'after' | 'before' | 'sourceKind' | 'projects' | 'files'>): FilterParts {
+  const { after, before, sourceKind, projects, files } = options;
   const filters: string[] = [];
   const params: Array<string | number> = [];
 
@@ -74,15 +88,55 @@ function buildFilterParts(after?: string, before?: string, sourceKind?: string):
     params.push(sourceKind);
   }
 
+  if (projects && projects.length > 0) {
+    filters.push(`e.project IN (${projects.map(() => '?').join(', ')})`);
+    params.push(...projects);
+  }
+
+  if (files && files.length > 0) {
+    const fileFilters: string[] = [];
+    for (const file of files) {
+      fileFilters.push(`(
+        e.archive_path LIKE ? ESCAPE '\\'
+        OR e.user_text LIKE ? ESCAPE '\\'
+        OR e.assistant_text LIKE ? ESCAPE '\\'
+        OR EXISTS (
+          SELECT 1
+          FROM tool_calls tc
+          WHERE tc.exchange_id = e.id
+            AND (tc.input LIKE ? ESCAPE '\\' OR tc.output LIKE ? ESCAPE '\\')
+        )
+      )`);
+      const pattern = makeLikePattern(file);
+      params.push(pattern, pattern, pattern, pattern, pattern);
+    }
+    filters.push(`(${fileFilters.join(' OR ')})`);
+  }
+
   return {
     clause: filters.length > 0 ? `AND ${filters.join(' AND ')}` : '',
     params,
+    hasFilters: filters.length > 0,
   };
 }
 
 function makeSnippet(userText: string, assistantText: string): string {
   const text = [userText, assistantText].filter(Boolean).join('\n').replace(/\s+/g, ' ').trim();
   return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+async function normalizeQuery(query: string, provider?: QueryNormalizerProvider): Promise<string> {
+  if (!provider) {
+    return query;
+  }
+
+  try {
+    const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.\n\nQuery: ${query}`);
+    const normalized = result.text.trim();
+    return normalized || query;
+  } catch {
+    return query;
+  }
 }
 
 function mapRow(row: {
@@ -116,15 +170,15 @@ function mapRow(row: {
 }
 
 async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
-  const { db, limit = 10, after, before, sourceKind } = options;
+  const { db, limit = 10 } = options;
   const embedding = await generateEmbedding(query);
 
   if (!embedding) {
     return [];
   }
 
-  const filterParts = buildFilterParts(after, before, sourceKind);
-  const candidateLimit = after || before || sourceKind
+  const filterParts = buildFilterParts(options);
+  const candidateLimit = filterParts.hasFilters
     ? Math.max(limit, (db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number }).count)
     : limit;
   const stmt = db.query(`
@@ -158,9 +212,14 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
   return rows.map(mapRow);
 }
 
-function textSearch(query: string, options: SearchOptions): ExchangeSearchResult[] {
-  const { db, limit = 10, after, before, sourceKind } = options;
-  const filterParts = buildFilterParts(after, before, sourceKind);
+function textSearch(queries: string[], options: SearchOptions): ExchangeSearchResult[] {
+  const { db, limit = 10 } = options;
+  const filterParts = buildFilterParts(options);
+  const queryClauses = queries.map(() => `(e.user_text LIKE ? ESCAPE '\\' OR e.assistant_text LIKE ? ESCAPE '\\')`);
+  const queryParams = queries.flatMap(query => {
+    const pattern = makeLikePattern(query);
+    return [pattern, pattern];
+  });
   const stmt = db.query(`
     SELECT
       e.id,
@@ -173,16 +232,14 @@ function textSearch(query: string, options: SearchOptions): ExchangeSearchResult
       e.user_text AS userText,
       e.assistant_text AS assistantText
     FROM exchanges e
-    WHERE (e.user_text LIKE ? OR e.assistant_text LIKE ?)
+    WHERE (${queryClauses.join(' OR ')})
       ${filterParts.clause}
     ORDER BY e.timestamp DESC
     LIMIT ?
   `);
 
-  const likeQuery = `%${query}%`;
   const rows = stmt.all(
-    likeQuery,
-    likeQuery,
+    ...queryParams,
     ...filterParts.params,
     limit,
   ) as Array<Parameters<typeof mapRow>[0]>;
@@ -199,12 +256,14 @@ export async function search(
   if (after) validateISODate(after, '--after');
   if (before) validateISODate(before, '--before');
 
-  const vectorResults = await vectorSearch(query, options);
+  const normalizedQuery = await normalizeQuery(query, options.queryNormalizerProvider);
+  const vectorResults = await vectorSearch(normalizedQuery, options);
   const combined: ExchangeSearchResult[] = [...vectorResults];
   const seenIds = new Set(vectorResults.map(result => result.id));
 
   if (combined.length < limit) {
-    const textResults = textSearch(query, options);
+    const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
+    const textResults = textSearch(textQueries, options);
     for (const result of textResults) {
       if (combined.length >= limit) {
         break;
