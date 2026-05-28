@@ -1,7 +1,14 @@
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { rmSync } from 'fs';
+
+// Other test files (logger.test.ts) install a process-wide mock for ./paths.js
+// via mock.module() at module top-level. Bun's mock.module leaks across files
+// in the same run, so undo any prior module mocks before importing the real
+// implementation here.
+mock.restore();
 
 // Import functions to test
 import {
