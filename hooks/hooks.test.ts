@@ -78,7 +78,11 @@ describe('hooks.json sync-only hook configuration', () => {
     const wrapper = readRepoFile('scripts/mcp-server-wrapper.mjs');
 
     expect(mcpConfig.mcpServers.memmem.command).toBe('bun');
-    expect(mcpConfig.mcpServers.memmem.args).toEqual(['scripts/mcp-server-wrapper.mjs']);
+    expect(mcpConfig.mcpServers.memmem.args).toEqual([
+      '${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server-wrapper.mjs',
+    ]);
+    // cwd must not be set — Claude Code does not substitute ${CLAUDE_PLUGIN_ROOT} there
+    expect(mcpConfig.mcpServers.memmem.cwd).toBeUndefined();
     expect(wrapper).toContain("spawn('bun', [mcpServerPath]");
     expect(wrapper).not.toContain('spawn(process.execPath, [mcpServerPath]');
   });
