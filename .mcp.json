@@ -2,8 +2,7 @@
   "mcpServers": {
     "memmem": {
       "command": "bun",
-      "args": ["scripts/mcp-server-wrapper.mjs"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server-wrapper.mjs"]
     }
   }
 }
