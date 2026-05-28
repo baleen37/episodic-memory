@@ -124,6 +124,9 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
   }
 
   const filterParts = buildFilterParts(after, before, sourceKind);
+  const candidateLimit = after || before || sourceKind
+    ? Math.max(limit, (db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number }).count)
+    : limit;
   const stmt = db.query(`
     SELECT
       e.id,
@@ -147,7 +150,7 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
 
   const rows = stmt.all(
     Buffer.from(new Float32Array(embedding).buffer),
-    limit,
+    candidateLimit,
     ...filterParts.params,
     limit,
   ) as Array<Parameters<typeof mapRow>[0]>;

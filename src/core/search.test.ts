@@ -50,6 +50,28 @@ describe('exchange search', () => {
     expect(results[0].sourceKind).toBe('codex-sessions');
   });
 
+  test('finds filtered vector result outside unfiltered top k', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+
+    for (let i = 0; i < 2; i++) {
+      const id = insertExchange(db, {
+        archivePath: `/archive/claude-projects/closer-${i}.jsonl`, lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'closer unrelated', assistantText: 'not the fallback term', embeddingText: 'closer unrelated', embeddingVersion: CURRENT_EMBEDDING_VERSION,
+      });
+      insertExchangeVector(db, id, Array.from({ length: 384 }, () => 0.1));
+    }
+
+    const codexId = insertExchange(db, {
+      archivePath: '/archive/codex-sessions/filtered.jsonl', lineStart: 3, lineEnd: 4, sourceKind: 'codex-sessions', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 27), userText: 'codex body without fallback words', assistantText: 'semantic only match', embeddingText: 'codex semantic only match', embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+    insertExchangeVector(db, codexId, Array.from({ length: 384 }, () => 0.2));
+
+    const results = await search('vector-filter-query', { db, limit: 2, sourceKind: 'codex-sessions' });
+
+    expect(results.map(result => result.id)).toEqual([codexId]);
+  });
+
   test('preserves null project and timestamp without legacy title', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
