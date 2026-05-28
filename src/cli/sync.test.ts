@@ -122,6 +122,26 @@ describe('syncTranscripts', () => {
     expect(result.indexed).toBe(1);
     expect(exchangeCount.count).toBe(2);
   });
+
+  test('does not copy or index transcripts below a .no-memmem directory', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const ignoredDir = join(claudeDir, 'projects', 'ignored');
+    const sourcePath = join(ignoredDir, 'session.jsonl');
+    mkdirSync(ignoredDir, { recursive: true });
+    writeFileSync(join(ignoredDir, '.no-memmem'), '');
+    writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+
+    const result = await syncTranscripts(db);
+    const exchangeCount = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
+
+    expect(result.copied).toBe(0);
+    expect(result.indexed).toBe(0);
+    expect(exchangeCount.count).toBe(0);
+    expect(existsSync(join(archiveDir, 'claude-projects', 'ignored', 'session.jsonl'))).toBe(false);
+  });
 });
 
 function setupDirs(): { claudeDir: string; codexDir: string; archiveDir: string } {

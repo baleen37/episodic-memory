@@ -6,6 +6,17 @@ import type { ParseContext, ParsedExchange } from './sources/types.js';
 
 export type ArchiveParser = (content: string, context: ParseContext) => ParsedExchange[];
 
+export const EXCLUSION_MARKERS = [
+  'DO NOT INDEX THIS CHAT',
+  'DO NOT INDEX THIS CONVERSATION',
+  '이 대화는 인덱싱하지 마세요',
+  '이 대화는 검색에서 제외하세요',
+];
+
+export function hasExclusionMarker(content: string): boolean {
+  return EXCLUSION_MARKERS.some(marker => content.includes(marker));
+}
+
 export async function reindexArchiveFile(
   db: Database,
   archivePath: string,
@@ -13,7 +24,7 @@ export async function reindexArchiveFile(
   parser: ArchiveParser,
 ): Promise<number> {
   const content = readFileSync(archivePath, 'utf-8');
-  if (content.includes('DO NOT INDEX THIS CHAT')) {
+  if (hasExclusionMarker(content)) {
     deleteExchangeIndexForArchivePath(db, archivePath);
     return 0;
   }

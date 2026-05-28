@@ -68,6 +68,10 @@ export async function runSyncCli(): Promise<void> {
 
 function findJsonlFiles(root: string, adapter: SourceAdapter): string[] {
   const files: string[] = [];
+  if (existsSync(path.join(root, '.no-memmem'))) {
+    return files;
+  }
+
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {

@@ -72,16 +72,24 @@ export function parseJsonlMessages(
   startLine?: number,
   endLine?: number
 ): ConversationMessage[] {
+  return selectJsonlLines(jsonl, startLine, endLine).flatMap(line => {
+    try {
+      return [JSON.parse(line)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function selectJsonlLines(jsonl: string, startLine?: number, endLine?: number): string[] {
   const allLines = jsonl.trim().split('\n').filter(line => line.trim());
 
-  const lines = startLine !== undefined || endLine !== undefined
+  return startLine !== undefined || endLine !== undefined
     ? allLines.slice(
         startLine !== undefined ? startLine - 1 : 0,
         endLine !== undefined ? endLine : undefined
       )
     : allLines;
-
-  return lines.map(line => JSON.parse(line));
 }
 
 /**
@@ -324,7 +332,7 @@ export function formatConversationAsMarkdown(
   const messages = filterValidMessages(allMessages);
 
   if (messages.length === 0) {
-    return '';
+    return formatNonClaudeJsonlFallback(selectJsonlLines(jsonl, startLine, endLine));
   }
 
   // Build output using extracted functions
@@ -384,6 +392,60 @@ export function formatConversationAsMarkdown(
  * @param msg - Assistant message to format
  * @returns Markdown formatted message content
  */
+function formatNonClaudeJsonlFallback(lines: string[]): string {
+  const renderedLines = lines.flatMap((line, index) => {
+    try {
+      const record = JSON.parse(line);
+      const codexMessage = formatCodexResponseItem(record, index);
+      if (codexMessage) return [codexMessage];
+      return ['```json\n' + JSON.stringify(record, null, 2) + '\n```'];
+    } catch {
+      return [line];
+    }
+  });
+
+  if (renderedLines.length === 0) {
+    return '';
+  }
+
+  return '# Conversation\n\n## Messages\n\n' + renderedLines.join('\n\n') + '\n';
+}
+
+function formatCodexResponseItem(record: any, index: number): string | null {
+  if (record?.type !== 'response_item' || record.payload?.type !== 'message') {
+    return null;
+  }
+
+  const role = record.payload.role === 'assistant' ? 'Agent' : 'User';
+  const text = extractCodexMessageText(record.payload.content);
+  if (!text) {
+    return null;
+  }
+
+  return `### **${role}** {#codex-${index + 1}}\n\n${text}\n`;
+}
+
+function extractCodexMessageText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .map(block => {
+      if (typeof block === 'string') return block;
+      if (block && typeof block === 'object' && 'text' in block && typeof (block as any).text === 'string') {
+        return (block as any).text;
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function formatAssistantMessage(
   messages: ConversationMessage[],
   index: number,

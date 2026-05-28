@@ -79,4 +79,52 @@ describe('reindexArchiveFile', () => {
     expect(rows).toEqual([{ userText: 'Old question' }]);
     expect(vectorCount.count).toBe(1);
   });
+
+  test('removes existing index when conversation marker asks not to index', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, [
+      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'Old question' } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Old answer' } }),
+    ].join('\n'));
+    await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
+
+    writeFileSync(archivePath, [
+      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:02.000Z', sessionId: 's1', message: { role: 'user', content: 'DO NOT INDEX THIS CONVERSATION' } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:03.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Sensitive answer' } }),
+    ].join('\n'));
+
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
+    const count = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
+
+    expect(result).toBe(0);
+    expect(count.count).toBe(0);
+  });
+
+  test('skips Korean exclusion markers', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, [
+      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: '이 대화는 인덱싱하지 마세요' } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Sensitive answer' } }),
+    ].join('\n'));
+
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
+    const count = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
+
+    expect(result).toBe(0);
+    expect(count.count).toBe(0);
+  });
 });
