@@ -26,7 +26,7 @@ async function main() {
   try {
     await import(CLI_PATH);
   } catch (error) {
-    if (error.code === 'MODULE_NOT_FOUND') {
+    if (error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND') {
       console.error('Error: Missing dependencies. Installing now...');
       console.error('Please run: bun install');
       if (missing.length > 0) {

@@ -70,6 +70,7 @@ describe('hooks.json sync-only hook configuration', () => {
     expect(runner).toContain('bun "$PLUGIN_ROOT/dist/cli.mjs" "$@"');
     expect(runner).not.toContain('node "$PLUGIN_ROOT/dist/cli.mjs"');
     expect(cliWrapper.startsWith('#!/usr/bin/env bun')).toBe(true);
+    expect(cliWrapper).toContain("error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND'");
   });
 
   it('runs the MCP server bundle with bun', () => {

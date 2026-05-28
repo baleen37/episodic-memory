@@ -239,7 +239,7 @@ plugins/memmem/
 │   ├── mcp-wrapper.mjs          # Cross-platform wrapper
 │   └── cli.mjs                  # Bundled CLI (for hooks)
 ├── scripts/
-│   ├── build.mjs                # esbuild config
+│   ├── build.mjs                # Bun.build config
 │   └── mcp-server-wrapper.mjs   # Wrapper script
 ├── package.json
 ├── tsconfig.json
@@ -298,16 +298,17 @@ memmem sync
 
 ### Installation Errors
 
-The plugin automatically installs dependencies on first run. If you encounter errors:
+The plugin automatically installs dependencies on first run using Bun. If you encounter errors:
 
 #### Permission Denied (EACCES)
 
 **Symptoms:** Error messages containing "EACCES" or "permission denied"
 
-**Fix:**
+**Fix:** Check permissions for the project directory and Bun cache, then retry:
 
 ```bash
-sudo chown -R $(whoami) ~/.npm
+cd plugins/memmem
+bun install
 ```
 
 Then restart Claude Code.
@@ -318,14 +319,8 @@ Then restart Claude Code.
 
 **Fix:**
 
-1. Check your internet connection
-2. If behind a corporate firewall, configure npm proxy:
-
-   ```bash
-   npm config set proxy http://your-proxy:port
-   npm config set https-proxy http://your-proxy:port
-   ```
-
+1. Check your internet connection.
+2. If behind a corporate firewall, configure registry or proxy access in your environment.
 3. Try installing manually:
 
    ```bash
@@ -339,14 +334,9 @@ Then restart Claude Code.
 
 **Fix:**
 
-1. Check available disk space: `df -h`
-2. Free up space by cleaning npm cache:
-
-   ```bash
-   npm cache clean --force
-   ```
-
-3. Remove old node_modules:
+1. Check available disk space: `df -h`.
+2. Free up disk space or clear Bun's cache if needed.
+3. Reinstall dependencies:
 
    ```bash
    cd plugins/memmem
