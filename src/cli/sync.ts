@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
 import path from 'path';
-import { openDatabase } from '../core/db.js';
+import { deleteExchangeIndexForArchivePathPrefix, openDatabase } from '../core/db.js';
 import { reindexArchiveFile } from '../core/indexer.js';
 import { getArchiveDir } from '../core/paths.js';
 import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/index.js';
@@ -24,7 +24,8 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
 
   for (const adapter of getBuiltInSourceAdapters()) {
     for (const root of adapter.roots()) {
-      for (const sourcePath of findJsonlFiles(root, adapter)) {
+      const excludedSourceDirs: string[] = [];
+      for (const sourcePath of findJsonlFiles(root, adapter, excludedSourceDirs)) {
         const archivePath = path.join(archiveDir, adapter.kind, path.relative(root, sourcePath));
         if (copyIfNewer(sourcePath, archivePath)) {
           copied++;
@@ -32,6 +33,11 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
         if (existsSync(archivePath)) {
           archiveFiles.set(archivePath, { adapter, archivePath });
         }
+      }
+
+      for (const sourceDir of excludedSourceDirs) {
+        const archivePathPrefix = path.join(archiveDir, adapter.kind, path.relative(root, sourceDir));
+        purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles);
       }
     }
 
@@ -66,21 +72,43 @@ export async function runSyncCli(): Promise<void> {
   }
 }
 
-function findJsonlFiles(root: string, adapter: SourceAdapter): string[] {
+function findJsonlFiles(root: string, adapter: SourceAdapter, excludedDirs: string[] = []): string[] {
   const files: string[] = [];
   if (existsSync(path.join(root, '.no-memmem'))) {
+    excludedDirs.push(root);
     return files;
   }
 
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const entryPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      files.push(...findJsonlFiles(entryPath, adapter));
+      files.push(...findJsonlFiles(entryPath, adapter, excludedDirs));
     } else if (entry.isFile() && entryPath.endsWith('.jsonl') && adapter.detect(entryPath)) {
       files.push(entryPath);
     }
   }
   return files;
+}
+
+function purgeExcludedArchiveSubtree(
+  db: Database,
+  archivePathPrefix: string,
+  archiveFiles: Map<string, ArchiveFile>,
+): void {
+  deleteExchangeIndexForArchivePathPrefix(db, archivePathPrefix);
+  for (const archivePath of archiveFiles.keys()) {
+    if (isPathAtOrUnder(archivePath, archivePathPrefix)) {
+      archiveFiles.delete(archivePath);
+    }
+  }
+  if (existsSync(archivePathPrefix)) {
+    rmSync(archivePathPrefix, { recursive: true, force: true });
+  }
+}
+
+function isPathAtOrUnder(filePath: string, parentPath: string): boolean {
+  const relative = path.relative(parentPath, filePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function copyIfNewer(sourcePath: string, destinationPath: string): boolean {

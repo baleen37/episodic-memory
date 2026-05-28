@@ -228,6 +228,20 @@ export function deleteExchangeIndexForArchivePath(db: Database, archivePath: str
   db.query('DELETE FROM exchanges WHERE archive_path = ?').run(archivePath);
 }
 
+export function deleteExchangeIndexForArchivePathPrefix(db: Database, archivePathPrefix: string): void {
+  const childPrefix = `${archivePathPrefix}${path.sep}%`;
+  const rows = db.query('SELECT id FROM exchanges WHERE archive_path = ? OR archive_path LIKE ?')
+    .all(archivePathPrefix, childPrefix) as Array<{ id: number }>;
+  const ids = rows.map(row => row.id);
+
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    db.query(`DELETE FROM vec_exchanges WHERE rowid IN (${placeholders})`).run(...ids);
+  }
+
+  db.query('DELETE FROM exchanges WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
+}
+
 export function getArchivePathsNeedingReindex(db: Database, archivePaths: string[]): string[] {
   const paths = new Set<string>();
   const stmt = db.query(`

@@ -142,6 +142,28 @@ describe('syncTranscripts', () => {
     expect(exchangeCount.count).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-projects', 'ignored', 'session.jsonl'))).toBe(false);
   });
+
+  test('purges archived indexes when a synced source directory becomes excluded', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const sourceDir = join(claudeDir, 'projects', 'proj');
+    const sourcePath = join(sourceDir, 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-projects', 'proj', 'session.jsonl');
+    mkdirSync(sourceDir, { recursive: true });
+    writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+    await syncTranscripts(db);
+
+    writeFileSync(join(sourceDir, '.no-memmem'), '');
+
+    const result = await syncTranscripts(db);
+    const exchangeCount = db.query('SELECT COUNT(*) AS count FROM exchanges WHERE archive_path = ?').get(archivePath) as { count: number };
+
+    expect(result.indexed).toBe(0);
+    expect(exchangeCount.count).toBe(0);
+    expect(existsSync(archivePath)).toBe(false);
+  });
 });
 
 function setupDirs(): { claudeDir: string; codexDir: string; archiveDir: string } {
