@@ -93,8 +93,8 @@ export function parseReadArgs(args: string[]): ReadCliArgs {
   return parsed;
 }
 
-function printHelp(): void {
-  console.log(`
+export function getHelpText(): string {
+  return `
 memmem - Persistent conversation memory for Claude Code
 
 USAGE:
@@ -108,7 +108,11 @@ COMMANDS:
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory
   CONVERSATION_MEMORY_DB_PATH      Override database path
-`);
+`;
+}
+
+function printHelp(): void {
+  console.log(getHelpText());
 }
 
 async function main(): Promise<void> {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseSearchArgs, parseReadArgs } from './main.js';
+import { getHelpText, parseSearchArgs, parseReadArgs } from './main.js';
 
 describe('CLI argument parsing', () => {
   test('parses search args', () => {
@@ -56,5 +56,15 @@ describe('CLI argument parsing', () => {
 
   test('rejects start line after end line', () => {
     expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '9', '--end-line', '8'])).toThrow('--start-line must be less than or equal to --end-line');
+  });
+
+  test('help text mentions only transcript commands', () => {
+    const help = getHelpText();
+    expect(help).toContain('sync');
+    expect(help).toContain('search');
+    expect(help).toContain('read');
+    expect(help).not.toContain('record');
+    expect(help).not.toContain('extract');
+    expect(help).not.toContain('recall');
   });
 });

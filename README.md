@@ -1,45 +1,37 @@
 # Memmem
 
-Memmem - Conversation memory with **observation-based semantic search** across Claude Code sessions.
+Memmem - Conversation memory with transcript search across Claude Code and Codex sessions.
 
 ## Purpose
 
-Gives Claude persistent memory across sessions by automatically indexing conversations and providing
-**progressive disclosure search** through structured observations. Based on [@obra/episodic-memory](https://github.com/obra/episodic-memory)
+Gives Claude persistent memory across sessions by archiving local transcripts, indexing transcript exchanges,
+and providing semantic/text search plus transcript reading. Based on [@obra/episodic-memory](https://github.com/obra/episodic-memory)
 with integration into the Claude Code plugin ecosystem.
 
 ## Features
 
-- **Automatic Indexing**: SessionEnd hook syncs conversations automatically
-- **Observation-Based Search**: Structured insights from past sessions (~30t each)
-- **Progressive Disclosure**: 3-layer pattern saves 50-100x context
-  - Layer 1: search() returns compact observations
-  - Layer 2: get_observations() returns full details
-  - Layer 3: read() returns raw conversation (rarely needed)
+- **Transcript Sync**: Copies Claude Code and Codex transcripts into a local archive
+- **Exchange Search**: Searches indexed user/assistant transcript exchanges
 - **Semantic Search**: Vector embeddings for intelligent similarity matching
 - **Text Search**: Fast exact-text matching for specific terms
-- **Advanced Filtering**: Filter by observation type, concepts, files, projects
-- **Multi-Concept Search**: AND search across 2-5 concepts (legacy exchange-based)
-- **Date Filtering**: Search within specific time ranges
-- **Conversation Reading**: Full conversation retrieval with pagination
+- **Source Filtering**: Filter by source kind and date range
+- **Conversation Reading**: Archived transcript retrieval with line ranges
 - **Inline Exclusion Markers**: Exclude sensitive conversations with `DO NOT INDEX THIS CHAT`
-- **Index Verification**: Check index health and repair issues
 - **CLI Interface**: Direct CLI access for manual operations
 
 ## Agents
 
 ### `search-conversation`
 
-Specialized agent for searching and synthesizing conversation history using **observations** (structured insights).
-Saves 50-100x context by using progressive disclosure and returning synthesized insights.
+Specialized agent for searching and synthesizing conversation history from indexed transcript exchanges.
+Saves context by searching first and reading archive lines only when needed.
 
 **The agent automatically:**
 
-1. Searches observations (Layer 1: compact results ~30t each)
-2. Gets full observation details (Layer 2: complete context ~200-500t each)
-3. Reads raw conversations only if needed (Layer 3: full transcript ~500-2000t)
-4. Synthesizes findings into 200-1000 word summary
-5. Returns actionable insights with sources
+1. Searches transcript exchanges
+2. Reads raw transcript lines only if needed
+3. Synthesizes findings into a concise summary
+4. Returns actionable insights with sources
 
 **Always use the agent instead of MCP tools directly** to avoid wasting context.
 
@@ -70,130 +62,79 @@ See `skills/remembering-conversations/SKILL.md` for complete usage guide.
 
 ## MCP Tools
 
-**⚠️ Warning:** Direct MCP tool usage is discouraged. Always use the
-`search-conversation` agent instead to save 50-100x context.
-
-These tools are exposed for advanced usage only. See `skills/remembering-conversations/MCP-TOOLS.md` for complete API reference.
+These tools are exposed for advanced usage.
 
 ### `memmem__search`
 
-Restores context by searching past conversations using **observations** (structured insights).
-Uses progressive disclosure to minimize context usage.
-
-**Use the search-conversation agent instead of calling this directly.**
+Searches indexed transcript exchanges.
 
 **Parameters:**
 
-- `query` (string | string[], required): Search query (single string for observation-based search, array of 2-5 strings for
-  multi-concept AND search - **deprecated**, use single-concept with filters instead)
+- `query` (string, required): Search query
 - `limit` (number, optional): Maximum results to return (1-50, default: 10)
-- `mode` (string, optional): Search mode - "vector", "text", or "both" (default: "both", only for single-concept)
 - `before` (string, optional): Only conversations before this date (YYYY-MM-DD)
 - `after` (string, optional): Only conversations after this date (YYYY-MM-DD)
-- `projects` (string[], optional): Filter results to specific project names
-- `types` (string[], optional): Filter by observation types (single-concept only)
-- `concepts` (string[], optional): Filter by tagged concepts (single-concept only)
-- `files` (string[], optional): Filter by files mentioned/modified (single-concept only)
-- `response_format` (string, optional): "markdown" or "json" (default: "markdown")
-
-**Examples:**
-
-```javascript
-// Observation-based search (recommended)
-{ query: "React Router authentication errors" }
-
-// Text search for exact match
-{ query: "a1b2c3d4e5f6", mode: "text" }
-
-// Advanced filtering (single-concept only)
-{ query: "authentication", types: ["decision", "bug-fix"], concepts: ["JWT"] }
-
-// Multi-concept AND search (deprecated, uses exchanges)
-// Instead use: { query: "React Router authentication JWT", concepts: ["React Router", "authentication", "JWT"], mode: "both" }
-{ query: ["React Router", "authentication", "JWT"] }
-
-// Date filtering
-{ query: "refactoring", after: "2025-09-01" }
-
-// Project filtering
-{ query: "authentication", projects: ["my-project"] }
-```
-
-### `memmem__get_observations`
-
-Gets full observation details (Layer 2 of progressive disclosure). Use after search() to retrieve
-complete information including narrative, facts, concepts, and files.
-
-**Use the search-conversation agent instead of calling this directly.**
-
-**Parameters:**
-
-- `ids` (string[], required): Array of observation IDs (1-20)
+- `source_kind` (string, optional): Filter to a source kind such as `claude-projects` or `codex-sessions`
 
 **Example:**
 
 ```javascript
-// Get full details for specific observations
-{ ids: ["obs-abc123", "obs-def456", "obs-ghi789"] }
+{ query: "React Router authentication errors", after: "2026-05-01" }
 ```
 
 ### `memmem__read`
 
-Reads full conversations (Layer 3 of progressive disclosure). Use to extract detailed context after finding
-relevant observations with search() and getting full details with get_observations(). Essential for understanding
-the complete rationale, evolution, and gotchas behind past decisions.
-
-**Use the search-conversation agent instead of calling this directly.**
+Reads archived transcript lines.
 
 **Parameters:**
 
-- `path` (string, required): Conversation file path from search results
-- `startLine` (number, optional): Starting line number (1-indexed) for pagination
-- `endLine` (number, optional): Ending line number (1-indexed) for pagination
-
-**Note:** Most searches are satisfied with layers 1-2 (search + get_observations). Only use this when
-absolutely necessary to save context.
+- `path` (string, required): Archive path from search results
+- `startLine` (number, optional): Starting line number (1-indexed)
+- `endLine` (number, optional): Ending line number (1-indexed)
 
 ## Installation
 
 ```bash
 # Install dependencies
 cd plugins/memmem
-npm install
+bun install
 
 # Build the plugin
-npm run build
+bun run build
 ```
 
 The plugin automatically:
 
 1. Creates `~/.config/memmem/` directory
-2. Begins indexing conversations via SessionEnd hook
-3. Provides MCP tools for semantic search
+2. Syncs and indexes transcripts via the SessionStart hook
+3. Provides MCP tools for transcript search and reading
 
 ## How It Works
 
-### Automatic Indexing (SessionStart Hook)
+### Transcript Sync (SessionStart Hook)
 
 When each Claude Code session starts (startup or resume), the hook (`hooks/hooks.json`) runs:
 
 ```bash
-node dist/cli.mjs sync
+memmem sync
 ```
 
 This:
 
-1. Scans `~/.claude/sessions/` for new/modified conversations
-2. Generates embeddings using Transformers.js
-3. Stores in SQLite database (`~/.config/memmem/conversations.db`)
-4. Runs in background (non-blocking, silent on errors)
+1. Copies Claude Code and Codex transcripts into `~/.config/memmem/conversation-archive/`
+2. Reindexes changed archive files into transcript exchanges
+3. Generates embeddings using Transformers.js
+4. Stores exchange metadata and vectors in SQLite
+5. Runs in background
 
 ### Storage Structure
 
 ```text
 ~/.config/memmem/
-├── conversations.db          # SQLite database with embeddings
-└── config.json              # User settings (optional)
+├── conversation-archive/     # Copied source transcripts
+├── conversation-index/
+│   └── conversations.db      # SQLite database with exchange embeddings
+└── config.json               # User settings (optional)
 ```
 
 ### Exclusion
@@ -219,53 +160,26 @@ Include one of these markers anywhere in the conversation content:
 
 The entire conversation will be excluded from indexing when any of these markers are detected.
 
-### LLM Configuration (Required for Summarization)
+### Configuration
 
-Summarization requires an LLM provider configuration. Create a config file at `~/.config/memmem/config.json`:
-
-**Supported providers:** `gemini`, `zai`
-
-#### Gemini Configuration
+Create `~/.config/memmem/config.json` to customize rate limits:
 
 ```json
 {
-  "provider": "gemini",
-  "apiKey": "your-gemini-api-key",
-  "model": "gemini-2.0-flash"
+  "ratelimit": {
+    "embedding": { "requestsPerSecond": 5, "burstSize": 10 }
+  }
 }
 ```
 
-**Getting a Gemini API key:**
-
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Create a new API key
-3. Add it to your config.json
-
-#### Z.AI Configuration
-
-```json
-{
-  "provider": "zai",
-  "apiKey": "your-zai-api-key",
-  "model": "glm-4.7"
-}
-```
-
-**Configuration options:**
-
-- **`provider`**: LLM provider name (`gemini` or `zai`)
-- **`apiKey`**: API key for the provider
-- **`model`**: Optional model name (defaults: `gemini-2.0-flash` for Gemini, `glm-4.7` for Z.AI)
-
-**Note**: If no config file is found, conversations will still be indexed but not summarized.
-You'll see `[Not summarized - no LLM config found]` placeholders instead of summaries.
+Transcript indexing does not require an LLM provider configuration.
 
 ## Development
 
 ### Build
 
 ```bash
-npm run build
+bun run build
 ```
 
 Bundles:
@@ -276,7 +190,7 @@ Bundles:
 ### Type Check
 
 ```bash
-npm run typecheck
+bun run typecheck
 ```
 
 ### CLI Usage
@@ -287,23 +201,14 @@ The plugin provides a CLI interface for manual operations:
 # Show help
 memmem --help
 
-# Sync new conversations
+# Copy and index transcripts
 memmem sync
 
-# Sync with parallel summarization
-memmem sync --concurrency 4
+# Search indexed transcript exchanges
+memmem search "query"
 
-# Index a specific session
-memmem index-session 2025-02-06-123456
-
-# Verify index health
-memmem verify
-
-# Repair detected issues
-memmem repair
-
-# Rebuild entire index
-memmem rebuild --concurrency 8
+# Read archived transcript lines
+memmem read /path/to/archive.jsonl --start-line 1 --end-line 20
 ```
 
 ### Project Structure
@@ -316,16 +221,15 @@ plugins/memmem/
 ├── hooks/
 │   └── hooks.json               # Auto-sync on session start (startup|resume)
 ├── src/
-│   ├── core/                    # Core library (from @obra/episodic-memory)
-│   │   ├── indexer.ts           # Conversation indexing
-│   │   ├── searcher.ts          # Semantic + text search
-│   │   ├── storage.ts           # SQLite + embeddings
-│   │   └── types.ts             # Type definitions
+│   ├── core/                    # Core library
+│   │   ├── indexer.ts           # Archive file indexing
+│   │   ├── search.ts            # Semantic + text search
+│   │   ├── db.ts                # SQLite + vector schema
+│   │   └── sources/             # Claude Code and Codex adapters
 │   ├── cli/                     # CLI commands
-│   │   ├── sync-cli.ts          # Sync command
-│   │   ├── search-cli.ts        # Search command
-│   │   ├── show-cli.ts          # Show command
-│   │   └── stats-cli.ts         # Stats command
+│   │   ├── sync.ts              # Sync command
+│   │   ├── search.ts            # Search command
+│   │   └── read.ts              # Read command
 │   └── mcp/
 │       └── server.ts            # MCP server (search, read tools)
 ├── dist/
@@ -356,45 +260,37 @@ plugins/memmem/
 - `typescript`: ^5.3.3
 - `node`: For build and test runtime (Node.js 18+)
 
-## Upgrading from v1.x (multilingual-e5-small)
+## Upgrading to the transcript index
 
-**IMPORTANT**: Version 2.0+ uses EmbeddingGemma with 768-dimensional embeddings (vs 384 in v1.x).
-The database must be recreated as vector dimensions are incompatible.
+**IMPORTANT**: This release is a breaking local index change. The old observation database is not compatible
+with the transcript exchange schema. Delete the old database before rebuilding the index.
 
 ### Migration Steps
 
 ```bash
 # 1. Backup existing database (optional)
-cp ~/.config/memmem/conversations.db \
-   ~/.config/memmem/conversations.db.backup
+cp ~/.config/memmem/conversation-index/conversations.db \
+   ~/.config/memmem/conversation-index/conversations.db.backup
 
 # 2. Remove old database
-rm ~/.config/memmem/conversations.db
+rm ~/.config/memmem/conversation-index/conversations.db
 
 # 3. Reinstall plugin dependencies
 cd plugins/memmem
-npm install
+bun install
 
 # 4. Rebuild plugin
-npm run build
+bun run build
 
-# 5. Reindex all conversations (downloads ~197MB model on first run)
-node dist/cli.mjs index-all
+# 5. Rebuild the local transcript index
+memmem sync
 ```
 
 **First sync timing**:
 
-- Model download: ~197MB (one-time, cached to `.cache/`)
-- Reindexing time: Varies by conversation count
-- Initial ONNX runtime warmup: ~30 seconds
-
-### What's New in v2.0
-
-- ✅ **Better Korean Support**: 83.86 MRR@10 (vs 55.4 in v1.x) - **+51% improvement**
-- ✅ **100+ Languages**: Multilingual coverage including Korean, Japanese, Chinese, etc.
-- ✅ **Higher Dimensions**: 768-dim embeddings (vs 384) for better semantic representation
-- ✅ **Memory Efficient**: < 200MB RAM usage with Q4 quantization
-- ✅ **Official Package**: Migrated to `@huggingface/transformers` v3
+- Model download happens once and is cached locally
+- Reindexing time varies by transcript count
+- Initial ONNX runtime warmup can take several seconds
 
 ## Troubleshooting
 
@@ -432,7 +328,7 @@ Then restart Claude Code.
 
    ```bash
    cd plugins/memmem
-   npm install
+   bun install
    ```
 
 #### Disk Space Full (ENOSPC)
@@ -453,7 +349,7 @@ Then restart Claude Code.
    ```bash
    cd plugins/memmem
    rm -rf node_modules
-   npm install
+   bun install
    ```
 
 ### Manual Installation
@@ -462,8 +358,8 @@ If automatic installation fails repeatedly, install dependencies manually:
 
 ```bash
 cd plugins/memmem
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## Architecture Notes

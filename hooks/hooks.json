@@ -7,31 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh recall",
-            "timeout": 1000
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh record",
-            "async": true
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh extract",
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync",
             "async": true
           }
         ]
