@@ -1,119 +1,61 @@
 /**
- * Test for hooks.json schema validation.
- *
- * This test validates that hooks.json conforms to the hooks-schema.json.
+ * Test for hooks.json sync-only hook configuration.
  */
 
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-describe('hooks.json schema validation', () => {
-  it('should have valid hooks.json structure', () => {
-    const hooksPath = path.join(__dirname, 'hooks.json');
-    const hooksContent = fs.readFileSync(hooksPath, 'utf-8');
-    const hooks = JSON.parse(hooksContent);
+function loadHooksJson(): any {
+  const hooksPath = path.join(__dirname, 'hooks.json');
+  const hooksContent = fs.readFileSync(hooksPath, 'utf-8');
+  return JSON.parse(hooksContent);
+}
 
-    // Basic structure validation
+function getCommandHooks(hooks: any): string[] {
+  return Object.values(hooks.hooks).flatMap((hookGroups: any) =>
+    hookGroups.flatMap((group: any) =>
+      group.hooks
+        .filter((hook: any) => hook.type === 'command')
+        .map((hook: any) => hook.command)
+    )
+  );
+}
+
+describe('hooks.json sync-only hook configuration', () => {
+  it('has a valid sync-only SessionStart hook structure', () => {
+    const hooks = loadHooksJson();
+
     expect(hooks).toHaveProperty('hooks');
-    expect(typeof hooks.hooks).toBe('object');
+    expect(Object.keys(hooks.hooks)).toEqual(['SessionStart']);
 
-    // Check that the three required hooks are registered
-    expect(hooks.hooks).toHaveProperty('SessionStart');
-    expect(hooks.hooks).toHaveProperty('PostToolUse');
-    expect(hooks.hooks).toHaveProperty('Stop');
-
-    // Validate SessionStart hook
     const sessionStartHooks = hooks.hooks.SessionStart;
     expect(Array.isArray(sessionStartHooks)).toBe(true);
-    expect(sessionStartHooks.length).toBeGreaterThan(0);
+    expect(sessionStartHooks).toHaveLength(1);
 
-    sessionStartHooks.forEach((hookGroup: any) => {
-      expect(hookGroup).toHaveProperty('matcher');
-      expect(typeof hookGroup.matcher).toBe('string');
-      expect(hookGroup).toHaveProperty('hooks');
-      expect(Array.isArray(hookGroup.hooks)).toBe(true);
+    const [hookGroup] = sessionStartHooks;
+    expect(hookGroup.matcher).toBe('startup|resume|clear|compact');
+    expect(Array.isArray(hookGroup.hooks)).toBe(true);
+    expect(hookGroup.hooks).toHaveLength(1);
 
-      hookGroup.hooks.forEach((hook: any) => {
-        expect(hook).toHaveProperty('type');
-        expect(['command', 'prompt', 'agent']).toContain(hook.type);
-
-        if (hook.type === 'command') {
-          expect(hook).toHaveProperty('command');
-          expect(typeof hook.command).toBe('string');
-        }
-      });
-    });
-
-    // Validate PostToolUse hook
-    const postToolUseHooks = hooks.hooks.PostToolUse;
-    expect(Array.isArray(postToolUseHooks)).toBe(true);
-    expect(postToolUseHooks.length).toBeGreaterThan(0);
-
-    postToolUseHooks.forEach((hookGroup: any) => {
-      expect(hookGroup).toHaveProperty('matcher');
-      expect(typeof hookGroup.matcher).toBe('string');
-      expect(hookGroup).toHaveProperty('hooks');
-      expect(Array.isArray(hookGroup.hooks)).toBe(true);
-
-      hookGroup.hooks.forEach((hook: any) => {
-        expect(hook).toHaveProperty('type');
-        expect(['command', 'prompt', 'agent']).toContain(hook.type);
-
-        if (hook.type === 'command') {
-          expect(hook).toHaveProperty('command');
-          expect(typeof hook.command).toBe('string');
-        }
-      });
-    });
-
-    // Validate Stop hook
-    const stopHooks = hooks.hooks.Stop;
-    expect(Array.isArray(stopHooks)).toBe(true);
-    expect(stopHooks.length).toBeGreaterThan(0);
-
-    stopHooks.forEach((hookGroup: any) => {
-      expect(hookGroup).toHaveProperty('matcher');
-      expect(typeof hookGroup.matcher).toBe('string');
-      expect(hookGroup).toHaveProperty('hooks');
-      expect(Array.isArray(hookGroup.hooks)).toBe(true);
-
-      hookGroup.hooks.forEach((hook: any) => {
-        expect(hook).toHaveProperty('type');
-        expect(['command', 'prompt', 'agent']).toContain(hook.type);
-
-        if (hook.type === 'command') {
-          expect(hook).toHaveProperty('command');
-          expect(typeof hook.command).toBe('string');
-        }
-      });
+    const [hook] = hookGroup.hooks;
+    expect(hook).toEqual({
+      type: 'command',
+      command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      async: true,
     });
   });
 
-  it('should have hooks that reference the new v3 implementations', () => {
-    const hooksPath = path.join(__dirname, 'hooks.json');
-    const hooksContent = fs.readFileSync(hooksPath, 'utf-8');
-    const hooks = JSON.parse(hooksContent);
+  it('does not reference old observation hook commands', () => {
+    const hooks = loadHooksJson();
+    const commands = getCommandHooks(hooks);
 
-    // Check that hooks reference the new implementations
-    // This is a basic check - the actual CLI commands will be validated separately
-
-    // SessionStart should call recall command
-    const sessionStartCommands = hooks.hooks.SessionStart.flatMap((group: any) =>
-      group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
-    );
-    expect(sessionStartCommands.some((cmd: string) => cmd.includes('recall'))).toBe(true);
-
-    // PostToolUse should call record command
-    const postToolUseCommands = hooks.hooks.PostToolUse.flatMap((group: any) =>
-      group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
-    );
-    expect(postToolUseCommands.some((cmd: string) => cmd.includes('record'))).toBe(true);
-
-    // Stop should call extract command
-    const stopCommands = hooks.hooks.Stop.flatMap((group: any) =>
-      group.hooks.filter((h: any) => h.type === 'command').map((h: any) => h.command)
-    );
-    expect(stopCommands.some((cmd: string) => cmd.includes('extract'))).toBe(true);
+    expect(commands).toEqual(['sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync']);
+    for (const command of commands) {
+      expect(command).not.toContain('recall');
+      expect(command).not.toContain('record');
+      expect(command).not.toContain('extract');
+      expect(command).not.toContain('observe');
+    }
   });
 });
