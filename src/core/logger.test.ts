@@ -1,370 +1,132 @@
-/**
- * Tests for logger.ts - Logging functionality for memmem.
- *
- * This logger provides:
- * - logInfo() - logs info messages
- * - logWarn() - logs warning messages
- * - logError() - logs error messages (no stderr output)
- * - logDebug() - logs debug messages only when CONVERSATION_MEMORY_DEBUG=true
- * - formatLogEntry() - formats log entries
- * - writeLog() - writes to log file
- */
-
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import fs from 'fs';
-import { LogLevel, logInfo, logWarn, logError, logDebug } from './logger.js';
-
-// Mock the paths module
-mock.module('./paths.js', () => ({
-  getLogFilePath: mock(() => '/tmp/test-memmem.log'),
-}));
-
-// Mock fs.appendFileSync
-const mockAppendFileSync = spyOn(fs, 'appendFileSync').mockImplementation(() => {});
+import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { log } from './logger.js';
 
 describe('logger', () => {
-  let originalEnv: NodeJS.ProcessEnv;
-  let consoleLogSpy: ReturnType<typeof spyOn>;
-  let consoleWarnSpy: ReturnType<typeof spyOn>;
+  let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, 'write'>>;
+  let originalLevel: string | undefined;
 
   beforeEach(() => {
-    // Store original environment
-    originalEnv = { ...process.env };
-
-    // Clear all mocks
-    mockAppendFileSync.mockClear();
-
-    // Mock console output
-    consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
-    consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    originalLevel = process.env.MEMMEM_LOG_LEVEL;
+    stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 
   afterEach(() => {
-    // Restore original environment
-    process.env = originalEnv;
-
-    // Restore console
-    consoleLogSpy.mockRestore();
-    consoleWarnSpy.mockRestore();
+    if (originalLevel === undefined) {
+      delete process.env.MEMMEM_LOG_LEVEL;
+    } else {
+      process.env.MEMMEM_LOG_LEVEL = originalLevel;
+    }
+    stderrSpy.mockRestore();
   });
 
-  describe('LogLevel enum', () => {
-    test('should have correct log levels', () => {
-      expect(LogLevel.INFO).toBe('INFO' as LogLevel);
-      expect(LogLevel.WARN).toBe('WARN' as LogLevel);
-      expect(LogLevel.ERROR).toBe('ERROR' as LogLevel);
-      expect(LogLevel.DEBUG).toBe('DEBUG' as LogLevel);
-    });
-  });
-
-  describe('logInfo', () => {
-    test('should write to file and console', () => {
-      const testMessage = 'Test info message';
-
-      logInfo(testMessage);
-
-      expect(mockAppendFileSync).toHaveBeenCalledWith(
-        '/tmp/test-memmem.log',
-        expect.stringContaining('[INFO]'),
-        'utf-8'
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[INFO]')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining(testMessage)
-      );
-    });
-
-    test('should include timestamp in log entry', () => {
-      logInfo('test');
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]/);
-    });
-
-    test('should include data when provided', () => {
-      const testData = { key: 'value', count: 42 };
-
-      logInfo('test with data', testData);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain(JSON.stringify(testData));
-    });
-
-    test('should not include data when not provided', () => {
-      logInfo('test without data');
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      // Should not have JSON object after message
-      expect(logEntry).toMatch(/\[INFO\] test without data\n$/);
-    });
-  });
-
-  describe('logWarn', () => {
-    test('should write to file and console with warning', () => {
-      const testMessage = 'Test warning message';
-
-      logWarn(testMessage);
-
-      expect(mockAppendFileSync).toHaveBeenCalledWith(
-        '/tmp/test-memmem.log',
-        expect.stringContaining('[WARN]'),
-        'utf-8'
-      );
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[WARN]')
-      );
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(testMessage)
-      );
-    });
-
-    test('should include timestamp in warning log entry', () => {
-      logWarn('warning test');
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]/);
-      expect(logEntry).toContain('[WARN]');
-    });
-
-    test('should include data when provided', () => {
-      const testData = { error: 'something went wrong', code: 500 };
-
-      logWarn('warning with data', testData);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain(JSON.stringify(testData));
-    });
-  });
-
-  describe('logError', () => {
-    let consoleErrorSpy: ReturnType<typeof spyOn>;
-
+  describe('default level (info)', () => {
     beforeEach(() => {
-      // Mock console.error to ensure it's NOT called
-      consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {});
+      delete process.env.MEMMEM_LOG_LEVEL;
     });
 
-    afterEach(() => {
-      consoleErrorSpy.mockRestore();
+    test('info is output', () => {
+      log.info('hello info');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0][0] as string).toContain('INFO hello info');
     });
 
-    test('should write to file but NOT to stderr', () => {
-      const testMessage = 'Test error message';
-
-      logError(testMessage);
-
-      expect(mockAppendFileSync).toHaveBeenCalledWith(
-        '/tmp/test-memmem.log',
-        expect.stringContaining('[ERROR]'),
-        'utf-8'
-      );
-      // Critical: errors should NOT go to stderr to avoid leaking into LLM context
-      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    test('warn is output', () => {
+      log.warn('hello warn');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0][0] as string).toContain('WARN hello warn');
     });
 
-    test('should include error stack trace when Error object provided', () => {
-      const testError = new Error('Test error');
-      testError.stack = 'Error: Test error\n    at test.js:10:15';
-
-      logError('Something went wrong', testError);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain('Error: Test error');
-      expect(logEntry).toContain('test.js:10:15');
+    test('error is output', () => {
+      log.error('hello error');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0][0] as string).toContain('ERROR hello error');
     });
 
-    test('should include error name and message', () => {
-      const testError = new TypeError('Invalid type');
-
-      logError('Type error occurred', testError);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain('TypeError');
-      expect(logEntry).toContain('Invalid type');
-    });
-
-    test('should handle non-Error objects', () => {
-      const nonError = { custom: 'error object', code: 123 };
-
-      logError('Custom error', nonError);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain(JSON.stringify(nonError));
-    });
-
-    test('should include additional data when provided', () => {
-      const testData = { userId: '123', action: 'delete' };
-      const testError = new Error('Database error');
-
-      logError('Operation failed', testError, testData);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain('"userId":"123"');
-      expect(logEntry).toContain('"action":"delete"');
-      expect(logEntry).toContain('Database error');
-    });
-
-    test('should handle error without data', () => {
-      const testError = new Error('Simple error');
-
-      logError('Error occurred', testError);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain('error');
+    test('debug is NOT output', () => {
+      log.debug('hello debug');
+      expect(stderrSpy).not.toHaveBeenCalled();
     });
   });
 
-  describe('logDebug', () => {
-    test('should log when CONVERSATION_MEMORY_DEBUG is true', () => {
-      process.env.CONVERSATION_MEMORY_DEBUG = 'true';
-
-      logDebug('Debug message');
-
-      expect(mockAppendFileSync).toHaveBeenCalledWith(
-        '/tmp/test-memmem.log',
-        expect.stringContaining('[DEBUG]'),
-        'utf-8'
-      );
-      // Debug logs include the message
-      const logCall = (consoleLogSpy.mock.calls as any[]).find((call: any[]) =>
-        call[0] as string === '[DEBUG] Debug message'
-      );
-      expect(logCall).toBeTruthy();
+  describe('MEMMEM_LOG_LEVEL=debug', () => {
+    beforeEach(() => {
+      process.env.MEMMEM_LOG_LEVEL = 'debug';
     });
 
-    test('should NOT log when CONVERSATION_MEMORY_DEBUG is not set', () => {
-      delete process.env.CONVERSATION_MEMORY_DEBUG;
-
-      logDebug('Debug message');
-
-      expect(mockAppendFileSync).not.toHaveBeenCalled();
-      expect(consoleLogSpy).not.toHaveBeenCalled();
+    test('debug is output', () => {
+      log.debug('debug message');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0][0] as string).toContain('DEBUG debug message');
     });
 
-    test('should NOT log when CONVERSATION_MEMORY_DEBUG is false', () => {
-      process.env.CONVERSATION_MEMORY_DEBUG = 'false';
-
-      logDebug('Debug message');
-
-      expect(mockAppendFileSync).not.toHaveBeenCalled();
-      expect(consoleLogSpy).not.toHaveBeenCalled();
-    });
-
-    test('should include data when debug enabled', () => {
-      process.env.CONVERSATION_MEMORY_DEBUG = 'true';
-
-      const testData = { variable: 'value', state: 'active' };
-
-      logDebug('Debug with data', testData);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain(JSON.stringify(testData));
-
-      // Verify console.log was called with debug message and data
-      const debugCalls = (consoleLogSpy.mock.calls as any[]).filter((call: any[]) =>
-        (call[0] as string).includes('[DEBUG]')
-      );
-      expect(debugCalls.length).toBeGreaterThan(0);
+    test('info is still output', () => {
+      log.info('info message');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('log entry formatting', () => {
-    test('should format log entry correctly with data', () => {
-      logInfo('test message', { key: 'value' });
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      // Format: [timestamp] [level] message data\n
-      expect(logEntry).toMatch(/^\[\d{4}-\d{2}-\d{2}T/);
-      expect(logEntry).toContain('[INFO]');
-      expect(logEntry).toContain('test message');
-      expect(logEntry).toContain('{"key":"value"}');
-      expect(logEntry.slice(-1)).toBe('\n');
+  describe('MEMMEM_LOG_LEVEL=silent', () => {
+    beforeEach(() => {
+      process.env.MEMMEM_LOG_LEVEL = 'silent';
     });
 
-    test('should format log entry correctly without data', () => {
-      logWarn('warning message');
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      // Format: [timestamp] [level] message\n
-      expect(logEntry).toMatch(/^\[\d{4}-\d{2}-\d{2}T/);
-      expect(logEntry).toContain('[WARN]');
-      expect(logEntry).toContain('warning message');
-      expect(logEntry).not.toContain('{');
-      expect(logEntry.slice(-1)).toBe('\n');
+    test('error is suppressed', () => {
+      log.error('nope');
+      expect(stderrSpy).not.toHaveBeenCalled();
     });
 
-    test('should handle special characters in message', () => {
-      const specialMessage = 'Message with "quotes" and \'apostrophes\'';
-
-      logInfo(specialMessage);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain(specialMessage);
+    test('warn is suppressed', () => {
+      log.warn('nope');
+      expect(stderrSpy).not.toHaveBeenCalled();
     });
 
-    test('should handle unicode characters', () => {
-      const unicodeMessage = 'Test with emoji 🚀 and unicode 中文';
+    test('info is suppressed', () => {
+      log.info('nope');
+      expect(stderrSpy).not.toHaveBeenCalled();
+    });
 
-      logInfo(unicodeMessage);
-
-      const logCall = mockAppendFileSync.mock.calls[0];
-      const logEntry = logCall[1] as string;
-
-      expect(logEntry).toContain('🚀');
-      expect(logEntry).toContain('中文');
+    test('debug is suppressed', () => {
+      log.debug('nope');
+      expect(stderrSpy).not.toHaveBeenCalled();
     });
   });
 
-  describe('file writing behavior', () => {
-    test('should append to log file', () => {
-      logInfo('First message');
-      logInfo('Second message');
-
-      expect(mockAppendFileSync).toHaveBeenCalledTimes(2);
-
-      const firstCall = mockAppendFileSync.mock.calls[0];
-      const secondCall = mockAppendFileSync.mock.calls[1];
-
-      expect(firstCall[0]).toBe('/tmp/test-memmem.log');
-      expect(secondCall[0]).toBe('/tmp/test-memmem.log');
+  describe('output format', () => {
+    beforeEach(() => {
+      delete process.env.MEMMEM_LOG_LEVEL;
     });
 
-    test('should use utf-8 encoding', () => {
-      logInfo('test');
+    test('includes ISO timestamp', () => {
+      log.info('ts test');
+      const line = stderrSpy.mock.calls[0][0] as string;
+      expect(line).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]/);
+    });
 
-      const logCall = mockAppendFileSync.mock.calls[0];
+    test('meta included as JSON when provided', () => {
+      log.info('with meta', { count: 5, file: 'foo.ts' });
+      const line = stderrSpy.mock.calls[0][0] as string;
+      expect(line).toContain('{"count":5,"file":"foo.ts"}');
+    });
 
-      expect(logCall[2]).toBe('utf-8');
+    test('no JSON suffix when meta is absent', () => {
+      log.info('no meta');
+      const line = stderrSpy.mock.calls[0][0] as string;
+      expect(line).not.toContain('{');
+      expect(line.trimEnd()).toBe(line.trimEnd()); // no trailing garbage
+    });
+
+    test('line ends with newline', () => {
+      log.info('newline test');
+      const line = stderrSpy.mock.calls[0][0] as string;
+      expect(line.endsWith('\n')).toBe(true);
+    });
+
+    test('goes to stderr not stdout', () => {
+      const stdoutSpy = spyOn(process.stdout, 'write').mockImplementation(() => true);
+      log.info('stderr only');
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stdoutSpy).not.toHaveBeenCalled();
+      stdoutSpy.mockRestore();
     });
   });
 });

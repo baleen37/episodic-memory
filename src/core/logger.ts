@@ -1,103 +1,68 @@
-import fs from 'fs';
-import path from 'path';
-import { getLogFilePath } from './paths.js';
-
-export enum LogLevel {
-  INFO = 'INFO',
-  WARN = 'WARN',
-  ERROR = 'ERROR',
-  DEBUG = 'DEBUG'
-}
-
-export interface LogEntry {
-  timestamp: string;
-  level: LogLevel;
-  message: string;
-  data?: Record<string, any>;
-}
-
 /**
- * Format log entry as single line
- */
-function formatLogEntry(entry: LogEntry): string {
-  const dataStr = entry.data ? ` ${JSON.stringify(entry.data)}` : '';
-  return `[${entry.timestamp}] [${entry.level}] ${entry.message}${dataStr}`;
-}
-
-/**
- * Write log entry to file
- */
-function writeLog(entry: LogEntry): void {
-  const logPath = getLogFilePath();
-  const line = formatLogEntry(entry) + '\n';
-
-  fs.appendFileSync(logPath, line, 'utf-8');
-}
-
-/**
- * Log info message
- */
-export function logInfo(message: string, data?: Record<string, any>): void {
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level: LogLevel.INFO,
-    message,
-    data
-  };
-  writeLog(entry);
-  console.log(`[INFO] ${message}`);
-}
-
-/**
- * Log warning message
- */
-export function logWarn(message: string, data?: Record<string, any>): void {
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level: LogLevel.WARN,
-    message,
-    data
-  };
-  writeLog(entry);
-  console.warn(`[WARN] ${message}`);
-}
-
-/**
- * Log error message
+ * Level-gated logger. Outputs to stderr only.
  *
- * NOTE: Only writes to file, does NOT output to stderr to avoid leaking into LLM context
+ * Control via MEMMEM_LOG_LEVEL env var:
+ *   error | warn | info | debug   (default: info)
+ *   silent                         (disables all output)
  */
-export function logError(message: string, error?: Error | unknown, data?: Record<string, any>): void {
-  const errorData = error instanceof Error ? {
-    name: error.name,
-    message: error.message,
-    stack: error.stack
-  } : error;
 
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level: LogLevel.ERROR,
-    message,
-    data: data ? { ...data, error: errorData } : { error: errorData }
-  };
-  writeLog(entry);
-  // NO console.error - errors are logged to file only to avoid leaking into LLM context
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+
+const LEVELS: Record<string, number> = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+};
+
+function getThreshold(): number {
+  const raw = (process.env.MEMMEM_LOG_LEVEL ?? 'info').toLowerCase();
+  if (raw === 'silent') return -1;
+  return LEVELS[raw] ?? LEVELS['info'];
 }
 
-/**
- * Log debug message (only when CONVERSATION_MEMORY_DEBUG is set)
- */
-export function logDebug(message: string, data?: Record<string, any>): void {
-  if (process.env.CONVERSATION_MEMORY_DEBUG !== 'true') {
-    return;
-  }
+function emit(level: LogLevel, msg: string, meta?: Record<string, unknown>): void {
+  if (getThreshold() < LEVELS[level]) return;
+  const ts = new Date().toISOString();
+  const line = meta !== undefined
+    ? `[${ts}] ${level.toUpperCase()} ${msg} ${JSON.stringify(meta)}\n`
+    : `[${ts}] ${level.toUpperCase()} ${msg}\n`;
+  process.stderr.write(line);
+}
 
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level: LogLevel.DEBUG,
-    message,
-    data
-  };
-  writeLog(entry);
-  console.log(`[DEBUG] ${message}`, data);
+export const log = {
+  error: (msg: string, meta?: Record<string, unknown>) => emit('error', msg, meta),
+  warn:  (msg: string, meta?: Record<string, unknown>) => emit('warn',  msg, meta),
+  info:  (msg: string, meta?: Record<string, unknown>) => emit('info',  msg, meta),
+  debug: (msg: string, meta?: Record<string, unknown>) => emit('debug', msg, meta),
+};
+
+// ---------------------------------------------------------------------------
+// Legacy shims — keep for existing callers in src/core/llm/
+// ---------------------------------------------------------------------------
+
+/** @deprecated use log.info */
+export function logInfo(message: string, data?: Record<string, unknown>): void {
+  log.info(message, data);
+}
+
+/** @deprecated use log.warn */
+export function logWarn(message: string, data?: Record<string, unknown>): void {
+  log.warn(message, data);
+}
+
+/** @deprecated use log.error */
+export function logError(message: string, error?: unknown, data?: Record<string, unknown>): void {
+  const errorMeta = error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : error !== undefined ? { error } : undefined;
+  const combined = errorMeta
+    ? { ...(data ?? {}), ...(errorMeta as Record<string, unknown>) }
+    : data;
+  log.error(message, combined);
+}
+
+/** @deprecated use log.debug */
+export function logDebug(message: string, data?: Record<string, unknown>): void {
+  log.debug(message, data);
 }
