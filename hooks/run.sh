@@ -9,7 +9,7 @@
 PLUGIN_ROOT="$(CLAUDE_PLUGIN_ROOT="" sh "$HOME/.claude/cpr.sh" memmem@baleen-marketplace)"
 TMPFILE=$(mktemp)
 cat > "$TMPFILE"
-node "$PLUGIN_ROOT/dist/cli.mjs" "$@" < "$TMPFILE"
+bun "$PLUGIN_ROOT/dist/cli.mjs" "$@" < "$TMPFILE"
 EXIT=$?
 rm -f "$TMPFILE"
 exit $EXIT

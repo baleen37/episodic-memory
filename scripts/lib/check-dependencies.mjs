@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Shared dependency checking logic for CLI and MCP wrappers
  * Returns: { installed: boolean, missing: string[] }
@@ -50,14 +50,14 @@ export function checkBuildNeeded() {
 }
 
 /**
- * Install dependencies using npm
+ * Install dependencies using bun
  * @param {boolean} silent - Run silently in background
  * @returns {Promise<void>}
  */
 export function installDependencies(silent = false) {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === 'win32';
-    const npmCommand = isWindows ? 'npm.cmd' : 'npm';
+    const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
     if (!silent) {
       console.error('[memmem] Installing dependencies...');
@@ -65,7 +65,7 @@ export function installDependencies(silent = false) {
 
     let stderrOutput = '';
 
-    const child = spawn(npmCommand, ['install', '--silent', '--no-audit', '--no-fund'], {
+    const child = spawn(bunCommand, ['install', '--silent'], {
       cwd: ROOT,
       stdio: silent ? 'ignore' : ['ignore', 'pipe', 'pipe'],
       shell: isWindows,
@@ -90,7 +90,7 @@ export function installDependencies(silent = false) {
         }
         resolve();
       } else {
-        const error = new Error(`npm install failed with exit code ${code}`);
+        const error = new Error(`bun install failed with exit code ${code}`);
         error.stderr = stderrOutput;
         reject(error);
       }
@@ -107,19 +107,19 @@ export function installDependencies(silent = false) {
 }
 
 /**
- * Run build using npm
+ * Run build using bun
  * @returns {Promise<void>}
  */
 export function runBuild() {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === 'win32';
-    const npmCommand = isWindows ? 'npm.cmd' : 'npm';
+    const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
     console.error('[memmem] Building plugin...');
 
     let stderrOutput = '';
 
-    const child = spawn(npmCommand, ['run', 'build', '--silent'], {
+    const child = spawn(bunCommand, ['run', 'build', '--silent'], {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: isWindows
@@ -139,7 +139,7 @@ export function runBuild() {
         console.error('[memmem] Build completed.');
         resolve();
       } else {
-        const error = new Error(`npm run build failed with exit code ${code}`);
+        const error = new Error(`bun run build failed with exit code ${code}`);
         error.stderr = stderrOutput;
         reject(error);
       }
@@ -152,7 +152,7 @@ export function runBuild() {
 }
 
 /**
- * Analyze npm error and suggest fix
+ * Analyze bun error and suggest fix
  * @param {Error} error
  * @returns {{ cause: string, fix: string }}
  */
@@ -162,7 +162,7 @@ export function analyzeError(error) {
   if (stderr.includes('EACCES') || stderr.includes('permission denied')) {
     return {
       cause: 'Permission denied',
-      fix: 'sudo chown -R $(whoami) ~/.npm'
+      fix: 'Check permissions for the project directory and Bun cache'
     };
   }
 
@@ -182,6 +182,6 @@ export function analyzeError(error) {
 
   return {
     cause: error.message || 'Unknown error',
-    fix: `Manual fallback: cd "${ROOT}" && npm install`
+    fix: `Manual fallback: cd "${ROOT}" && bun install`
   };
 }

@@ -1,30 +1,31 @@
-/**
- * Observation Search
- *
- * Search using observations table with vector similarity.
- */
-
 import { Database } from 'bun:sqlite';
-import { generateEmbedding, initEmbeddings } from './embeddings.js';
-import type { LLMProvider } from './llm/types.js';
+import { generateEmbedding } from './embeddings.js';
 
-interface SearchOptions {
-  limit?: number;
-  after?: string;  // ISO date string
-  before?: string; // ISO date string
-  projects?: string[]; // Filter by project names
-  files?: string[]; // Filter by file paths mentioned in content
-  queryNormalizerProvider?: LLMProvider; // Optional provider to normalize query to English
+interface QueryNormalizerProvider {
+  complete(prompt: string): Promise<{ text: string }>;
 }
 
-/**
- * Compact observation result (Layer 1 of progressive disclosure)
- */
-export interface ObservationSummary {
+interface SearchOptions {
+  db: Database;
+  limit?: number;
+  after?: string;
+  before?: string;
+  sourceKind?: string;
+  projects?: string[];
+  files?: string[];
+  queryNormalizerProvider?: QueryNormalizerProvider;
+}
+
+export interface ExchangeSearchResult {
   id: number;
-  title: string;
-  project: string;
-  timestamp: number;
+  archivePath: string;
+  lineStart: number;
+  lineEnd: number;
+  sourceKind: string;
+  project: string | null;
+  timestamp: number | null;
+  snippet: string;
+  score?: number;
 }
 
 function isValidCalendarDate(dateStr: string): boolean {
@@ -37,34 +38,6 @@ function isValidCalendarDate(dateStr: string): boolean {
   );
 }
 
-async function normalizeQueryToEnglish(
-  query: string,
-  queryNormalizerProvider?: LLMProvider
-): Promise<string> {
-  if (!queryNormalizerProvider) {
-    return query;
-  }
-
-  const normalizePrompt = [
-    'Normalize the following search query into concise English for memory retrieval.',
-    'Preserve technical terms, file paths, and identifiers exactly.',
-    'Return only the normalized English query text with no explanation.',
-    '',
-    query,
-  ].join('\n');
-
-  try {
-    const result = await queryNormalizerProvider.complete(normalizePrompt, {
-      maxTokens: 128,
-      systemPrompt: 'You normalize search queries to concise English only.'
-    });
-    const normalized = result.text.trim();
-    return normalized.length > 0 ? normalized : query;
-  } catch {
-    return query;
-  }
-}
-
 function validateISODate(dateStr: string, paramName: string): void {
   const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!isoDateRegex.test(dateStr)) {
@@ -75,212 +48,233 @@ function validateISODate(dateStr: string, paramName: string): void {
   }
 }
 
-/**
- * Convert ISO date string to Unix timestamp (milliseconds)
- */
 function isoToTimestamp(isoDate: string): number {
   const [year, month, day] = isoDate.split('-').map(Number);
   return Date.UTC(year, month - 1, day);
 }
 
-interface SharedFilterParts {
-  timeClause: string;
-  timeFilterParams: number[];
-  projectClause: string;
-  projectFilterParams: string[];
-  fileClause: string;
-  fileFilterParams: string[];
+interface FilterParts {
+  clause: string;
+  params: Array<string | number>;
+  hasFilters: boolean;
 }
 
-function buildSharedFilterParts(
-  after?: string,
-  before?: string,
-  projects?: string[],
-  files?: string[]
-): SharedFilterParts {
-  const timeFilter: string[] = [];
-  const timeFilterParams: number[] = [];
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+function makeLikePattern(value: string): string {
+  return `%${escapeLikePattern(value)}%`;
+}
+
+function buildFilterParts(options: Pick<SearchOptions, 'after' | 'before' | 'sourceKind' | 'projects' | 'files'>): FilterParts {
+  const { after, before, sourceKind, projects, files } = options;
+  const filters: string[] = [];
+  const params: Array<string | number> = [];
+
   if (after) {
-    timeFilter.push('o.timestamp >= ?');
-    timeFilterParams.push(isoToTimestamp(after));
+    filters.push('e.timestamp >= ?');
+    params.push(isoToTimestamp(after));
   }
+
   if (before) {
     const [year, month, day] = before.split('-').map(Number);
-    const nextDayStart = Date.UTC(year, month - 1, day + 1);
-    timeFilter.push('o.timestamp < ?');
-    timeFilterParams.push(nextDayStart);
+    filters.push('e.timestamp < ?');
+    params.push(Date.UTC(year, month - 1, day + 1));
   }
-  const timeClause = timeFilter.length > 0 ? `AND ${timeFilter.join(' AND ')}` : '';
 
-  const projectFilter: string[] = [];
-  const projectFilterParams: string[] = [];
+  if (sourceKind) {
+    filters.push('e.source_kind = ?');
+    params.push(sourceKind);
+  }
+
   if (projects && projects.length > 0) {
-    const projectPlaceholders = projects.map(() => '?').join(',');
-    projectFilter.push(`o.project IN (${projectPlaceholders})`);
-    projectFilterParams.push(...projects);
+    filters.push(`e.project IN (${projects.map(() => '?').join(', ')})`);
+    params.push(...projects);
   }
-  const projectClause = projectFilter.length > 0 ? `AND ${projectFilter.join(' AND ')}` : '';
 
-  const fileFilter: string[] = [];
-  const fileFilterParams: string[] = [];
   if (files && files.length > 0) {
-    const fileClauses = files.map(() => 'instr(o.content, ?) > 0').join(' OR ');
-    fileFilter.push(`(${fileClauses})`);
-    fileFilterParams.push(...files);
+    const fileFilters: string[] = [];
+    for (const file of files) {
+      fileFilters.push(`(
+        e.archive_path LIKE ? ESCAPE '\\'
+        OR e.user_text LIKE ? ESCAPE '\\'
+        OR e.assistant_text LIKE ? ESCAPE '\\'
+        OR EXISTS (
+          SELECT 1
+          FROM tool_calls tc
+          WHERE tc.exchange_id = e.id
+            AND (tc.input LIKE ? ESCAPE '\\' OR tc.output LIKE ? ESCAPE '\\')
+        )
+      )`);
+      const pattern = makeLikePattern(file);
+      params.push(pattern, pattern, pattern, pattern, pattern);
+    }
+    filters.push(`(${fileFilters.join(' OR ')})`);
   }
-  const fileClause = fileFilter.length > 0 ? `AND ${fileFilter.join(' AND ')}` : '';
 
   return {
-    timeClause,
-    timeFilterParams,
-    projectClause,
-    projectFilterParams,
-    fileClause,
-    fileFilterParams
+    clause: filters.length > 0 ? `AND ${filters.join(' AND ')}` : '',
+    params,
+    hasFilters: filters.length > 0,
   };
 }
 
-async function vector_search(
-  query: string,
-  options: SearchOptions & { db: Database }
-): Promise<ObservationSummary[]> {
-  const { db, limit = 10, after, before, projects, files } = options;
-  const {
-    timeClause,
-    timeFilterParams,
-    projectClause,
-    projectFilterParams,
-    fileClause,
-    fileFilterParams
-  } = buildSharedFilterParts(after, before, projects, files);
+function makeSnippet(userText: string, assistantText: string): string {
+  const text = [userText, assistantText].filter(Boolean).join('\n').replace(/\s+/g, ' ').trim();
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
 
-  await initEmbeddings();
-  const queryEmbedding = await generateEmbedding(query);
+async function normalizeQuery(query: string, provider?: QueryNormalizerProvider): Promise<string> {
+  if (!provider) {
+    return query;
+  }
 
-  // If embeddings are disabled, return empty array (fallback to keyword search)
-  if (!queryEmbedding) {
+  try {
+    const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.\n\nQuery: ${query}`);
+    const normalized = result.text.trim();
+    return normalized || query;
+  } catch {
+    return query;
+  }
+}
+
+function mapRow(row: {
+  id: number;
+  archivePath: string;
+  lineStart: number;
+  lineEnd: number;
+  sourceKind: string;
+  project: string | null;
+  timestamp: number | null;
+  userText: string;
+  assistantText: string;
+  distance?: number;
+}): ExchangeSearchResult {
+  const result: ExchangeSearchResult = {
+    id: row.id,
+    archivePath: row.archivePath,
+    lineStart: row.lineStart,
+    lineEnd: row.lineEnd,
+    sourceKind: row.sourceKind,
+    project: row.project,
+    timestamp: row.timestamp,
+    snippet: makeSnippet(row.userText, row.assistantText),
+  };
+
+  if (row.distance !== undefined) {
+    result.score = 1 / (1 + row.distance);
+  }
+
+  return result;
+}
+
+async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
+  const { db, limit = 10 } = options;
+  const embedding = await generateEmbedding(query);
+
+  if (!embedding) {
     return [];
   }
 
-  // Request more vector candidates when file filters are present to avoid early cutoff.
-  const vectorCandidateLimit = files && files.length > 0 ? Math.max(limit * 5, limit) : limit;
-
+  const filterParts = buildFilterParts(options);
+  const candidateLimit = filterParts.hasFilters
+    ? Math.max(limit, (db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number }).count)
+    : limit;
   const stmt = db.query(`
     SELECT
-      o.id,
-      o.title,
-      o.project,
-      o.timestamp
-    FROM observations o
-    INNER JOIN vec_observations vec ON CAST(o.id AS TEXT) = vec.id
+      e.id,
+      e.archive_path AS archivePath,
+      e.line_start AS lineStart,
+      e.line_end AS lineEnd,
+      e.source_kind AS sourceKind,
+      e.project,
+      e.timestamp,
+      e.user_text AS userText,
+      e.assistant_text AS assistantText,
+      vec.distance AS distance
+    FROM vec_exchanges vec
+    INNER JOIN exchanges e ON e.id = vec.rowid
     WHERE vec.embedding MATCH ?
       AND vec.k = ?
-      ${timeClause}
-      ${projectClause}
-      ${fileClause}
+      ${filterParts.clause}
     ORDER BY vec.distance ASC
     LIMIT ?
   `);
 
-  const vectorParams = [
-    Buffer.from(new Float32Array(queryEmbedding).buffer),
-    vectorCandidateLimit,
-    ...timeFilterParams,
-    ...projectFilterParams,
-    ...fileFilterParams,
-    limit
-  ];
+  const rows = stmt.all(
+    Buffer.from(new Float32Array(embedding).buffer),
+    candidateLimit,
+    ...filterParts.params,
+    limit,
+  ) as Array<Parameters<typeof mapRow>[0]>;
 
-  return stmt.all(...vectorParams) as ObservationSummary[];
+  return rows.map(mapRow);
 }
 
-function keyword_search(
-  query: string,
-  options: SearchOptions & { db: Database }
-): ObservationSummary[] {
-  const { db, limit = 10, after, before, projects, files } = options;
-  const {
-    timeClause,
-    timeFilterParams,
-    projectClause,
-    projectFilterParams,
-    fileClause,
-    fileFilterParams
-  } = buildSharedFilterParts(after, before, projects, files);
-
+function textSearch(queries: string[], options: SearchOptions): ExchangeSearchResult[] {
+  const { db, limit = 10 } = options;
+  const filterParts = buildFilterParts(options);
+  const queryClauses = queries.map(() => `(e.user_text LIKE ? ESCAPE '\\' OR e.assistant_text LIKE ? ESCAPE '\\')`);
+  const queryParams = queries.flatMap(query => {
+    const pattern = makeLikePattern(query);
+    return [pattern, pattern];
+  });
   const stmt = db.query(`
     SELECT
-      o.id,
-      o.title,
-      o.project,
-      o.timestamp
-    FROM observations o
-    WHERE o.content LIKE ?
-      ${timeClause}
-      ${projectClause}
-      ${fileClause}
-    ORDER BY o.timestamp DESC
+      e.id,
+      e.archive_path AS archivePath,
+      e.line_start AS lineStart,
+      e.line_end AS lineEnd,
+      e.source_kind AS sourceKind,
+      e.project,
+      e.timestamp,
+      e.user_text AS userText,
+      e.assistant_text AS assistantText
+    FROM exchanges e
+    WHERE (${queryClauses.join(' OR ')})
+      ${filterParts.clause}
+    ORDER BY e.timestamp DESC
     LIMIT ?
   `);
 
-  const keywordParams = [
-    `%${query}%`,
-    ...timeFilterParams,
-    ...projectFilterParams,
-    ...fileFilterParams,
-    limit
-  ];
+  const rows = stmt.all(
+    ...queryParams,
+    ...filterParts.params,
+    limit,
+  ) as Array<Parameters<typeof mapRow>[0]>;
 
-  return stmt.all(...keywordParams) as ObservationSummary[];
+  return rows.map(mapRow);
 }
 
-/**
- * Search observations using hybrid strategy:
- * vector_search first, then keyword_search fallback when needed.
- * Returns compact observations (Layer 1 of progressive disclosure).
- *
- * @param query - Search query string
- * @param options - Search options
- * @returns Array of compact observation results
- */
 export async function search(
   query: string,
-  options: SearchOptions & { db: Database }
-): Promise<ObservationSummary[]> {
-  const { db, limit = 10, after, before, projects, files, queryNormalizerProvider } = options;
+  options: SearchOptions
+): Promise<ExchangeSearchResult[]> {
+  const { limit = 10, after, before } = options;
 
   if (after) validateISODate(after, '--after');
   if (before) validateISODate(before, '--before');
 
-  const normalizedQuery = await normalizeQueryToEnglish(query, queryNormalizerProvider);
-
-  const vectorResults = await vector_search(normalizedQuery, { db, limit, after, before, projects, files });
-  if (vectorResults.length >= limit) {
-    return vectorResults.slice(0, limit);
-  }
-
-  const keywordResults = keyword_search(normalizedQuery, {
-    db,
-    limit,
-    after,
-    before,
-    projects,
-    files
-  });
-
-  const combined: ObservationSummary[] = [...vectorResults];
+  const normalizedQuery = await normalizeQuery(query, options.queryNormalizerProvider);
+  const vectorResults = await vectorSearch(normalizedQuery, options);
+  const combined: ExchangeSearchResult[] = [...vectorResults];
   const seenIds = new Set(vectorResults.map(result => result.id));
 
-  for (const result of keywordResults) {
-    if (combined.length >= limit) {
-      break;
+  if (combined.length < limit) {
+    const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
+    const textResults = textSearch(textQueries, options);
+    for (const result of textResults) {
+      if (combined.length >= limit) {
+        break;
+      }
+      if (seenIds.has(result.id)) {
+        continue;
+      }
+      combined.push(result);
+      seenIds.add(result.id);
     }
-    if (seenIds.has(result.id)) {
-      continue;
-    }
-    combined.push(result);
-    seenIds.add(result.id);
   }
 
-  return combined;
+  return combined.slice(0, limit);
 }

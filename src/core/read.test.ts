@@ -113,6 +113,37 @@ describe('read.ts', () => {
       expect(result).toContain('**Session ID:** session-456');
     });
 
+    test('reads Codex response_item JSONL as non-empty markdown', () => {
+      const jsonlPath = join(tempDir, 'codex-conversation.jsonl');
+      const jsonl = [
+        JSON.stringify({ type: 'session_meta', payload: { id: 'c1', cwd: '/repo' } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run the focused tests' }] } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'The focused tests passed' }] } }),
+      ].join('\n');
+
+      writeFileSync(jsonlPath, jsonl);
+
+      const result = readConversation(jsonlPath);
+
+      expect(result).not.toBeNull();
+      expect(result).not.toBe('');
+      expect(result).toContain('Run the focused tests');
+      expect(result).toContain('The focused tests passed');
+    });
+
+    test('returns fallback content for non-Claude JSONL that has no renderable messages', () => {
+      const jsonlPath = join(tempDir, 'non-claude.jsonl');
+      const jsonl = JSON.stringify({ type: 'event', message: 'plain event content' });
+
+      writeFileSync(jsonlPath, jsonl);
+
+      const result = readConversation(jsonlPath);
+
+      expect(result).not.toBeNull();
+      expect(result).not.toBe('');
+      expect(result).toContain('plain event content');
+    });
+
     test('returns null when JSONL file does not exist', () => {
       const result = readConversation( '/nonexistent/file.jsonl');
       expect(result).toBeNull();

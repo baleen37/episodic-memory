@@ -1,16 +1,16 @@
 ---
 name: remembering-conversations
-description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using observations (structured insights).
+description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using indexed transcript exchanges.
 version: 1.0.0
 ---
 
 # Remembering Conversations
 
-**Core principle:** Search before reinventing. Searching costs nothing; reinventing or repeating mistakes costs everything.
+**Core principle:** Search before reinventing. Searching costs little; repeating past mistakes is expensive.
 
 ## Mandatory: Use the Search Agent
 
-**YOU MUST dispatch the search-conversation agent for any historical search.**
+**YOU MUST dispatch the search-conversation agent for historical conversation search.**
 
 Announce: "Dispatching search agent to find [topic]."
 
@@ -19,201 +19,76 @@ Then use the Task tool with `subagent_type: "search-conversation"`:
 ```text
 Task tool:
   description: "Search past conversations for [topic]"
-  prompt: "Search for [specific query or topic]. Focus on [what you're looking for - e.g., decisions, patterns, gotchas, code examples]."
+  prompt: "Search for [specific query or topic]. Focus on [decisions, patterns, gotchas, code examples]."
   subagent_type: "search-conversation"
 ```
 
-The agent will use **progressive disclosure** (3 layers):
-
-1. **Layer 1: search()** - Returns compact observations (~30t each)
-   - Fast discovery of relevant insights from past sessions
-
-2. **Layer 2: get_observations()** - Full observation details (~200-500t each)
-   - Complete context: narrative, concepts, files, decisions
-   - Most searches stop here - this is usually enough
-
-3. **Layer 3: read()** - Raw conversation transcript (~500-2000t)
-   - Full dialogue when you need the complete rationale
-   - Use only when layers 1-2 don't provide enough context
-
 The agent will:
-- Search with the `search` tool (observations for single-concept)
-- Get full details with `get_observations` for top results
-- Read raw conversations only if needed (rare)
-- Synthesize findings (200-1000 words)
-- Return actionable insights + sources
 
-**Saves 50-100x context vs. loading raw conversations.**
+1. Search indexed transcript exchanges with `search`.
+2. Read archived transcript lines with `read` only when snippets are not enough.
+3. Synthesize concise findings.
+4. Return actionable insights with `archive_path:line_start-line_end` sources.
 
 ## When to Use
 
-You often get value out of consulting your episodic memory once you understand what you're being asked. Search memory
-in these situations:
-
-**After understanding the task:**
+Search memory after you understand the task in these situations:
 
 - User asks "how should I..." or "what's the best approach..."
-- You've explored current codebase and need to make architectural decisions
-- User asks for implementation approach after describing what they want
+- You've explored the current codebase and need architectural context
+- You're stuck after investigating a problem
+- You need to follow an unfamiliar workflow or process
+- User references past work: "last time", "before", "we discussed", "do you remember"
 
-**When you're stuck:**
+## Don't Search First
 
-- You've investigated a problem and can't find the solution
-- Facing a complex problem without obvious solution in current code
-- Need to follow an unfamiliar workflow or process
-
-**When historical signals are present:**
-
-- User says "last time", "before", "we discussed", "you implemented"
-- User asks "why did we...", "what was the reason..."
-- User says "do you remember...", "what do we know about..."
-
-**Don't search first:**
-
-- For current codebase structure (use Grep/Read to explore first)
-- For info in current conversation
-- Before understanding what you're being asked to do
+- For current codebase structure; use file search/read tools first.
+- For information already present in the current conversation.
+- Before understanding what the user is asking.
 
 ## Direct Tool Access (Discouraged)
 
-You CAN use MCP tools directly, but **DON'T**:
+Prefer the search-conversation agent. If direct MCP access is necessary:
 
-- `mcp__plugin_memmem_memmem__search`
-- `mcp__plugin_memmem_memmem__read`
-
-Using these directly wastes your context window. **Always dispatch the agent instead.**
-
-See [MCP-TOOLS.md](./MCP-TOOLS.md) for complete API reference if needed for advanced usage.
-
-## Legacy: How to Search (Discouraged)
-
-**Note:** This section describes direct MCP tool usage, which is discouraged. Use the search-conversation agent instead.
-
-<details>
-<summary>Click to expand legacy direct tool usage instructions</summary>
-
-Use the MCP tools provided by memmem plugin:
-
-### Step 1: Search
-
-Use `mcp__plugin_memmem_memmem__search` to find relevant conversations:
+### Search
 
 ```typescript
 {
-  query: "React Router authentication errors",  // Single concept
-  mode: "both",  // "vector" | "text" | "both" (default)
-  limit: 10      // Max results (1-50, default: 10)
+  query: "React Router authentication errors",
+  limit: 10,
+  after: "2026-05-01",
+  source_kind: "claude-projects"
 }
 ```
 
-**Multi-concept AND search** (finds conversations containing ALL concepts):
+### Read
+
+Use `archive_path`, `line_start`, and `line_end` from search results:
 
 ```typescript
 {
-  query: ["authentication", "React Router", "error handling"],
-  limit: 10
-}
-```
-
-**Date filtering:**
-
-```typescript
-{
-  query: "refactoring patterns",
-  after: "2025-09-01",   // YYYY-MM-DD
-  before: "2025-10-01"
-}
-```
-
-### Step 2: Read Details
-
-Use `mcp__plugin_memmem_memmem__read` to view full conversations:
-
-```typescript
-{
-  path: "/path/from/search/results/conversation.jsonl"
-}
-```
-
-**Paginate large conversations:**
-
-```typescript
-{
-  path: "/path/to/conversation.jsonl",
-  startLine: 100,  // 1-indexed
-  endLine: 200
+  path: "/path/from/search/result.jsonl",
+  startLine: 100,
+  endLine: 140
 }
 ```
 
 ## Search Strategy
 
-1. **Start broad**, then narrow:
-   - First: `{ query: "authentication" }`
-   - Then: `{ query: ["authentication", "JWT", "Express"] }`
-
-2. **Use text mode for exact terms**:
-   - IDs, error codes, exact phrases: `{ query: "ERR_AUTH_FAILED", mode: "text" }`
-
-3. **Check top 2-5 results**:
-   - Read snippets from search results
-   - Use `read` tool for promising conversations
-   - Focus on decisions, gotchas, patterns
-
-4. **Synthesize findings**:
-   - Summarize key insights (200-1000 words)
-   - Include source paths and dates
-   - Extract actionable recommendations
-
-## Search Modes
-
-- **`vector`** - Semantic similarity (best for concepts, ideas)
-- **`text`** - Exact text matching (best for IDs, codes, exact phrases)
-- **`both`** - Combined search (default, recommended for general use)
-
-## Performance Tips
-
-- Search is fast (< 100ms typically)
-- Read can be slow for large conversations - use pagination
-- Multi-concept search is more precise but may return fewer results
-- Text search is case-insensitive
-
-## Example Workflow
-
-```text
-User: "How should we implement authentication in the new API?"
-
-1. Understand context:
-   - Read current API code
-   - Check existing auth patterns
-
-2. Search memory:
-   {
-     query: ["authentication", "API", "JWT"],
-     limit: 10
-   }
-
-3. Review top results:
-   - Read 2-3 most relevant conversations
-   - Note past decisions and rationale
-
-4. Synthesize:
-   - Summarize findings
-   - Apply to current context
-   - Recommend approach with sources
-```
+1. Start broad, then narrow with additional query terms.
+2. Put exact IDs, error codes, and file names directly in the query.
+3. Use `after` / `before` for date ranges.
+4. Use `source_kind` to limit results to a transcript source.
+5. Read only the most promising transcript ranges.
+6. Synthesize decisions, gotchas, and reusable patterns.
 
 ## Important Notes
 
-- **Use the agent** - always dispatch search-conversation agent, never use MCP tools directly
-- **Search costs nothing** - always check before reinventing
-- **Past mistakes are valuable** - learn from failed approaches
-- **Context matters** - past decisions may not apply to new situations
-- **Sources are essential** - always cite conversation paths and dates
-- **Agent saves 50-100x context** - synthesized insights vs. raw conversation data
+- Always cite conversation paths and line ranges.
+- Past decisions may not apply directly; explain context before recommending reuse.
+- Search snippets are usually enough; use `read` for missing rationale or surrounding context.
 
 ## Further Reading
 
-- [MCP-TOOLS.md](./MCP-TOOLS.md) - Complete MCP tools API reference (advanced usage only)
+- [MCP-TOOLS.md](./MCP-TOOLS.md) - MCP tools API reference
 - [search-conversation agent](../../agents/search-conversation.md) - Agent implementation details
-
-</details>

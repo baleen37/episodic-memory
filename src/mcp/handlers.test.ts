@@ -1,168 +1,127 @@
-/**
- * Tests for MCP tool handlers
- */
-
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import {
-  handleSearch,
-  handleGetObservations,
-  handleRead,
-  type SearchResult,
-} from './handlers.js';
-import { initDatabase, insertObservation } from '../core/db.js';
-import { EMBEDDING_DIM } from '../core/constants.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { handleRead, handleSearch } from './handlers.js';
+import { CURRENT_EMBEDDING_VERSION, initDatabase, insertExchange } from '../core/db.js';
 
 describe('handlers', () => {
   let db: Database;
+  let dir: string | null = null;
 
   beforeEach(() => {
-    // Use in-memory database for testing
-    process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
-    // Disable embedding worker to avoid socket connection attempts in CI
+    process.env.TEST_DB_PATH = ':memory:';
     process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     db = initDatabase();
   });
 
   afterEach(() => {
+    db.close();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = null;
+    delete process.env.TEST_DB_PATH;
     delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
   });
 
-  // Helper to create a EMBEDDING_DIM-dimensional test embedding
-  function createTestEmbedding(seed: number = 0): number[] {
-    return Array.from({ length: EMBEDDING_DIM }, (_, i) => Math.sin(seed + i * 0.1) * 0.5 + 0.5);
-  }
-
-  // Helper to insert test observation
-  function insertTestObservation(
-    db: Database,
-    observation: {
-      title: string;
-      content: string;
-      project: string;
-      sessionId?: string;
-      timestamp: number;
-    },
-    embedding?: number[]
-  ): number {
-    return insertObservation(db, {
-      title: observation.title,
-      content: observation.content,
-      project: observation.project,
-      sessionId: observation.sessionId ?? undefined,
-      timestamp: observation.timestamp,
-      createdAt: observation.timestamp
-    }, embedding);
-  }
-
-  describe('handleSearch', () => {
-    test('returns empty array when no results', async () => {
-      const results = await handleSearch(
-        { query: 'nonexistent', limit: 10 },
-        db,
-        () => null, // no config
-        async () => ({ complete: async () => '' }) as any
-      );
-
-      expect(results).toEqual([]);
+  test('maps search results to snake_case transcript fields', async () => {
+    insertExchange(db, {
+      archivePath: '/archive/claude-projects/session.jsonl',
+      lineStart: 2,
+      lineEnd: 4,
+      sourceKind: 'claude-projects',
+      sessionId: 'session-1',
+      project: 'memmem',
+      cwd: '/repo',
+      gitBranch: 'main',
+      model: 'claude-sonnet',
+      provider: 'anthropic',
+      metadataJson: null,
+      timestamp: Date.UTC(2026, 4, 26),
+      userText: 'memory search',
+      assistantText: 'transcript result',
+      embeddingText: 'memory search transcript result',
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
     });
 
-    test('returns formatted search results', async () => {
-      // Insert test observation
-      insertTestObservation(db, {
-        title: 'Test Title',
-        content: 'Test content',
-        project: 'test-project',
-        timestamp: 1704067200000
-      }, createTestEmbedding(1));
+    const results = await handleSearch({ query: 'memory search', limit: 10 }, db);
 
-      const results = await handleSearch(
-        { query: 'Test', limit: 10 },
-        db,
-        () => null,
-        async () => ({ complete: async () => '' }) as any
-      );
-
-      expect(results.length).toBeGreaterThan(0);
-      expect(results[0]).toHaveProperty('id');
-      expect(results[0]).toHaveProperty('title');
-      expect(results[0]).toHaveProperty('project');
-      expect(results[0]).toHaveProperty('timestamp');
-    });
+    expect(results).toEqual([
+      {
+        id: '1',
+        archive_path: '/archive/claude-projects/session.jsonl',
+        line_start: 2,
+        line_end: 4,
+        source_kind: 'claude-projects',
+        project: 'memmem',
+        timestamp: Date.UTC(2026, 4, 26),
+        snippet: 'memory search transcript result',
+      },
+    ]);
   });
 
-  describe('handleGetObservations', () => {
-    test('returns empty array for nonexistent IDs', async () => {
-      const results = await handleGetObservations(
-        { ids: [99999], includeOriginal: false },
-        db
-      );
-
-      expect(results).toEqual([]);
+  test('passes source kind filter to search', async () => {
+    insertExchange(db, {
+      archivePath: '/archive/claude-projects/session.jsonl',
+      lineStart: 1,
+      lineEnd: 2,
+      sourceKind: 'claude-projects',
+      sessionId: null,
+      project: null,
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      timestamp: Date.UTC(2026, 4, 25),
+      userText: 'filter memory',
+      assistantText: 'claude result',
+      embeddingText: 'filter memory claude result',
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+    insertExchange(db, {
+      archivePath: '/archive/codex-sessions/session.jsonl',
+      lineStart: 3,
+      lineEnd: 4,
+      sourceKind: 'codex-sessions',
+      sessionId: null,
+      project: null,
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      timestamp: Date.UTC(2026, 4, 26),
+      userText: 'filter memory',
+      assistantText: 'codex result',
+      embeddingText: 'filter memory codex result',
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
     });
 
-    test('returns observations by IDs', async () => {
-      // Insert test observation
-      insertTestObservation(db, {
-        title: 'Test',
-        content: 'Content',
-        project: 'project',
-        timestamp: 1704067200000
-      });
+    const results = await handleSearch({ query: 'filter memory', limit: 10, source_kind: 'codex-sessions' }, db);
 
-      const observations = await handleGetObservations(
-        { ids: [1], includeOriginal: false },
-        db
-      );
-
-      expect(observations).toHaveLength(1);
-      expect(observations[0].title).toBe('Test');
-      expect(observations[0].content).toBe('Content');
-    });
-
-    test('includes content_original when requested', async () => {
-      insertTestObservation(db, {
-        title: 'Test',
-        content: 'Content',
-        project: 'project',
-        timestamp: 1704067200000
-      });
-
-      // Update to add content_original
-      db.exec(`
-        UPDATE observations SET content_original = 'Original content' WHERE id = 1
-      `);
-
-      const observations = await handleGetObservations(
-        { ids: [1], includeOriginal: true },
-        db
-      );
-
-      expect(observations[0].content_original).toBe('Original content');
-    });
+    expect(results).toHaveLength(1);
+    expect(results[0].source_kind).toBe('codex-sessions');
+    expect(results[0].archive_path).toBe('/archive/codex-sessions/session.jsonl');
   });
 
-  describe('handleRead', () => {
-    test('throws error for nonexistent file', () => {
-      expect(() => handleRead({ path: '/nonexistent/file.jsonl' })).toThrow('File not found');
-    });
+  test('reads a transcript file', () => {
+    dir = mkdtempSync(join(tmpdir(), 'memmem-mcp-read-'));
+    const path = join(dir, 'session.jsonl');
+    writeFileSync(path, JSON.stringify({
+      uuid: '1',
+      type: 'user',
+      timestamp: '2026-05-26T00:00:00.000Z',
+      message: { role: 'user', content: 'Hello' },
+    }) + '\n');
 
-    test('returns content for existing file', async () => {
-      // Create temp file
-      const tempPath = `/tmp/test-conversation-${Date.now()}.jsonl`;
-      await Bun.write(tempPath, JSON.stringify({
-        uuid: '1',
-        type: 'user',
-        timestamp: '2024-01-01T00:00:00Z',
-        message: { role: 'user', content: 'Hello' }
-      }) + '\n');
+    const result = handleRead({ path, startLine: 1, endLine: 1 });
 
-      try {
-        const result = handleRead({ path: tempPath });
-        expect(result).toContain('# Conversation');
-      } finally {
-        await Bun.file(tempPath).delete();
-      }
-    });
+    expect(result).toContain('# Conversation');
+    expect(result).toContain('Hello');
+  });
+
+  test('throws when transcript file is missing', () => {
+    expect(() => handleRead({ path: '/missing/session.jsonl' })).toThrow('File not found: /missing/session.jsonl');
   });
 });
