@@ -1,16 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { EMBEDDING_DIM } from './constants.js';
 import { resetRateLimiters, __setLoadConfigForTests } from './ratelimiter.js';
-import { __setModelForTests, isEmbeddingsDisabled, initEmbeddings, generateEmbedding } from './embeddings.js';
+import { __setModelForTests, isEmbeddingsDisabled, initEmbeddings, embedPassage, embedQuery } from './embeddings.js';
 
 const mockEmbedding = Array.from({ length: EMBEDDING_DIM }, (_, i) => i * 0.001);
 let shouldFail = false;
+let lastKind: 'passage' | 'query' | null = null;
+let lastText: string | null = null;
 
 const mockInit = async () => {
   if (shouldFail) throw new Error('model load failed');
 };
-const mockGenerate = async () => {
+const mockGenerate = async (kind: 'passage' | 'query', text: string) => {
   if (shouldFail) throw new Error('generation failed');
+  lastKind = kind;
+  lastText = text;
   return mockEmbedding;
 };
 
@@ -29,10 +33,12 @@ describe('isEmbeddingsDisabled()', () => {
   });
 });
 
-describe('generateEmbedding()', () => {
+describe('embedPassage() and embedQuery()', () => {
   beforeEach(() => {
     delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
     shouldFail = false;
+    lastKind = null;
+    lastText = null;
     __setModelForTests(mockInit, mockGenerate);
     __setLoadConfigForTests(() => ({
       provider: 'gemini',
@@ -50,27 +56,41 @@ describe('generateEmbedding()', () => {
     resetRateLimiters();
   });
 
-  test('returns null when disabled', async () => {
+  test('embedPassage returns null when disabled', async () => {
     process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
-    expect(await generateEmbedding('test')).toBeNull();
+    expect(await embedPassage('test')).toBeNull();
   });
 
-  test('returns embedding from model', async () => {
-    const result = await generateEmbedding('hello world');
+  test('embedQuery returns null when disabled', async () => {
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    expect(await embedQuery('test')).toBeNull();
+  });
+
+  test('embedPassage routes with kind="passage"', async () => {
+    const result = await embedPassage('hello world');
     expect(result).toEqual(mockEmbedding);
+    expect(lastKind).toBe('passage');
+    expect(lastText).toBe('hello world');
+  });
+
+  test('embedQuery routes with kind="query"', async () => {
+    const result = await embedQuery('hello world');
+    expect(result).toEqual(mockEmbedding);
+    expect(lastKind).toBe('query');
+    expect(lastText).toBe('hello world');
   });
 
   test('returns null on model error', async () => {
     shouldFail = true;
-    const result = await generateEmbedding('hello');
-    expect(result).toBeNull();
+    expect(await embedPassage('hello')).toBeNull();
+    expect(await embedQuery('hello')).toBeNull();
   });
 
-  test('handles concurrent requests', async () => {
+  test('handles concurrent passage and query requests', async () => {
     const results = await Promise.all([
-      generateEmbedding('text 1'),
-      generateEmbedding('text 2'),
-      generateEmbedding('text 3'),
+      embedPassage('text 1'),
+      embedQuery('text 2'),
+      embedPassage('text 3'),
     ]);
     expect(results).toHaveLength(3);
     results.forEach(r => expect(r).toHaveLength(EMBEDDING_DIM));

@@ -8,6 +8,13 @@ import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 
 let embeddingPipeline: FeatureExtractionPipeline | null = null;
 
+const PREFIX = {
+  passage: 'passage: ',
+  query: 'query: ',
+} as const;
+
+const MAX_CONTENT_CHARS = 8000;
+
 export async function initModel(): Promise<void> {
   if (!embeddingPipeline) {
     const { pipeline, env } = await import('@huggingface/transformers');
@@ -15,23 +22,26 @@ export async function initModel(): Promise<void> {
     env.cacheDir = './.cache';
     embeddingPipeline = await pipeline(
       'feature-extraction',
-      'Supabase/gte-small',
+      'dragonkue/multilingual-e5-small-ko-v2',
       { dtype: 'fp16' } as any
     );
     console.log('Embedding model loaded');
   }
 }
 
-export async function generateEmbeddingFromModel(text: string): Promise<number[] | null> {
+export async function generateEmbeddingFromModel(
+  kind: 'passage' | 'query',
+  text: string,
+): Promise<number[] | null> {
   if (!embeddingPipeline) {
     await initModel();
   }
   if (!embeddingPipeline) return null;
 
-  // gte-small: no prefix needed, just truncate
-  const truncated = text.substring(0, 8000);
+  const truncated = text.substring(0, MAX_CONTENT_CHARS);
+  const input = PREFIX[kind] + truncated;
 
-  const output = await embeddingPipeline!(truncated, {
+  const output = await embeddingPipeline!(input, {
     pooling: 'mean',
     normalize: true,
   });

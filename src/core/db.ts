@@ -14,7 +14,7 @@ if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV 
   }
 }
 
-export const CURRENT_EMBEDDING_VERSION = 1;
+export const CURRENT_EMBEDDING_VERSION = 2;
 
 export interface ExchangeInsert {
   archivePath: string;

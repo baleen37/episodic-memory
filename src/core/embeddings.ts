@@ -5,13 +5,16 @@
 import { initModel as defaultInitModel, generateEmbeddingFromModel as defaultGenerate } from './embeddings-model.js';
 import { getEmbeddingRateLimiter } from './ratelimiter.js';
 
-let initModelFn = defaultInitModel;
-let generateFn = defaultGenerate;
+type EmbeddingKind = 'passage' | 'query';
+type GenerateFn = (kind: EmbeddingKind, text: string) => Promise<number[] | null>;
+
+let initModelFn: () => Promise<void> = defaultInitModel;
+let generateFn: GenerateFn = defaultGenerate;
 
 /** Override model functions for testing. Pass null to reset. */
 export function __setModelForTests(
   init: (() => Promise<void>) | null,
-  generate: ((text: string) => Promise<number[]>) | null,
+  generate: GenerateFn | null,
 ): void {
   initModelFn = init ?? defaultInitModel;
   generateFn = generate ?? defaultGenerate;
@@ -26,11 +29,21 @@ export async function initEmbeddings(): Promise<void> {
   await initModelFn();
 }
 
-export async function generateEmbedding(text: string): Promise<number[] | null> {
+/** Embed text that will be stored as a vector for retrieval. */
+export async function embedPassage(text: string): Promise<number[] | null> {
+  return run('passage', text);
+}
+
+/** Embed a user search query. */
+export async function embedQuery(text: string): Promise<number[] | null> {
+  return run('query', text);
+}
+
+async function run(kind: EmbeddingKind, text: string): Promise<number[] | null> {
   if (isEmbeddingsDisabled()) return null;
   try {
     await getEmbeddingRateLimiter().acquire();
-    return await generateFn(text);
+    return await generateFn(kind, text);
   } catch {
     return null;
   }

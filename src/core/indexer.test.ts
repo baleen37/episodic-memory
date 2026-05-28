@@ -24,7 +24,7 @@ describe('reindexArchiveFile', () => {
   test('reindexes a file from scratch and replaces old rows', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, (_, i) => i / 384));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, (_, i) => i / 384));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
     const archiveDir = join(dir, 'claude-projects');
@@ -49,7 +49,7 @@ describe('reindexArchiveFile', () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
     let embeddingCall = 0;
-    __setModelForTests(async () => {}, async () => {
+    __setModelForTests(async () => {}, async (_kind, _text) => {
       embeddingCall++;
       return Array.from({ length: embeddingCall === 3 ? 1 : 384 }, () => 0.1);
     });
@@ -83,7 +83,7 @@ describe('reindexArchiveFile', () => {
   test('removes existing index when conversation marker asks not to index', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
     const archiveDir = join(dir, 'claude-projects');
@@ -110,7 +110,7 @@ describe('reindexArchiveFile', () => {
   test('skips Korean exclusion markers', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
     const archiveDir = join(dir, 'claude-projects');

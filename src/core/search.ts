@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { generateEmbedding } from './embeddings.js';
+import { embedQuery } from './embeddings.js';
 
 interface QueryNormalizerProvider {
   complete(prompt: string): Promise<{ text: string }>;
@@ -171,7 +171,7 @@ function mapRow(row: {
 
 async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
   const { db, limit = 10 } = options;
-  const embedding = await generateEmbedding(query);
+  const embedding = await embedQuery(query);
 
   if (!embedding) {
     return [];

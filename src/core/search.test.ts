@@ -15,7 +15,7 @@ describe('exchange search', () => {
   test('returns vector results and text fallback results without duplicates', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const vectorId = insertExchange(db, {
       archivePath: '/archive/claude-projects/a.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: 'alpha', cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'semantic memory', assistantText: 'vector result', embeddingText: 'semantic memory vector result', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -35,7 +35,7 @@ describe('exchange search', () => {
   test('filters by source kind and date', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     insertExchange(db, {
       archivePath: '/archive/claude-projects/a.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 25), userText: 'filter me', assistantText: 'old', embeddingText: 'filter me old', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -53,7 +53,7 @@ describe('exchange search', () => {
   test('filters text results by project', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const alphaId = insertExchange(db, {
       archivePath: '/archive/claude-projects/alpha.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: 'alpha', cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'project text query', assistantText: 'alpha', embeddingText: 'project text query alpha', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -70,7 +70,7 @@ describe('exchange search', () => {
   test('filters vector results by project', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const alphaId = insertExchange(db, {
       archivePath: '/archive/claude-projects/alpha-vector.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: 'alpha', cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'alpha unrelated', assistantText: 'semantic only', embeddingText: 'alpha semantic only', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -89,7 +89,7 @@ describe('exchange search', () => {
   test('filters results by archive path and tool call file substrings', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const archiveId = insertExchange(db, {
       archivePath: '/archive/claude-projects/src-target.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'archive unrelated', assistantText: 'semantic only', embeddingText: 'archive semantic only', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -116,7 +116,7 @@ describe('exchange search', () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
     let embeddedQuery = '';
-    __setModelForTests(async () => {}, async (text: string) => {
+    __setModelForTests(async () => {}, async (_kind, text: string) => {
       embeddedQuery = text;
       return Array.from({ length: 384 }, () => 0.1);
     });
@@ -142,7 +142,7 @@ describe('exchange search', () => {
   test('treats LIKE wildcards as literal characters', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const literalId = insertExchange(db, {
       archivePath: '/archive/claude-projects/literal.jsonl', lineStart: 1, lineEnd: 2, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: Date.UTC(2026, 4, 26), userText: 'literal 100% match', assistantText: 'result', embeddingText: 'literal 100 percent match', embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -159,7 +159,7 @@ describe('exchange search', () => {
   test('finds filtered vector result outside unfiltered top k', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     for (let i = 0; i < 2; i++) {
       const id = insertExchange(db, {
@@ -181,7 +181,7 @@ describe('exchange search', () => {
   test('preserves null project and timestamp without legacy title', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     insertExchange(db, {
       archivePath: '/archive/claude-projects/nulls.jsonl', lineStart: 5, lineEnd: 6, sourceKind: 'claude-projects', sessionId: null, project: null, cwd: null, gitBranch: null, model: null, provider: null, metadataJson: null, timestamp: null, userText: 'null shape', assistantText: 'result', embeddingText: 'null shape result', embeddingVersion: CURRENT_EMBEDDING_VERSION,
