@@ -2,8 +2,7 @@ import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { ParsedExchange, ParseContext, SourceAdapter, ToolCallRecord } from './types.js';
-
-type JsonObject = Record<string, unknown>;
+import { asObject, asString, attachToolResult, eachJsonLine, parseTimestamp, stringifyValue, type JsonObject } from './jsonl.js';
 
 interface PendingClaudeExchange {
   archivePath: string;
@@ -57,14 +56,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
     current = null;
   };
 
-  const lines = content.split(/\r?\n/);
-  for (const [index, line] of lines.entries()) {
-    if (!line.trim()) continue;
-
-    const item = parseJsonObject(line);
-    if (!item) continue;
-
-    const lineNumber = index + 1;
+  eachJsonLine(content, (item, lineNumber) => {
     const message = asObject(item.message);
     const role = asString(message?.role) ?? asString(item.type);
     const messageContent = message && 'content' in message ? message.content : undefined;
@@ -75,7 +67,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
           current.lineEnd = lineNumber;
           applyToolResults(current.toolCalls, messageContent);
         }
-        continue;
+        return;
       }
 
       flushCurrent();
@@ -97,10 +89,10 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
         assistantTexts: [],
         toolCalls: [],
       };
-      continue;
+      return;
     }
 
-    if (!current) continue;
+    if (!current) return;
 
     current.lineEnd = lineNumber;
     current.sessionId ??= asString(item.sessionId);
@@ -115,7 +107,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
       if (text) current.assistantTexts.push(text);
       current.toolCalls.push(...extractToolCalls(messageContent));
     }
-  }
+  });
 
   flushCurrent();
   return exchanges;
@@ -200,42 +192,9 @@ function applyToolResults(calls: ToolCallRecord[], value: unknown): void {
 }
 
 function applyToolResult(calls: ToolCallRecord[], object: JsonObject): void {
-  const callId = asString(object.tool_use_id);
-  const existing = calls.find(call => call.callId === callId && call.output === null);
-  const output = stringifyValue(object.content);
-  const status = object.is_error === true ? 'error' : 'success';
-  if (existing) {
-    existing.output = output;
-    existing.status = status;
-  } else {
-    calls.push({ toolName: null, callId, input: null, output, status });
-  }
-}
-
-function parseJsonObject(line: string): JsonObject | null {
-  try {
-    return asObject(JSON.parse(line));
-  } catch {
-    return null;
-  }
-}
-
-function asObject(value: unknown): JsonObject | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonObject : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-function parseTimestamp(value: unknown): number | null {
-  if (typeof value !== 'string') return null;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
-
-function stringifyValue(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value);
+  attachToolResult(calls, {
+    callId: asString(object.tool_use_id),
+    output: stringifyValue(object.content),
+    status: object.is_error === true ? 'error' : 'success',
+  });
 }

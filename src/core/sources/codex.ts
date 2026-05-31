@@ -2,8 +2,7 @@ import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { ParsedExchange, ParseContext, SourceAdapter, ToolCallRecord } from './types.js';
-
-type JsonObject = Record<string, unknown>;
+import { asObject, asString, attachToolResult, eachJsonLine, parseTimestamp, stringifyValue } from './jsonl.js';
 
 interface CodexMeta {
   sessionId: string | null;
@@ -54,14 +53,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
     current = null;
   };
 
-  const lines = content.split(/\r?\n/);
-  for (const [index, line] of lines.entries()) {
-    if (!line.trim()) continue;
-
-    const item = parseJsonObject(line);
-    if (!item) continue;
-
-    const lineNumber = index + 1;
+  eachJsonLine(content, (item, lineNumber) => {
     if (item.type === 'session_meta') {
       const payload = asObject(item.payload);
       if (payload) {
@@ -71,7 +63,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         meta.model = asString(payload.model);
         meta.provider = asString(payload.provider) ?? asString(payload.model_provider);
       }
-      continue;
+      return;
     }
 
     if (item.type === 'turn_context') {
@@ -81,13 +73,13 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         meta.model = asString(payload.model) ?? meta.model;
         meta.provider = asString(payload.provider) ?? asString(payload.model_provider) ?? meta.provider;
       }
-      continue;
+      return;
     }
 
-    if (item.type !== 'response_item') continue;
+    if (item.type !== 'response_item') return;
 
     const payload = asObject(item.payload);
-    if (!payload) continue;
+    if (!payload) return;
 
     if (payload.type === 'message') {
       const role = asString(payload.role);
@@ -106,7 +98,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
           assistantTexts: [],
           toolCalls: [],
         };
-        continue;
+        return;
       }
 
       if (role === 'assistant' && current) {
@@ -115,10 +107,10 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         const text = extractText(payload.content).trim();
         if (text) current.assistantTexts.push(text);
       }
-      continue;
+      return;
     }
 
-    if (!current) continue;
+    if (!current) return;
     current.lineEnd = lineNumber;
     current.timestamp ??= parseTimestamp(item.timestamp);
 
@@ -130,21 +122,17 @@ export function parseCodexJsonl(content: string, context: ParseContext): ParsedE
         output: null,
         status: null,
       });
-      continue;
+      return;
     }
 
     if (isToolOutputType(payload.type)) {
-      const callId = asString(payload.call_id) ?? asString(payload.id);
-      const existing = current.toolCalls.find(call => call.callId === callId && call.output === null);
-      const output = stringifyValue(payload.output);
-      if (existing) {
-        existing.output = output;
-        existing.status = 'success';
-      } else {
-        current.toolCalls.push({ toolName: null, callId, input: null, output, status: 'success' });
-      }
+      attachToolResult(current.toolCalls, {
+        callId: asString(payload.call_id) ?? asString(payload.id),
+        output: stringifyValue(payload.output),
+        status: 'success',
+      });
     }
-  }
+  });
 
   flushCurrent();
   return exchanges;
@@ -185,32 +173,4 @@ function isToolCallType(value: unknown): boolean {
 
 function isToolOutputType(value: unknown): boolean {
   return value === 'function_call_output' || value === 'custom_tool_call_output' || value === 'tool_search_call_output' || value === 'local_shell_call_output';
-}
-
-function parseJsonObject(line: string): JsonObject | null {
-  try {
-    return asObject(JSON.parse(line));
-  } catch {
-    return null;
-  }
-}
-
-function asObject(value: unknown): JsonObject | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonObject : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-function parseTimestamp(value: unknown): number | null {
-  if (typeof value !== 'string') return null;
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
-
-function stringifyValue(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value);
 }

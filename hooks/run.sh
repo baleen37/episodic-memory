@@ -6,7 +6,8 @@
 # Uses a temp file to preserve stdin exactly, avoiding echo "$VAR" corruption
 # of special characters (newlines, backslashes, etc.) in JSON payloads.
 
-PLUGIN_ROOT="$(CLAUDE_PLUGIN_ROOT="" sh "$HOME/.claude/cpr.sh" memmem@baleen-marketplace)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(sh "$SCRIPT_DIR/../scripts/resolve-plugin-root.sh")"
 TMPFILE=$(mktemp)
 cat > "$TMPFILE"
 bun "$PLUGIN_ROOT/dist/cli.mjs" "$@" < "$TMPFILE"
