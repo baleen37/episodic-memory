@@ -12,21 +12,22 @@ if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
   exit 0
 fi
 
-PLUGIN_ID="memmem@baleen-marketplace"
+# Match by plugin name prefix ("memmem@") rather than a hardcoded marketplace,
+# so resolution works regardless of which marketplace installed the plugin.
+PLUGIN_PREFIX="memmem@"
 INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
 
-if [ -f "$INSTALLED_PLUGINS" ]; then
-  INSTALL_PATH=$(python3 -c "
-import json, sys
-data = json.load(open('$INSTALLED_PLUGINS'))
-entries = data.get('$PLUGIN_ID', [])
-if entries:
-    print(entries[0].get('installPath', ''))
+INSTALL_PATH=$(python3 -c "
+import json
+plugins = json.load(open('$INSTALLED_PLUGINS')).get('plugins', {})
+for key, entries in plugins.items():
+    if key.startswith('$PLUGIN_PREFIX') and entries:
+        print(entries[0]['installPath'])
+        break
 " 2>/dev/null)
-  if [ -n "$INSTALL_PATH" ]; then
-    echo "$INSTALL_PATH"
-    exit 0
-  fi
+if [ -n "$INSTALL_PATH" ]; then
+  echo "$INSTALL_PATH"
+  exit 0
 fi
 
 # Fallback: two levels up from this script (scripts/ -> project root)
