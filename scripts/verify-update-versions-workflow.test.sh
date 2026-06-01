@@ -4,10 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKFLOW_FILE="$REPO_ROOT/.github/workflows/update-versions.yml"
+ON_RELEASE_WORKFLOW_FILE="$REPO_ROOT/.github/workflows/on-release.yml"
 MARKETPLACE_FILE="$REPO_ROOT/.claude-plugin/marketplace.json"
 CLAUDE_PLUGIN_FILE="$REPO_ROOT/.claude-plugin/plugin.json"
 CODEX_PLUGIN_FILE="$REPO_ROOT/.codex-plugin/plugin.json"
 PACKAGE_FILE="$REPO_ROOT/package.json"
+DISPATCH_ACTION_SHA="12f7f29617c0083c78affd8c1e286e0a093fb0f9"
 
 fail() {
   echo "FAIL: $1"
@@ -15,14 +17,27 @@ fail() {
 }
 
 assert_contains() {
-  local needle="$1"
-  if ! grep -Fq -- "$needle" "$WORKFLOW_FILE"; then
-    fail "expected '$needle' in $WORKFLOW_FILE"
+  local file="$1"
+  local needle="$2"
+  if ! grep -Fq -- "$needle" "$file"; then
+    fail "expected '$needle' in $file"
+  fi
+}
+
+assert_not_contains() {
+  local file="$1"
+  local needle="$2"
+  if grep -Fq -- "$needle" "$file"; then
+    fail "did not expect '$needle' in $file"
   fi
 }
 
 if [[ ! -f "$WORKFLOW_FILE" ]]; then
   fail "workflow file not found: $WORKFLOW_FILE"
+fi
+
+if [[ ! -f "$ON_RELEASE_WORKFLOW_FILE" ]]; then
+  fail "workflow file not found: $ON_RELEASE_WORKFLOW_FILE"
 fi
 
 if [[ ! -f "$MARKETPLACE_FILE" ]]; then
@@ -66,24 +81,32 @@ if [[ "$(jq -r 'has("mcpServers")' "$CODEX_PLUGIN_FILE")" != "true" ]]; then
   fail ".codex-plugin/plugin.json must preserve mcpServers"
 fi
 
-assert_contains "schedule:"
-assert_contains "- cron: '0 * * * *'"
-assert_contains "workflow_dispatch:"
-assert_contains "repository_dispatch:"
-assert_contains "types:"
-assert_contains "- update_versions"
-assert_contains "runs-on: ubuntu-latest"
-assert_contains "- name: Checkout repository"
-assert_contains "uses: actions/checkout@v4"
-assert_contains "- name: Run update action"
-assert_contains "uses: baleen37/baleen-marketplace/.github/actions/update-versions@main"
-assert_contains "marketplace-json: .claude-plugin/marketplace.json"
-assert_contains "- name: Align standalone plugin metadata"
-assert_contains ".claude-plugin/plugin.json"
-assert_contains ".codex-plugin/plugin.json"
-assert_contains "- name: Verify standalone plugin metadata"
-assert_contains "git push"
-assert_contains "permissions:"
-assert_contains "contents: write"
+assert_contains "$WORKFLOW_FILE" "schedule:"
+assert_contains "$WORKFLOW_FILE" "- cron: '0 * * * *'"
+assert_contains "$WORKFLOW_FILE" "workflow_dispatch:"
+assert_contains "$WORKFLOW_FILE" "repository_dispatch:"
+assert_contains "$WORKFLOW_FILE" "types:"
+assert_contains "$WORKFLOW_FILE" "- update_versions"
+assert_contains "$WORKFLOW_FILE" "runs-on: ubuntu-latest"
+assert_contains "$WORKFLOW_FILE" "- name: Checkout repository"
+assert_contains "$WORKFLOW_FILE" "uses: actions/checkout@v4"
+assert_contains "$WORKFLOW_FILE" "- name: Run update action"
+assert_contains "$WORKFLOW_FILE" "uses: baleen37/baleen-marketplace/.github/actions/update-versions@"
+assert_contains "$WORKFLOW_FILE" "marketplace-json: .claude-plugin/marketplace.json"
+assert_contains "$WORKFLOW_FILE" "- name: Align standalone plugin metadata"
+assert_contains "$WORKFLOW_FILE" ".claude-plugin/plugin.json"
+assert_contains "$WORKFLOW_FILE" ".codex-plugin/plugin.json"
+assert_contains "$WORKFLOW_FILE" "- name: Verify standalone plugin metadata"
+assert_contains "$WORKFLOW_FILE" "git push"
+assert_contains "$WORKFLOW_FILE" "permissions:"
+assert_contains "$WORKFLOW_FILE" "contents: write"
 
-echo "PASS: update-versions workflow wiring is valid"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "release:"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "types: [published]"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "uses: baleen37/baleen-marketplace/.github/actions/dispatch-marketplace-update@$DISPATCH_ACTION_SHA"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "github-token: \${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "event-type: update_versions"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "plugin: memmem"
+assert_not_contains "$ON_RELEASE_WORKFLOW_FILE" "dispatch-marketplace-update@main"
+
+echo "PASS: update-versions and on-release workflow wiring is valid"
