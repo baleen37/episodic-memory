@@ -1,10 +1,10 @@
 import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import type { ParsedExchange, ParseContext, SourceAdapter, ToolCallRecord } from './types.js';
-import { asObject, asString, attachToolResult, eachJsonLine, parseTimestamp, stringifyValue, type JsonObject } from './jsonl.js';
+import type { ParseContext, SourceAdapter, TranscriptSpan } from './types.js';
+import { asObject, asString, eachJsonLine, parseTimestamp } from './jsonl.js';
 
-interface PendingClaudeExchange {
+interface PendingClaudeSpan {
   archivePath: string;
   lineStart: number;
   lineEnd: number;
@@ -16,43 +16,36 @@ interface PendingClaudeExchange {
   model: string | null;
   provider: string | null;
   metadataJson: string | null;
-  timestamp: number | null;
+  observedAt: number | null;
   userText: string;
   assistantTexts: string[];
-  toolCalls: ToolCallRecord[];
 }
 
-export function parseClaudeJsonl(content: string, context: ParseContext): ParsedExchange[] {
-  const exchanges: ParsedExchange[] = [];
-  let current: PendingClaudeExchange | null = null;
+export function parseClaudeJsonl(content: string, context: ParseContext): TranscriptSpan[] {
+  const spans: TranscriptSpan[] = [];
+  let current: PendingClaudeSpan | null = null;
 
   const flushCurrent = () => {
     if (!current) return;
 
-    const assistantText = current.assistantTexts.join('\n').trim();
-    if (!assistantText) {
-      current = null;
-      return;
+    const text = formatSpanText(current.userText, current.assistantTexts.join('\n'));
+    if (text.trim()) {
+      spans.push({
+        archivePath: current.archivePath,
+        lineStart: current.lineStart,
+        lineEnd: current.lineEnd,
+        sourceKind: current.sourceKind,
+        sessionId: current.sessionId,
+        project: current.project,
+        cwd: current.cwd,
+        gitBranch: current.gitBranch,
+        model: current.model,
+        provider: current.provider,
+        metadataJson: current.metadataJson,
+        observedAt: current.observedAt,
+        text,
+      });
     }
-
-    exchanges.push({
-      archivePath: current.archivePath,
-      lineStart: current.lineStart,
-      lineEnd: current.lineEnd,
-      sourceKind: current.sourceKind,
-      sessionId: current.sessionId,
-      project: current.project,
-      cwd: current.cwd,
-      gitBranch: current.gitBranch,
-      model: current.model,
-      provider: current.provider,
-      metadataJson: current.metadataJson,
-      timestamp: current.timestamp,
-      userText: current.userText,
-      assistantText,
-      embeddingText: [current.userText, assistantText].filter(Boolean).join('\n'),
-      toolCalls: current.toolCalls,
-    });
     current = null;
   };
 
@@ -63,10 +56,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
 
     if (role === 'user') {
       if (isToolResultContent(messageContent)) {
-        if (current) {
-          current.lineEnd = lineNumber;
-          applyToolResults(current.toolCalls, messageContent);
-        }
+        if (current) current.lineEnd = lineNumber;
         return;
       }
 
@@ -84,10 +74,9 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
         model: asString(item.model),
         provider: asString(item.provider),
         metadataJson: null,
-        timestamp: parseTimestamp(item.timestamp),
+        observedAt: parseTimestamp(item.timestamp),
         userText,
         assistantTexts: [],
-        toolCalls: [],
       };
       return;
     }
@@ -100,17 +89,17 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Parsed
     current.gitBranch ??= asString(item.gitBranch);
     current.model ??= asString(item.model);
     current.provider ??= asString(item.provider);
+    current.observedAt ??= parseTimestamp(item.timestamp);
 
     if (role === 'assistant') {
       current.model ??= asString(message?.model);
       const text = extractText(messageContent).trim();
       if (text) current.assistantTexts.push(text);
-      current.toolCalls.push(...extractToolCalls(messageContent));
     }
   });
 
   flushCurrent();
-  return exchanges;
+  return spans;
 }
 
 export function createClaudeProjectsAdapter(): SourceAdapter {
@@ -135,6 +124,13 @@ function createClaudeAdapter(kind: string, dirname: string): SourceAdapter {
   };
 }
 
+function formatSpanText(userText: string, assistantText: string): string {
+  const parts: string[] = [];
+  if (userText.trim()) parts.push(`User: ${userText.trim()}`);
+  if (assistantText.trim()) parts.push(`Assistant: ${assistantText.trim()}`);
+  return parts.join('\n');
+}
+
 function extractText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (!Array.isArray(value)) return '';
@@ -151,50 +147,7 @@ function extractText(value: unknown): string {
     .join('\n');
 }
 
-function extractToolCalls(value: unknown): ToolCallRecord[] {
-  if (!Array.isArray(value)) return [];
-
-  const calls: ToolCallRecord[] = [];
-  for (const block of value) {
-    const object = asObject(block);
-    if (!object) continue;
-
-    if (object.type === 'tool_use') {
-      calls.push({
-        toolName: asString(object.name),
-        callId: asString(object.id),
-        input: stringifyValue(object.input),
-        output: null,
-        status: null,
-      });
-      continue;
-    }
-
-    if (object.type === 'tool_result') {
-      applyToolResult(calls, object);
-    }
-  }
-
-  return calls;
-}
-
 function isToolResultContent(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
   return value.some(block => asObject(block)?.type === 'tool_result');
-}
-
-function applyToolResults(calls: ToolCallRecord[], value: unknown): void {
-  if (!Array.isArray(value)) return;
-  for (const block of value) {
-    const object = asObject(block);
-    if (object?.type === 'tool_result') applyToolResult(calls, object);
-  }
-}
-
-function applyToolResult(calls: ToolCallRecord[], object: JsonObject): void {
-  attachToolResult(calls, {
-    callId: asString(object.tool_use_id),
-    output: stringifyValue(object.content),
-    status: object.is_error === true ? 'error' : 'success',
-  });
 }

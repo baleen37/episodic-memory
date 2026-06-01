@@ -1,4 +1,10 @@
-import type { ToolCallRecord } from './types.js';
+interface ToolCallRecord {
+  toolName: string | null;
+  callId: string | null;
+  input: string | null;
+  output: string | null;
+  status: string | null;
+}
 
 export type JsonObject = Record<string, unknown>;
 
