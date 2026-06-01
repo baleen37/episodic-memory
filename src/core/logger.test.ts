@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { log, __flushForTests, __resetRetentionForTests } from './logger.js';
 
 describe('logger', () => {
@@ -19,6 +19,10 @@ describe('logger', () => {
   });
 
   afterEach(() => {
+    // Flush before restoring config dir so any residual buffer goes to the
+    // temp dir (not the real ~/.config/memmem/logs/).
+    __flushForTests();
+    __resetRetentionForTests();
     if (originalLevel === undefined) {
       delete process.env.MEMMEM_LOG_LEVEL;
     } else {
@@ -30,8 +34,6 @@ describe('logger', () => {
       process.env.CONVERSATION_MEMORY_CONFIG_DIR = originalConfigDir;
     }
     rmSync(tempConfigDir, { recursive: true, force: true });
-    __flushForTests();
-    __resetRetentionForTests();
     stderrSpy.mockRestore();
   });
 
@@ -157,15 +159,22 @@ describe('logger', () => {
     });
 
     test('auto-flushes after 64 buffered lines', () => {
-      for (let i = 0; i < 64; i++) {
-        log.info(`bulk line ${i}`);
+      const savedNodeEnv = process.env.NODE_ENV;
+      delete process.env.NODE_ENV;
+      try {
+        for (let i = 0; i < 64; i++) {
+          log.info(`bulk line ${i}`);
+        }
+        const date = new Date().toISOString().split('T')[0];
+        const logPath = join(tempConfigDir, 'logs', `${date}.log`);
+        expect(existsSync(logPath)).toBe(true);
+        const contents = readFileSync(logPath, 'utf8');
+        expect(contents).toContain('bulk line 0');
+        expect(contents).toContain('bulk line 63');
+      } finally {
+        if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = savedNodeEnv;
       }
-      const date = new Date().toISOString().split('T')[0];
-      const logPath = join(tempConfigDir, 'logs', `${date}.log`);
-      expect(existsSync(logPath)).toBe(true);
-      const contents = readFileSync(logPath, 'utf8');
-      expect(contents).toContain('bulk line 0');
-      expect(contents).toContain('bulk line 63');
     });
 
     test('silent level writes no file', () => {
@@ -176,6 +185,18 @@ describe('logger', () => {
       // Either the logs dir was never created, or it contains no log files.
       const files = existsSync(logsDir) ? readdirSync(logsDir) : [];
       expect(files.filter(f => f.endsWith('.log'))).toEqual([]);
+    });
+
+    test('automatic flush under NODE_ENV=test does not write a file', () => {
+      // NODE_ENV is 'test' under bun test; do not override it here.
+      for (let i = 0; i < 64; i++) {
+        log.info(`suppressed line ${i}`);
+      }
+      // The 64-line threshold triggered an automatic flush, which must be
+      // suppressed under test (no force). No file should exist.
+      const date = new Date().toISOString().split('T')[0];
+      const logPath = join(tempConfigDir, 'logs', `${date}.log`);
+      expect(existsSync(logPath)).toBe(false);
     });
 
     test('logging schedules a flush without hanging (unref timer)', () => {

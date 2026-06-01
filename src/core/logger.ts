@@ -1,5 +1,7 @@
 /**
- * Level-gated logger. Outputs to stderr only.
+ * Level-gated logger. Writes to stderr and mirrors output to a dated log file
+ * at ~/.config/memmem/logs/YYYY-MM-DD.log (buffered; file writes are suppressed
+ * under `bun test` / NODE_ENV=test to avoid polluting the real logs directory).
  *
  * Control via MEMMEM_LOG_LEVEL env var:
  *   error | warn | info | debug   (default: info)
@@ -69,8 +71,15 @@ function pruneOldLogs(): void {
   }
 }
 
-function flushLogBuffer(): void {
+function flushLogBuffer(force = false): void {
   if (buffer.length === 0) return;
+  // Under `bun test` (NODE_ENV=test) skip automatic file writes so suites that
+  // don't override the config dir don't pollute the real logs directory.
+  // Explicit flushes (force) still write — logger's own tests rely on this.
+  if (process.env.NODE_ENV === 'test' && !force) {
+    buffer = [];
+    return;
+  }
   // Prune old log files once per process on the first real write.
   if (!retentionDone) {
     retentionDone = true;
@@ -173,7 +182,7 @@ export function __flushForTests(): void {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  flushLogBuffer();
+  flushLogBuffer(true);
 }
 
 /** Test-only: allow retention to run again on the next flush. */
