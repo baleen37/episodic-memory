@@ -18,6 +18,7 @@ afterEach(() => {
   dir = null;
   __setModelForTests(null, null);
   resetRateLimiters();
+  delete process.env.TEST_DB_PATH;
 });
 
 describe('reindexArchiveFile', () => {
@@ -183,6 +184,154 @@ describe('reindexArchiveFile', () => {
     expect(completeCalls).toBe(2);
     expect(rows).toEqual([{ lineStart: 1 }]);
     expect(vectorCount.count).toBe(1);
+  });
+
+  test('re-extracts a stale pruned span when it returns later', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'changed transcript content');
+
+    const makeSpan = (line: number) => ({
+      archivePath,
+      lineStart: line,
+      lineEnd: line,
+      sourceKind: 'claude-projects',
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+      text: `Durable fact ${line}.`,
+    });
+    const bothSpansParser: ArchiveParser = () => [makeSpan(1), makeSpan(2)];
+    const firstSpanParser: ArchiveParser = () => [makeSpan(1)];
+
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        return {
+          text: JSON.stringify([{ kind: 'fact', text: `Durable fact ${completeCalls}.`, confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    await reindexArchiveFile(db, archivePath, 'claude-projects', bothSpansParser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-projects', firstSpanParser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', bothSpansParser, provider);
+
+    const rows = db.query('SELECT line_start AS lineStart FROM memory_records ORDER BY line_start').all() as Array<{ lineStart: number }>;
+
+    expect(result.spansSkipped).toBe(1);
+    expect(result.memoryRecordsIndexed).toBe(1);
+    expect(completeCalls).toBe(3);
+    expect(rows).toEqual([{ lineStart: 1 }, { lineStart: 2 }]);
+  });
+
+  test('preserves existing span index when embedding fails during replacement', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    let embeddingCalls = 0;
+    __setModelForTests(async () => {}, async (_kind, _text) => {
+      embeddingCalls++;
+      return embeddingCalls === 1 ? Array.from({ length: 384 }, () => 0.1) : null;
+    });
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    let spanText = 'Original durable fact.';
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: spanText,
+    }];
+    const provider: LLMProvider = {
+      async complete() {
+        return {
+          text: JSON.stringify([{ kind: 'fact', text: spanText, confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    spanText = 'Updated durable fact.';
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+
+    const rows = db.query('SELECT text FROM memory_records').all() as Array<{ text: string }>;
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
+
+    expect(result.spansErrored).toBe(1);
+    expect(result.memoryRecordsIndexed).toBe(0);
+    expect(rows).toEqual([{ text: 'Original durable fact.' }]);
+    expect(vectorCount.count).toBe(1);
+  });
+
+  test('skips retrying an errored span before retry_after', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: 'Retry later fact.',
+    }];
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        throw new Error('temporary provider failure');
+      },
+    };
+
+    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+
+    expect(firstResult.spansErrored).toBe(1);
+    expect(secondResult.spansSkipped).toBe(1);
+    expect(secondResult.spansErrored).toBe(0);
+    expect(completeCalls).toBe(1);
   });
 
   test('removes existing memory index when conversation marker asks not to index', async () => {

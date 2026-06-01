@@ -13,6 +13,7 @@ import {
 import { embedPassage } from './embeddings.js';
 import { extractMemoryRecordsFromSpan } from './llm/extractor.js';
 import type { LLMProvider } from './llm/types.js';
+import type { ExtractedMemoryRecord } from './llm/extractor.js';
 import type { ParseContext, TranscriptSpan } from './sources/types.js';
 
 export type ArchiveParser = (content: string, context: ParseContext) => TranscriptSpan[];
@@ -73,18 +74,59 @@ function deleteMemoryIndexForSpan(db: Database, span: TranscriptSpan): void {
   deleteMemoryRecordsByIds(db, rows.map(row => row.id));
 }
 
+function deleteExtractionStateForSpan(db: Database, archivePath: string, lineStart: number, lineEnd: number): void {
+  db.query(`
+    DELETE FROM extraction_state
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+  `).run(archivePath, lineStart, lineEnd);
+}
+
 function pruneStaleMemoryIndexForArchivePath(db: Database, archivePath: string, spans: TranscriptSpan[]): void {
   const currentSpanKeys = new Set(spans.map(span => `${span.lineStart}:${span.lineEnd}`));
-  const rows = db.query(`
+  const memoryRows = db.query(`
     SELECT id, line_start AS lineStart, line_end AS lineEnd
     FROM memory_records
     WHERE archive_path = ?
   `).all(archivePath) as Array<{ id: number; lineStart: number; lineEnd: number }>;
-  const staleIds = rows
-    .filter(row => !currentSpanKeys.has(`${row.lineStart}:${row.lineEnd}`))
-    .map(row => row.id);
+  const stateRows = db.query(`
+    SELECT line_start AS lineStart, line_end AS lineEnd
+    FROM extraction_state
+    WHERE archive_path = ?
+  `).all(archivePath) as Array<{ lineStart: number; lineEnd: number }>;
+  const staleMemoryRows = memoryRows.filter(row => !currentSpanKeys.has(`${row.lineStart}:${row.lineEnd}`));
+  const staleStateKeys = new Set(
+    stateRows
+      .filter(row => !currentSpanKeys.has(`${row.lineStart}:${row.lineEnd}`))
+      .map(row => `${row.lineStart}:${row.lineEnd}`),
+  );
 
-  deleteMemoryRecordsByIds(db, staleIds);
+  deleteMemoryRecordsByIds(db, staleMemoryRows.map(row => row.id));
+  for (const key of staleStateKeys) {
+    const [lineStart, lineEnd] = key.split(':').map(Number);
+    deleteExtractionStateForSpan(db, archivePath, lineStart, lineEnd);
+  }
+}
+
+function hasPendingRetryExtractionState(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): boolean {
+  const row = db.query(`
+    SELECT retry_after AS retryAfter FROM extraction_state
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+      AND source_hash = ? AND extraction_version = ? AND status = 'errored'
+      AND retry_after IS NOT NULL AND retry_after > ?
+  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion, Date.now()) as { retryAfter: number } | null;
+  return row !== null;
+}
+
+interface PreparedMemoryRecord {
+  record: ExtractedMemoryRecord;
+  embedding: number[];
 }
 
 export async function reindexArchiveFile(
@@ -131,6 +173,18 @@ export async function reindexArchiveFile(
       continue;
     }
 
+    if (hasPendingRetryExtractionState(
+      db,
+      span.archivePath,
+      span.lineStart,
+      span.lineEnd,
+      sourceHash,
+      CURRENT_EXTRACTION_VERSION,
+    )) {
+      result.spansSkipped++;
+      continue;
+    }
+
     try {
       const records = await extractMemoryRecordsFromSpan(provider, {
         sourceKind: span.sourceKind,
@@ -142,9 +196,49 @@ export async function reindexArchiveFile(
         text: span.text,
       }, { maxRecords: 10 });
 
-      deleteMemoryIndexForSpan(db, span);
+      const preparedRecords: PreparedMemoryRecord[] = [];
+      for (const record of records) {
+        const embedding = await embedPassage(record.text);
+        if (!embedding) {
+          throw new Error('embedding failed');
+        }
+        preparedRecords.push({ record, embedding });
+      }
 
-      if (records.length === 0) {
+      const replaceSpanIndex = db.transaction(() => {
+        deleteMemoryIndexForSpan(db, span);
+
+        if (preparedRecords.length === 0) {
+          upsertExtractionState(db, {
+            sourceKind: span.sourceKind,
+            archivePath: span.archivePath,
+            lineStart: span.lineStart,
+            lineEnd: span.lineEnd,
+            sourceHash,
+            extractionVersion: CURRENT_EXTRACTION_VERSION,
+            status: 'empty',
+          });
+          return 0;
+        }
+
+        for (const { record, embedding } of preparedRecords) {
+          const memoryRecordId = insertMemoryRecord(db, {
+            kind: record.kind,
+            text: record.text,
+            sourceKind: span.sourceKind,
+            archivePath: span.archivePath,
+            lineStart: span.lineStart,
+            lineEnd: span.lineEnd,
+            observedAt: span.observedAt,
+            project: span.project,
+            confidence: record.confidence,
+            dedupeKey: record.dedupeKey ?? makeDedupeKey(record.kind, record.text),
+            extractionVersion: CURRENT_EXTRACTION_VERSION,
+            embeddingVersion: CURRENT_EMBEDDING_VERSION,
+          });
+          insertMemoryRecordVector(db, memoryRecordId, embedding);
+        }
+
         upsertExtractionState(db, {
           sourceKind: span.sourceKind,
           archivePath: span.archivePath,
@@ -152,44 +246,17 @@ export async function reindexArchiveFile(
           lineEnd: span.lineEnd,
           sourceHash,
           extractionVersion: CURRENT_EXTRACTION_VERSION,
-          status: 'empty',
+          status: 'done',
         });
-        result.spansEmpty++;
-        continue;
-      }
-
-      for (const record of records) {
-        const memoryRecordId = insertMemoryRecord(db, {
-          kind: record.kind,
-          text: record.text,
-          sourceKind: span.sourceKind,
-          archivePath: span.archivePath,
-          lineStart: span.lineStart,
-          lineEnd: span.lineEnd,
-          observedAt: span.observedAt,
-          project: span.project,
-          confidence: record.confidence,
-          dedupeKey: record.dedupeKey ?? makeDedupeKey(record.kind, record.text),
-          extractionVersion: CURRENT_EXTRACTION_VERSION,
-          embeddingVersion: CURRENT_EMBEDDING_VERSION,
-        });
-
-        const embedding = await embedPassage(record.text);
-        if (embedding) {
-          insertMemoryRecordVector(db, memoryRecordId, embedding);
-        }
-        result.memoryRecordsIndexed++;
-      }
-
-      upsertExtractionState(db, {
-        sourceKind: span.sourceKind,
-        archivePath: span.archivePath,
-        lineStart: span.lineStart,
-        lineEnd: span.lineEnd,
-        sourceHash,
-        extractionVersion: CURRENT_EXTRACTION_VERSION,
-        status: 'done',
+        return preparedRecords.length;
       });
+
+      const indexedCount = replaceSpanIndex();
+      if (indexedCount === 0) {
+        result.spansEmpty++;
+      } else {
+        result.memoryRecordsIndexed += indexedCount;
+      }
     } catch (error) {
       upsertExtractionState(db, {
         sourceKind: span.sourceKind,
