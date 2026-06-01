@@ -1,10 +1,29 @@
+import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import type { Database } from 'bun:sqlite';
-import { CURRENT_EMBEDDING_VERSION, deleteExchangeIndexForArchivePath, insertExchange, insertToolCall, insertExchangeVector } from './db.js';
+import {
+  CURRENT_EMBEDDING_VERSION,
+  CURRENT_EXTRACTION_VERSION,
+  deleteMemoryIndexForArchivePath,
+  hasCompletedExtractionState,
+  insertMemoryRecord,
+  insertMemoryRecordVector,
+  upsertExtractionState,
+} from './db.js';
 import { embedPassage } from './embeddings.js';
-import type { ParseContext, ParsedExchange } from './sources/types.js';
+import { extractMemoryRecordsFromSpan } from './llm/extractor.js';
+import type { LLMProvider } from './llm/types.js';
+import type { ParseContext, TranscriptSpan } from './sources/types.js';
 
-export type ArchiveParser = (content: string, context: ParseContext) => ParsedExchange[];
+export type ArchiveParser = (content: string, context: ParseContext) => TranscriptSpan[];
+
+export interface ReindexArchiveResult {
+  spansConsidered: number;
+  spansSkipped: number;
+  spansEmpty: number;
+  spansErrored: number;
+  memoryRecordsIndexed: number;
+}
 
 export const EXCLUSION_MARKERS = [
   'DO NOT INDEX THIS CHAT',
@@ -17,47 +36,141 @@ export function hasExclusionMarker(content: string): boolean {
   return EXCLUSION_MARKERS.some(marker => content.includes(marker));
 }
 
+function emptyResult(): ReindexArchiveResult {
+  return {
+    spansConsidered: 0,
+    spansSkipped: 0,
+    spansEmpty: 0,
+    spansErrored: 0,
+    memoryRecordsIndexed: 0,
+  };
+}
+
+function hashText(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function makeDedupeKey(kind: string, text: string): string {
+  const normalized = `${kind}:${text.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+  return hashText(normalized);
+}
+
 export async function reindexArchiveFile(
   db: Database,
   archivePath: string,
   sourceKind: string,
   parser: ArchiveParser,
-): Promise<number> {
+  provider: LLMProvider | null,
+): Promise<ReindexArchiveResult> {
   const content = readFileSync(archivePath, 'utf-8');
   if (hasExclusionMarker(content)) {
-    deleteExchangeIndexForArchivePath(db, archivePath);
-    return 0;
+    deleteMemoryIndexForArchivePath(db, archivePath);
+    return emptyResult();
   }
 
-  const exchanges = parser(content, { archivePath, sourceKind });
-  const embeddings: Array<number[] | null> = [];
-  for (const exchange of exchanges) {
-    embeddings.push(await embedPassage(exchange.embeddingText));
+  const spans = parser(content, { archivePath, sourceKind });
+  const result: ReindexArchiveResult = {
+    spansConsidered: spans.length,
+    spansSkipped: 0,
+    spansEmpty: 0,
+    spansErrored: 0,
+    memoryRecordsIndexed: 0,
+  };
+
+  deleteMemoryIndexForArchivePath(db, archivePath);
+
+  if (!provider) {
+    result.spansSkipped = spans.length;
+    return result;
   }
 
-  const replaceIndex = db.transaction(() => {
-    deleteExchangeIndexForArchivePath(db, archivePath);
+  for (const span of spans) {
+    const sourceHash = hashText(span.text);
 
-    let indexed = 0;
-    for (const [index, exchange] of exchanges.entries()) {
-      const exchangeId = insertExchange(db, {
-        ...exchange,
-        embeddingVersion: CURRENT_EMBEDDING_VERSION,
-      });
-
-      for (const toolCall of exchange.toolCalls) {
-        insertToolCall(db, { exchangeId, ...toolCall });
-      }
-
-      const embedding = embeddings[index];
-      if (embedding) {
-        insertExchangeVector(db, exchangeId, embedding);
-      }
-      indexed++;
+    if (hasCompletedExtractionState(
+      db,
+      span.archivePath,
+      span.lineStart,
+      span.lineEnd,
+      sourceHash,
+      CURRENT_EXTRACTION_VERSION,
+    )) {
+      result.spansSkipped++;
+      continue;
     }
 
-    return indexed;
-  });
+    try {
+      const records = await extractMemoryRecordsFromSpan(provider, {
+        sourceKind: span.sourceKind,
+        archivePath: span.archivePath,
+        lineStart: span.lineStart,
+        lineEnd: span.lineEnd,
+        observedAt: span.observedAt,
+        project: span.project,
+        text: span.text,
+      }, { maxRecords: 10 });
 
-  return replaceIndex();
+      if (records.length === 0) {
+        upsertExtractionState(db, {
+          sourceKind: span.sourceKind,
+          archivePath: span.archivePath,
+          lineStart: span.lineStart,
+          lineEnd: span.lineEnd,
+          sourceHash,
+          extractionVersion: CURRENT_EXTRACTION_VERSION,
+          status: 'empty',
+        });
+        result.spansEmpty++;
+        continue;
+      }
+
+      for (const record of records) {
+        const memoryRecordId = insertMemoryRecord(db, {
+          kind: record.kind,
+          text: record.text,
+          sourceKind: span.sourceKind,
+          archivePath: span.archivePath,
+          lineStart: span.lineStart,
+          lineEnd: span.lineEnd,
+          observedAt: span.observedAt,
+          project: span.project,
+          confidence: record.confidence,
+          dedupeKey: record.dedupeKey ?? makeDedupeKey(record.kind, record.text),
+          extractionVersion: CURRENT_EXTRACTION_VERSION,
+          embeddingVersion: CURRENT_EMBEDDING_VERSION,
+        });
+
+        const embedding = await embedPassage(record.text);
+        if (embedding) {
+          insertMemoryRecordVector(db, memoryRecordId, embedding);
+        }
+        result.memoryRecordsIndexed++;
+      }
+
+      upsertExtractionState(db, {
+        sourceKind: span.sourceKind,
+        archivePath: span.archivePath,
+        lineStart: span.lineStart,
+        lineEnd: span.lineEnd,
+        sourceHash,
+        extractionVersion: CURRENT_EXTRACTION_VERSION,
+        status: 'done',
+      });
+    } catch (error) {
+      upsertExtractionState(db, {
+        sourceKind: span.sourceKind,
+        archivePath: span.archivePath,
+        lineStart: span.lineStart,
+        lineEnd: span.lineEnd,
+        sourceHash,
+        extractionVersion: CURRENT_EXTRACTION_VERSION,
+        status: 'errored',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        retryAfter: Date.now() + 60 * 60 * 1000,
+      });
+      result.spansErrored++;
+    }
+  }
+
+  return result;
 }

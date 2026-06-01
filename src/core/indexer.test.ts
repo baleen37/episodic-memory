@@ -5,8 +5,8 @@ import { tmpdir } from 'os';
 import { initDatabase } from './db.js';
 import { resetRateLimiters } from './ratelimiter.js';
 import { __setModelForTests } from './embeddings.js';
-import { reindexArchiveFile } from './indexer.js';
-import { parseClaudeJsonl } from './sources/claude.js';
+import { reindexArchiveFile, type ArchiveParser } from './indexer.js';
+import type { LLMProvider } from './llm/types.js';
 
 let dir: string | null = null;
 let db: ReturnType<typeof initDatabase> | null = null;
@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe('reindexArchiveFile', () => {
-  test('reindexes a file from scratch and replaces old rows', async () => {
+  test('extracts memory records from transcript spans and indexes vectors', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, (_, i) => i / 384));
@@ -30,101 +30,107 @@ describe('reindexArchiveFile', () => {
     const archiveDir = join(dir, 'claude-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'First question' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'First answer' } }),
-    ].join('\n'));
+    writeFileSync(archivePath, 'transcript content');
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+      text: 'User prefers durable memory records over exchange indexing.',
+    }];
 
-    const count = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
-    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_exchanges').get() as { count: number };
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        return {
+          text: JSON.stringify([
+            {
+              kind: 'fact',
+              text: 'The user prefers durable memory records over exchange indexing.',
+              confidence: 0.9,
+            },
+          ]),
+          usage: { input_tokens: 10, output_tokens: 5 },
+        };
+      },
+    };
 
-    expect(count.count).toBe(1);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+
+    expect(result.memoryRecordsIndexed).toBe(1);
+    expect(result.spansEmpty).toBe(0);
+    expect(result.spansErrored).toBe(0);
+    expect(completeCalls).toBe(1);
+
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
+    const state = db.query('SELECT status FROM extraction_state').get() as { status: string } | null;
+
+    expect(memoryCount.count).toBe(1);
     expect(vectorCount.count).toBe(1);
+    expect(state?.status).toBe('done');
   });
 
-  test('keeps old index when replacement vector insert fails', async () => {
+  test('removes existing memory index when conversation marker asks not to index', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
-    let embeddingCall = 0;
-    __setModelForTests(async () => {}, async (_kind, _text) => {
-      embeddingCall++;
-      return Array.from({ length: embeddingCall === 3 ? 1 : 384 }, () => 0.1);
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: null,
+      project: null,
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: 'Durable fact.',
+    }];
+    const provider: LLMProvider = {
+      async complete() {
+        return {
+          text: JSON.stringify([{ kind: 'fact', text: 'Durable fact.', confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    writeFileSync(archivePath, 'DO NOT INDEX THIS CONVERSATION');
+
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
+
+    expect(result).toEqual({
+      spansConsidered: 0,
+      spansSkipped: 0,
+      spansEmpty: 0,
+      spansErrored: 0,
+      memoryRecordsIndexed: 0,
     });
-
-    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
-    mkdirSync(archiveDir, { recursive: true });
-    const archivePath = join(archiveDir, 'session.jsonl');
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'Old question' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Old answer' } }),
-    ].join('\n'));
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
-
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:02.000Z', sessionId: 's1', message: { role: 'user', content: 'New question one' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:03.000Z', sessionId: 's1', message: { role: 'assistant', content: 'New answer one' } }),
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:04.000Z', sessionId: 's1', message: { role: 'user', content: 'New question two' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:05.000Z', sessionId: 's1', message: { role: 'assistant', content: 'New answer two' } }),
-    ].join('\n'));
-
-    await expect(reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl)).rejects.toThrow();
-
-    const rows = db.query('SELECT user_text AS userText FROM exchanges').all() as Array<{ userText: string }>;
-    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_exchanges').get() as { count: number };
-
-    expect(rows).toEqual([{ userText: 'Old question' }]);
-    expect(vectorCount.count).toBe(1);
-  });
-
-  test('removes existing index when conversation marker asks not to index', async () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
-
-    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
-    mkdirSync(archiveDir, { recursive: true });
-    const archivePath = join(archiveDir, 'session.jsonl');
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'Old question' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Old answer' } }),
-    ].join('\n'));
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
-
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:02.000Z', sessionId: 's1', message: { role: 'user', content: 'DO NOT INDEX THIS CONVERSATION' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:03.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Sensitive answer' } }),
-    ].join('\n'));
-
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
-    const count = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
-
-    expect(result).toBe(0);
-    expect(count.count).toBe(0);
-  });
-
-  test('skips Korean exclusion markers', async () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
-
-    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
-    mkdirSync(archiveDir, { recursive: true });
-    const archivePath = join(archiveDir, 'session.jsonl');
-    writeFileSync(archivePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: '이 대화는 인덱싱하지 마세요' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Sensitive answer' } }),
-    ].join('\n'));
-
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parseClaudeJsonl);
-    const count = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
-
-    expect(result).toBe(0);
-    expect(count.count).toBe(0);
+    expect(memoryCount.count).toBe(0);
+    expect(vectorCount.count).toBe(0);
   });
 });
