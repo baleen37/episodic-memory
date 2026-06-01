@@ -166,5 +166,15 @@ describe('logger', () => {
       expect(contents).toContain('bulk line 0');
       expect(contents).toContain('bulk line 63');
     });
+
+    test('silent level writes no file', () => {
+      process.env.MEMMEM_LOG_LEVEL = 'silent';
+      log.error('should not be written');
+      __flushForTests();
+      const logsDir = join(tempConfigDir, 'logs');
+      // Either the logs dir was never created, or it contains no log files.
+      const files = existsSync(logsDir) ? readdirSync(logsDir) : [];
+      expect(files.filter(f => f.endsWith('.log'))).toEqual([]);
+    });
   });
 });
