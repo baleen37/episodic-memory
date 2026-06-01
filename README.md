@@ -218,7 +218,10 @@ memmem read /path/to/archive.jsonl --start-line 1 --end-line 20
 ```text
 plugins/memmem/
 ├── .claude-plugin/
-│   └── plugin.json              # Plugin metadata
+│   ├── marketplace.json         # Marketplace release metadata
+│   └── plugin.json              # Claude Code plugin metadata
+├── .codex-plugin/
+│   └── plugin.json              # Codex plugin metadata and MCP registration
 ├── .mcp.json                     # MCP server registration
 ├── hooks/
 │   └── hooks.json               # Auto-sync on session start (startup|resume)
