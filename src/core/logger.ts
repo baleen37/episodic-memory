@@ -6,8 +6,9 @@
  *   silent                         (disables all output)
  */
 
-import { appendFileSync } from 'fs';
-import { getLogFilePath } from './paths.js';
+import { appendFileSync, readdirSync, unlinkSync } from 'fs';
+import { getLogFilePath, getLogDir } from './paths.js';
+import { join } from 'path';
 
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
@@ -27,8 +28,41 @@ function getThreshold(): number {
 const FLUSH_LINE_THRESHOLD = 64;
 let buffer: string[] = [];
 
+const RETENTION_DAYS = 14;
+let retentionDone = false;
+
+function pruneOldLogs(): void {
+  const dir = getLogDir();
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const cutoff = todayUtc - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const match = name.match(/^(\d{4})-(\d{2})-(\d{2})\.log$/);
+    if (!match) continue;
+    const fileTime = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (fileTime < cutoff) {
+      try {
+        unlinkSync(join(dir, name));
+      } catch {
+        // ignore individual delete failures
+      }
+    }
+  }
+}
+
 function flushLogBuffer(): void {
   if (buffer.length === 0) return;
+  // Prune old log files once per process on the first real write.
+  if (!retentionDone) {
+    retentionDone = true;
+    pruneOldLogs();
+  }
   const lines = buffer.join(''); // each buffered entry already ends with '\n'
   buffer = [];
   try {
@@ -95,4 +129,9 @@ export function logDebug(message: string, data?: Record<string, unknown>): void 
 /** Test-only: synchronously flush the file buffer. */
 export function __flushForTests(): void {
   flushLogBuffer();
+}
+
+/** Test-only: allow retention to run again on the next flush. */
+export function __resetRetentionForTests(): void {
+  retentionDone = false;
 }

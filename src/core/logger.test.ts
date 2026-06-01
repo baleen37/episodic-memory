@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'fs';
-import { log, __flushForTests } from './logger.js';
+import { log, __flushForTests, __resetRetentionForTests } from './logger.js';
 
 describe('logger', () => {
   let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, 'write'>>;
@@ -31,6 +31,7 @@ describe('logger', () => {
     }
     rmSync(tempConfigDir, { recursive: true, force: true });
     __flushForTests();
+    __resetRetentionForTests();
     stderrSpy.mockRestore();
   });
 
@@ -175,6 +176,32 @@ describe('logger', () => {
       // Either the logs dir was never created, or it contains no log files.
       const files = existsSync(logsDir) ? readdirSync(logsDir) : [];
       expect(files.filter(f => f.endsWith('.log'))).toEqual([]);
+    });
+
+    test('prunes log files older than 14 days, keeps recent', () => {
+      const logsDir = join(tempConfigDir, 'logs');
+      // getLogDir() ensures the dir; create it via a real flush first.
+      log.info('seed');
+      __flushForTests();
+      expect(existsSync(logsDir)).toBe(true);
+
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const oldDate = new Date(now - 15 * DAY_MS).toISOString().split('T')[0];
+      const recentDate = new Date(now - 13 * DAY_MS).toISOString().split('T')[0];
+      const oldPath = join(logsDir, `${oldDate}.log`);
+      const recentPath = join(logsDir, `${recentDate}.log`);
+      writeFileSync(oldPath, 'old\n');
+      writeFileSync(recentPath, 'recent\n');
+
+      // Retention runs once per process and already ran on the seed flush above.
+      // Force it to run again for this test via the test-only reset + flush.
+      __resetRetentionForTests();
+      log.info('trigger');
+      __flushForTests();
+
+      expect(existsSync(oldPath)).toBe(false);
+      expect(existsSync(recentPath)).toBe(true);
     });
   });
 });
