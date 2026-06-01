@@ -68,10 +68,14 @@ describe('CLI argument parsing', () => {
     expect(help).toContain('sync');
     expect(help).toContain('search');
     expect(help).toContain('read');
+    expect(help).toContain('stats');
+    expect(help).toContain('verify');
     expect(help).toContain('memmem - Event/fact memory for Claude Code and Codex transcripts');
     expect(help).toContain('sync      Copy transcripts and extract memory records');
     expect(help).toContain('search    Search indexed memory records');
     expect(help).toContain('read      Read archived transcript lines');
+    expect(help).toContain('stats     Print memory index statistics');
+    expect(help).toContain('verify    Verify memory index integrity');
     expect(help).not.toContain('recall');
   });
 });

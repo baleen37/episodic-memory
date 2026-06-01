@@ -1,6 +1,8 @@
 import { runReadCli } from './read.js';
 import { runSearchCli } from './search.js';
+import { runStatsCli } from './stats.js';
 import { runSyncCli } from './sync.js';
+import { runVerifyCli } from './verify.js';
 
 interface SearchCliArgs {
   query: string;
@@ -104,6 +106,8 @@ COMMANDS:
   sync      Copy transcripts and extract memory records
   search    Search indexed memory records
   read      Read archived transcript lines
+  stats     Print memory index statistics
+  verify    Verify memory index integrity
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory
@@ -133,6 +137,12 @@ async function main(): Promise<void> {
       break;
     case 'read':
       runReadCli(parseReadArgs(args));
+      break;
+    case 'stats':
+      runStatsCli();
+      break;
+    case 'verify':
+      runVerifyCli();
       break;
     default:
       console.error(`Unknown command: ${command}`);
