@@ -6,8 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-Persistent conversation memory across Claude Code and Codex sessions using archived transcript exchange search.
-Memmem syncs local transcripts into an archive, indexes user/assistant exchanges with embeddings, and exposes search/read through CLI and MCP.
+Persistent conversation memory across Claude Code and Codex sessions using archived transcripts.
+Memmem syncs local transcripts into an archive, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through CLI and MCP.
+
+## Memory Architecture Principles
+
+- Transcript archive is the source of truth.
+- The persisted and searchable unit is `memory_record`, not a turn-level transcript object.
+- A `memory_record` is an atomic fact or event extracted from transcript content.
+- Every `memory_record` must have provenance: `archive_path`, `line_start`, `line_end`, and `source_kind`.
+- Memory is an append-first derived index. Do not silently overwrite old facts; supersede them when needed.
+- Store facts/events, not conversation summaries.
+- Search retrieves compact memory records first. Raw transcript lines are read only when evidence or additional context is needed.
+- Token efficiency is a product requirement: default outputs must be compact, deduplicated, bounded, and source-linked.
+- LLM extraction must be bounded, idempotent, schema-validated, and failure-tolerant.
 
 ## Commands
 
@@ -25,23 +37,25 @@ bun run typecheck               # tsc --noEmit
 
 | File | Description |
 | ---- | ----------- |
-| `src/core/db.ts` | Exchange database schema — use `openDatabase()` in production, `initDatabase()` only in tests |
-| `src/core/sources/types.ts` | Source adapter and parsed exchange types |
+| `src/core/db.ts` | Memory database schema — use `openDatabase()` in production, `initDatabase()` only in tests |
+| `src/core/sources/types.ts` | Source adapter and transcript span types |
 | `src/core/sources/claude.ts` | Claude Code transcript adapters and JSONL parser |
 | `src/core/sources/codex.ts` | Codex transcript adapter and rollout parser |
 | `src/core/sources/index.ts` | Built-in source adapter exports |
-| `src/core/indexer.ts` | Full-file archive reindexing into exchanges, tool calls, and vectors |
-| `src/core/search.ts` | Hybrid vector-first + text fallback exchange search |
+| `src/core/indexer.ts` | Archive indexing into memory records and vectors |
+| `src/core/search.ts` | Hybrid vector-first + text fallback memory search |
 | `src/core/read.ts` | Archived transcript line reading/rendering |
-| `src/core/embeddings.ts` | multilingual-e5-small-ko-v2 embeddings (384-dim, fp16) with passage/query prefix routing |
+| `src/core/embeddings.ts` | Xenova/multilingual-e5-small embeddings (384-dim) with passage/query prefix routing |
 | `src/core/ratelimiter.ts` | Token bucket rate limiter (singleton, configurable) |
 | `src/cli/sync.ts` | CLI sync command: copy transcripts to archive and index changed files |
 | `src/cli/search.ts` | CLI search command |
 | `src/cli/read.ts` | CLI read command |
-| `src/cli/main.ts` | CLI router exposing only `sync`, `search`, and `read` |
+| `src/cli/stats.ts` | CLI stats command |
+| `src/cli/verify.ts` | CLI verify command |
+| `src/cli/main.ts` | CLI router exposing `sync`, `search`, `read`, `stats`, and `verify` |
 | `src/cli-graceful.mjs` | Bun CLI wrapper copied to `dist/cli.mjs` |
 | `src/mcp/server.ts` | MCP server exposing search and read tools |
-| `src/mcp/handlers.ts` | MCP handlers for transcript search/read |
+| `src/mcp/handlers.ts` | MCP handlers for memory search/read |
 | `src/mcp/schemas.ts` | MCP input schemas for search/read |
 | `src/mcp/tools.ts` | MCP tool definitions for search/read |
 | `hooks/hooks.json` | SessionStart hook configuration for `memmem sync` |
@@ -56,19 +70,21 @@ bun run typecheck               # tsc --noEmit
 SessionStart hook → hooks/run.sh sync → src/cli/sync.ts
 sync              → source adapters discover Claude/Codex JSONL transcripts
 sync              → copy changed transcripts into conversation-archive/<source_kind>/<relative path>
-indexer           → reindex changed archive files into exchanges + tool_calls + vec_exchanges
-CLI/MCP           → search transcript exchanges, then read archive line ranges when needed
+indexer           → parse changed archive files into transcript spans
+extractor         → extract bounded fact/event memory records with source-linked provenance
+indexer           → embed memory records into vec_memory_records
+CLI/MCP           → search compact memory records, then read archive line ranges when needed
 ```
 
-The archive is the source of truth. Index rows for an archive file are deleted and rebuilt whenever that file is reindexed.
+The archive is the source of truth. Memory rows and vector rows are derived indexes and must be rebuildable from archived transcripts.
 
 ### Database Schema
 
 Primary tables in `~/.config/memmem/conversation-index/conversations.db`:
 
-- **`exchanges`**: Indexed user/assistant transcript exchanges with source metadata, archive path, line range, text, and embedding version.
-- **`tool_calls`**: Tool calls associated with an exchange; rows cascade when their exchange is deleted.
-- **`vec_exchanges`**: 384-dimensional float embeddings for exchange search (`sqlite-vec` virtual table).
+- **`memory_records`**: Atomic fact/event memories extracted from archived transcripts, with source metadata and archive line provenance.
+- **`vec_memory_records`**: 384-dimensional float embeddings for memory search (`sqlite-vec` virtual table).
+- **`extraction_state`**: Per-span extraction status used to avoid repeated LLM calls and control retry/backoff.
 
 `openDatabase()` opens/creates and preserves data. `initDatabase()` wipes and recreates — tests only.
 
@@ -77,14 +93,14 @@ Primary tables in `~/.config/memmem/conversation-index/conversations.db`:
 Search is hybrid:
 
 1. Generate a query embedding.
-2. Search `vec_exchanges` joined to `exchanges` by vector distance.
-3. Supplement with text matches on `user_text` and `assistant_text`.
-4. Deduplicate and return up to the requested limit.
+2. Search `vec_memory_records` joined to active `memory_records` by vector distance.
+3. Supplement with text matches on `memory_records.text`.
+4. Deduplicate by memory/provenance and return compact, source-linked memory cards up to the requested limit.
 
 Public MCP/CLI filters: `after`, `before`, and `source_kind`.
 Internal compatibility options may also support project/file filtering in code paths, but do not document them as primary MCP surface unless the schemas expose them.
 
-Use `read` with `archive_path`, `line_start`, and `line_end` from search results to inspect raw transcript context.
+Use `read` with `archive_path`, `line_start`, and `line_end` from search results to inspect raw transcript context. Search results should not include raw transcript text by default.
 
 ### Source Adapters
 
@@ -94,16 +110,16 @@ Built-in adapters:
 - `claude-transcripts`: Claude transcript directory when present.
 - `codex-sessions`: Codex session JSONL transcripts under `CODEX_HOME`.
 
-Adapters discover roots, detect JSONL files, parse normalized exchanges, and preserve source-specific metadata where available.
+Adapters discover roots, detect JSONL files, parse transcript spans for extraction, and preserve source-specific metadata where available.
 
 ### MCP Surface
 
 MCP exposes only:
 
-- **`search`**: returns exchange summaries with `archive_path`, `line_start`, `line_end`, `source_kind`, `project`, `timestamp`, `snippet`, and optional score.
+- **`search`**: returns compact memory records with `kind`, `text`, `archive_path`, `line_start`, `line_end`, `source_kind`, `project`, `timestamp`, and optional `score`.
 - **`read`**: renders archived transcript content for an archive path and optional line range.
 
-There is no observation detail/get layer in the current architecture.
+There is no summary detail, observation detail, or graph layer in the target architecture.
 
 ### Build Output
 
@@ -129,7 +145,7 @@ External (not bundled): `@huggingface/transformers`, `bun:sqlite`, `sqlite-vec`,
 }
 ```
 
-Transcript indexing/search does not require an LLM provider configuration.
+Archive sync and `read` do not require an LLM provider configuration. Memory extraction during indexing does require a configured LLM provider; without one, spans are skipped and no memory rows are created for those spans.
 
 Storage locations:
 
@@ -147,7 +163,7 @@ Storage locations:
 
 - **Never** call `initDatabase()` in production code — wipes the database.
 - **Never** run runtime entrypoints with Node — CLI and MCP bundles import `bun:sqlite` and must run with Bun.
-- Modify DB schema requires a migration strategy.
+- Modify DB schema requires a migration or rebuild strategy.
 - After modifying TypeScript or runtime wrappers: rebuild with `bun run build`.
 
 <!-- MANUAL: Project-specific notes below this line are preserved -->
