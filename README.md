@@ -171,7 +171,7 @@ Create `~/.config/memmem/config.json` to customize rate limits:
 }
 ```
 
-Transcript indexing does not require an LLM provider configuration.
+Archive sync and `read` do not require an LLM provider configuration. Memory extraction during indexing does require a configured LLM provider; without one, spans are skipped and no memory rows are created for those spans.
 
 ## Development
 
@@ -220,6 +220,12 @@ Source: /path/to/archive.jsonl:120-124
 ```bash
 # Read archived transcript lines
 memmem read /path/to/archive.jsonl --start-line 1 --end-line 20
+
+# Print memory index statistics
+memmem stats
+
+# Verify memory index integrity
+memmem verify
 ```
 
 ### Project Structure
@@ -243,7 +249,9 @@ plugins/memmem/
 │   ├── cli/                     # CLI commands
 │   │   ├── sync.ts              # Sync command
 │   │   ├── search.ts            # Search command
-│   │   └── read.ts              # Read command
+│   │   ├── read.ts              # Read command
+│   │   ├── stats.ts             # Stats command
+│   │   └── verify.ts            # Verify command
 │   └── mcp/
 │       └── server.ts            # MCP server (search, read tools)
 ├── dist/
@@ -264,7 +272,7 @@ plugins/memmem/
 
 - Bun runtime with `bun:sqlite` for SQLite access
 - `@modelcontextprotocol/sdk`: MCP protocol implementation
-- `@huggingface/transformers`: gte-small embeddings
+- `@huggingface/transformers`: Xenova/multilingual-e5-small embeddings
 - `sqlite-vec`: Vector similarity search extension
 - `zod`: Schema validation
 - `marked`: Markdown rendering
@@ -372,9 +380,10 @@ bun run build
 - **Based on @obra/episodic-memory**: Forked and integrated into Claude Code plugin ecosystem
 - **Storage Location**: `~/.config/memmem/` (not `.claude/`)
 - **Naming**: All public interfaces use `memmem` for clarity
-- **Embedding Model**: `Supabase/gte-small`
+- **Embedding Model**: `Xenova/multilingual-e5-small`
   - 384 dimensions
   - Loaded through `@huggingface/transformers`
+  - Uses query/passage prefix routing for search and indexed memory records
   - Stored in `sqlite-vec` virtual tables
 
 ## Future Enhancements

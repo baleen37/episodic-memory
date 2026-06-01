@@ -88,7 +88,7 @@ Read archived transcript lines.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | `string` | Yes | - | `archive_path` from search results |
-| `startLine` | `number` | No | `1` | Starting line (1-indexed) |
+| `startLine` | `number` | No | - | Starting line (1-indexed); omitted = start from beginning |
 | `endLine` | `number` | No | - | Ending line |
 
 ### Basic Usage
