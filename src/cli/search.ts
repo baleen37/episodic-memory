@@ -6,10 +6,10 @@ export async function runSearchCli(args: { query: string; limit?: number; after?
   try {
     const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind });
     for (const result of results) {
-      const date = result.timestamp ? new Date(result.timestamp).toISOString().split('T')[0] : 'unknown-date';
-      console.log(`## [${result.sourceKind}, ${date}] ${result.project ?? 'unknown-project'}`);
-      console.log(`${result.snippet}`);
-      console.log(`Path: ${result.archivePath}:${result.lineStart}-${result.lineEnd}`);
+      const date = result.observedAt ? new Date(result.observedAt).toISOString().split('T')[0] : 'unknown-date';
+      console.log(`## [${result.kind}, ${result.sourceKind}, ${date}] ${result.project ?? 'unknown-project'}`);
+      console.log(result.text);
+      console.log(`Source: ${result.archivePath}:${result.lineStart}-${result.lineEnd}`);
       if (result.score !== undefined) console.log(`Score: ${Math.round(result.score * 100)}%`);
       console.log('');
     }

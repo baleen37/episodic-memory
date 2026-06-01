@@ -95,15 +95,15 @@ export function parseReadArgs(args: string[]): ReadCliArgs {
 
 export function getHelpText(): string {
   return `
-memmem - Persistent conversation memory for Claude Code
+memmem - Event/fact memory for Claude Code and Codex transcripts
 
 USAGE:
   memmem <command>
 
 COMMANDS:
-  sync      Copy and index transcripts
-  search    Search indexed transcripts
-  read      Read an archived transcript
+  sync      Copy transcripts and extract memory records
+  search    Search indexed memory records
+  read      Read archived transcript lines
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory

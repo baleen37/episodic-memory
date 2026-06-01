@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
 import path from 'path';
-import { deleteExchangeIndexForArchivePathPrefix, openDatabase } from '../core/db.js';
+import { deleteMemoryIndexForArchivePathPrefix, openDatabase } from '../core/db.js';
 import { reindexArchiveFile } from '../core/indexer.js';
 import { log } from '../core/logger.js';
 import { getArchiveDir } from '../core/paths.js';
@@ -105,7 +105,7 @@ function purgeExcludedArchiveSubtree(
   archivePathPrefix: string,
   archiveFiles: Map<string, ArchiveFile>,
 ): void {
-  deleteExchangeIndexForArchivePathPrefix(db, archivePathPrefix);
+  deleteMemoryIndexForArchivePathPrefix(db, archivePathPrefix);
   for (const archivePath of archiveFiles.keys()) {
     if (isPathAtOrUnder(archivePath, archivePathPrefix)) {
       archiveFiles.delete(archivePath);

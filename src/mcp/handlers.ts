@@ -5,13 +5,14 @@ import type { SearchInput, ReadInput } from './schemas.js';
 
 export interface SearchResult {
   id: string;
+  kind: 'fact' | 'event';
+  text: string;
   archive_path: string;
   line_start: number;
   line_end: number;
   source_kind: string;
   project: string | null;
   timestamp: number | null;
-  snippet: string;
   score?: number;
 }
 
@@ -26,13 +27,14 @@ export async function handleSearch(params: SearchInput, db: Database): Promise<S
 
   return results.map(result => ({
     id: String(result.id),
+    kind: result.kind,
+    text: result.text,
     archive_path: result.archivePath,
     line_start: result.lineStart,
     line_end: result.lineEnd,
     source_kind: result.sourceKind,
     project: result.project,
-    timestamp: result.timestamp,
-    snippet: result.snippet,
+    timestamp: result.observedAt,
     score: result.score,
   }));
 }

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { SearchInputSchema, ReadInputSchema } from './schemas.js';
 
 describe('MCP schemas', () => {
-  test('validates transcript search input', () => {
+  test('validates memory search input', () => {
     expect(SearchInputSchema.parse({ query: 'memory search', limit: 5, source_kind: 'claude-projects' })).toEqual({
       query: 'memory search',
       limit: 5,
