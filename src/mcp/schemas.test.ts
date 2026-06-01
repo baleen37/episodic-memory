@@ -17,4 +17,8 @@ describe('MCP schemas', () => {
       endLine: 3,
     });
   });
+
+  test('rejects read input when startLine is greater than endLine', () => {
+    expect(() => ReadInputSchema.parse({ path: '/archive/session.jsonl', startLine: 3, endLine: 1 })).toThrow();
+  });
 });

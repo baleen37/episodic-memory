@@ -63,7 +63,7 @@ describe('CLI argument parsing', () => {
     expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '9', '--end-line', '8'])).toThrow('--start-line must be less than or equal to --end-line');
   });
 
-  test('help text mentions only transcript commands', () => {
+  test('help text mentions commands, options, and examples', () => {
     const help = getHelpText();
     expect(help).toContain('sync');
     expect(help).toContain('search');
@@ -76,6 +76,14 @@ describe('CLI argument parsing', () => {
     expect(help).toContain('read      Read archived transcript lines');
     expect(help).toContain('stats     Print memory index statistics');
     expect(help).toContain('verify    Verify memory index integrity');
+    expect(help).toContain('--limit <number>');
+    expect(help).toContain('--after <YYYY-MM-DD>');
+    expect(help).toContain('--before <YYYY-MM-DD>');
+    expect(help).toContain('--source-kind <kind>');
+    expect(help).toContain('--start-line <number>');
+    expect(help).toContain('--end-line <number>');
+    expect(help).toContain('memmem search "source of truth" --limit 5');
+    expect(help).toContain('memmem read /archive/session.jsonl --start-line 3 --end-line 8');
     expect(help).not.toContain('recall');
   });
 });

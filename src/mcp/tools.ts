@@ -12,7 +12,7 @@ export const searchTool: Tool = {
         description: 'Search query string',
       },
       limit: {
-        type: 'number',
+        type: 'integer',
         minimum: 1,
         maximum: 50,
         default: 10,
@@ -58,12 +58,12 @@ export const readTool: Tool = {
         description: 'Path to the JSONL transcript file',
       },
       startLine: {
-        type: 'number',
+        type: 'integer',
         minimum: 1,
         description: 'Starting line number (1-indexed, inclusive)',
       },
       endLine: {
-        type: 'number',
+        type: 'integer',
         minimum: 1,
         description: 'Ending line number (1-indexed, inclusive)',
       },

@@ -33,7 +33,7 @@ Without one, transcript spans are skipped and no memory rows are created for tho
 ### Supported Providers
 
 1. **Gemini** (Google AI) - `gemini-2.0-flash` (default)
-2. **Z.AI** (GLM models) - `glm-4.7` (default)
+2. **Z.AI** (GLM models) - `glm-4.5-air` (default)
 
 ### Gemini Configuration
 
@@ -57,7 +57,7 @@ Without one, transcript spans are skipped and no memory rows are created for tho
 {
   "provider": "zai",
   "apiKey": "your-zai-api-key",
-  "model": "glm-4.7"
+  "model": "glm-4.5-air"
 }
 ```
 
@@ -66,34 +66,28 @@ Without one, transcript spans are skipped and no memory rows are created for tho
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `provider` | string | Yes | - | `gemini` or `zai` |
-| `apiKey` | string | Yes | - | API key for the provider |
+| `apiKey` | string | Single-key mode only | - | API key for the provider |
+| `providers` | array | Round-robin mode only | - | Non-empty list of `{ apiKey, model? }` entries |
 | `model` | string | No | Provider-specific | Model name (see below) |
+
+Use top-level `provider` with either a single `apiKey`, or a non-empty `providers[]` list to rotate across multiple keys/models.
 
 **Default models:**
 
 - Gemini: `gemini-2.0-flash`
-- Z.AI: `glm-4.7`
+- Z.AI: `glm-4.5-air`
 
 ## Project Exclusions
 
-Exclude specific projects from indexing using one of these methods:
-
-### Method 1: Environment Variable
+Exclude a conversation directory from indexing by placing a `.no-memmem` marker file in that directory:
 
 ```bash
-export CONVERSATION_SEARCH_EXCLUDE_PROJECTS="project-a,project-b,project-c"
+touch /path/to/conversation/dir/.no-memmem
 ```
 
-### Method 2: Exclude Config File
+During sync, memmem skips directories containing `.no-memmem` and removes any already archived/indexed content for that subtree.
 
-Create a file at `~/.config/memmem/conversation-index/exclude.txt`:
-
-```text
-# Comments start with #
-project-a
-project-b
-project-c
-```
+For single-conversation inline exclusion markers such as `DO NOT INDEX THIS CHAT`, see the README exclusion section.
 
 ## Environment Variables
 
@@ -101,7 +95,6 @@ project-c
 |----------|---------|
 | `CONVERSATION_MEMORY_CONFIG_DIR` | Override config directory location |
 | `CONVERSATION_MEMORY_DB_PATH` | Override database path |
-| `CONVERSATION_SEARCH_EXCLUDE_PROJECTS` | Comma-separated list of projects to exclude |
 | `CONVERSATION_MEMORY_DEBUG` | Set to `true` for debug logging |
 | `TEST_ARCHIVE_DIR` | Override archive directory (testing only) |
 | `TEST_DB_PATH` | Test database path (testing only) |
@@ -164,7 +157,7 @@ tail -f ~/.config/memmem/logs/$(date +%Y-%m-%d).log
 
 - Verify config.json exists at `~/.config/memmem/config.json`
 - Check config.json has valid JSON syntax
-- Ensure `provider` and `apiKey` fields are present
+- Ensure `provider` is present with either `apiKey` or a non-empty `providers[]` list
 - Re-run `memmem sync` after configuring the provider so extraction can create memory rows
 
 ## Example Configurations
@@ -173,7 +166,6 @@ See [examples/](./examples/) directory for complete working examples:
 
 - `examples/gemini-config.json` - Gemini configuration
 - `examples/zai-config.json` - Z.AI configuration
-- `examples/exclude.txt` - Project exclusion file
 
 ## Further Reading
 
