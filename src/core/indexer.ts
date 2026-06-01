@@ -55,22 +55,36 @@ function makeDedupeKey(kind: string, text: string): string {
   return hashText(normalized);
 }
 
+function deleteMemoryRecordsByIds(db: Database, ids: number[]): void {
+  if (ids.length === 0) {
+    return;
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  db.query(`DELETE FROM vec_memory_records WHERE rowid IN (${placeholders})`).run(...ids);
+  db.query(`DELETE FROM memory_records WHERE id IN (${placeholders})`).run(...ids);
+}
+
 function deleteMemoryIndexForSpan(db: Database, span: TranscriptSpan): void {
   const rows = db.query(`
     SELECT id FROM memory_records
     WHERE archive_path = ? AND line_start = ? AND line_end = ?
   `).all(span.archivePath, span.lineStart, span.lineEnd) as Array<{ id: number }>;
-  const ids = rows.map(row => row.id);
+  deleteMemoryRecordsByIds(db, rows.map(row => row.id));
+}
 
-  if (ids.length > 0) {
-    const placeholders = ids.map(() => '?').join(',');
-    db.query(`DELETE FROM vec_memory_records WHERE rowid IN (${placeholders})`).run(...ids);
-  }
+function pruneStaleMemoryIndexForArchivePath(db: Database, archivePath: string, spans: TranscriptSpan[]): void {
+  const currentSpanKeys = new Set(spans.map(span => `${span.lineStart}:${span.lineEnd}`));
+  const rows = db.query(`
+    SELECT id, line_start AS lineStart, line_end AS lineEnd
+    FROM memory_records
+    WHERE archive_path = ?
+  `).all(archivePath) as Array<{ id: number; lineStart: number; lineEnd: number }>;
+  const staleIds = rows
+    .filter(row => !currentSpanKeys.has(`${row.lineStart}:${row.lineEnd}`))
+    .map(row => row.id);
 
-  db.query(`
-    DELETE FROM memory_records
-    WHERE archive_path = ? AND line_start = ? AND line_end = ?
-  `).run(span.archivePath, span.lineStart, span.lineEnd);
+  deleteMemoryRecordsByIds(db, staleIds);
 }
 
 export async function reindexArchiveFile(
@@ -94,6 +108,8 @@ export async function reindexArchiveFile(
     spansErrored: 0,
     memoryRecordsIndexed: 0,
   };
+
+  pruneStaleMemoryIndexForArchivePath(db, archivePath, spans);
 
   if (!provider) {
     result.spansSkipped = spans.length;
