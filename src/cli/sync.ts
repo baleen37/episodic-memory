@@ -43,8 +43,16 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
       const excludedSourceDirs: string[] = [];
       for (const sourcePath of findJsonlFiles(root, adapter, excludedSourceDirs)) {
         const archivePath = path.join(archiveDir, adapter.kind, path.relative(root, sourcePath));
-        if (copyIfNewer(sourcePath, archivePath)) {
-          result.copied++;
+        try {
+          if (copyIfNewer(sourcePath, archivePath)) {
+            result.copied++;
+          }
+        } catch (error) {
+          log.warn('Failed to copy transcript; continuing sync.', {
+            sourcePath,
+            archivePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
         if (existsSync(archivePath)) {
           archiveFiles.set(archivePath, { adapter, archivePath });

@@ -158,6 +158,40 @@ describe('syncTranscripts', () => {
     expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'session.jsonl'))).toBe(true);
   });
 
+  test('continues syncing other archives when a source transcript copy fails', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const failingSourceDir = join(claudeDir, 'projects', 'blocked');
+    const otherSourceDir = join(claudeDir, 'projects', 'proj');
+    const failingSourcePath = join(failingSourceDir, 'session.jsonl');
+    const existingSourcePath = join(otherSourceDir, 'existing.jsonl');
+    const otherSourcePath = join(otherSourceDir, 'other.jsonl');
+    const existingArchivePath = join(archiveDir, 'claude-projects', 'proj', 'existing.jsonl');
+    const blockedArchivePath = join(archiveDir, 'claude-projects', 'blocked');
+    mkdirSync(failingSourceDir, { recursive: true });
+    mkdirSync(otherSourceDir, { recursive: true });
+    writeClaudeTranscript(failingSourcePath, 'Failing question', 'Failing answer');
+    writeClaudeTranscript(existingSourcePath, 'Existing question', 'Existing answer');
+    writeClaudeTranscript(otherSourcePath, 'Other question', 'Other answer');
+    mkdirSync(join(archiveDir, 'claude-projects', 'proj'), { recursive: true });
+    writeClaudeTranscript(existingArchivePath, 'Archived question', 'Archived answer');
+    writeFileSync(blockedArchivePath, 'not a directory');
+    const future = new Date(Date.now() + 1000);
+    utimesSync(existingArchivePath, future, future);
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+
+    const result = await syncTranscripts(db);
+
+    expect(result.copied).toBe(1);
+    expect(result.archived).toBe(2);
+    expect(result.spansConsidered).toBe(2);
+    expect(result.spansSkipped).toBe(2);
+    expect(existsSync(join(archiveDir, 'claude-projects', 'blocked', 'session.jsonl'))).toBe(false);
+    expect(existsSync(existingArchivePath)).toBe(true);
+    expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'other.jsonl'))).toBe(true);
+  });
+
   test('does not copy or index transcripts below a .no-memmem directory', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const ignoredDir = join(claudeDir, 'projects', 'ignored');
