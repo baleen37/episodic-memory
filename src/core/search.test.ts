@@ -244,6 +244,31 @@ describe('memory search', () => {
     expect(results.map(result => result.id)).toEqual([codexId]);
   });
 
+  test('returns active vector result when closer superseded vector fills top k', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    const supersededId = insertMemoryRecord(db, memory({
+      archivePath: '/archive/claude-projects/superseded-vector.jsonl',
+      text: 'Superseded semantic only memory.',
+      status: 'superseded',
+      dedupeKey: 'superseded-vector-top-k',
+    }));
+    insertMemoryRecordVector(db, supersededId, Array.from({ length: 384 }, () => 0.1));
+
+    const activeId = insertMemoryRecord(db, memory({
+      archivePath: '/archive/claude-projects/active-vector.jsonl',
+      text: 'Active semantic only memory.',
+      dedupeKey: 'active-vector-after-superseded',
+    }));
+    insertMemoryRecordVector(db, activeId, Array.from({ length: 384 }, () => 0.2));
+
+    const results = await search('vector-only-query', { db, limit: 1 });
+
+    expect(results.map(result => result.id)).toEqual([activeId]);
+  });
+
   test('preserves null project and observedAt without legacy title or snippet', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();
