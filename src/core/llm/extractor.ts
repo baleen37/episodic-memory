@@ -176,7 +176,10 @@ export async function extractMemoryRecordsFromSpan(
     const prompt = buildMemoryExtractPrompt(span, options.maxRecords);
     const result = await provider.complete(prompt, {
       systemPrompt: MEMORY_EXTRACT_SYSTEM_PROMPT,
-      maxTokens: options.maxTokens ?? 1500,
+      // Thinking models (Gemma 4) spend most output tokens on reasoning before
+      // emitting the JSON answer; 26b can use ~2k thought tokens alone, so the
+      // budget must comfortably exceed thought + answer to avoid truncation.
+      maxTokens: options.maxTokens ?? 4000,
     });
     const records = parseMemoryExtractResponse(result.text, options.maxRecords);
     const duration = Date.now() - startTime;

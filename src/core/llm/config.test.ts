@@ -117,6 +117,23 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('when config uses providers[] without a top-level apiKey', () => {
+    it('should load successfully', () => {
+      const validConfig = {
+        provider: 'gemini' as const,
+        providers: [
+          { apiKey: 'key1', model: 'gemma-4-31b-it' },
+          { apiKey: 'key2', model: 'gemma-4-26b-a4b-it' },
+        ],
+      };
+      mockExistsSyncReturnValue = true;
+      mockReadFileSyncReturnValue = JSON.stringify(validConfig);
+
+      const config = loadConfig();
+      expect(config).toMatchObject(validConfig);
+    });
+  });
+
   describe('when config file exists but is invalid', () => {
     it('should return null and log warning for invalid JSON', () => {
       mockExistsSyncReturnValue = true;
@@ -237,6 +254,50 @@ describe('createProvider', () => {
       expect(provider).toBeDefined();
       expect(typeof provider.complete).toBe('function');
       expect(provider.complete.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('providers array (round-robin)', () => {
+    it('should create a rotating provider when providers[] is set', async () => {
+      const config: LLMConfig = {
+        provider: 'gemini',
+        providers: [
+          { apiKey: 'key1', model: 'gemma-4-31b-it' },
+          { apiKey: 'key1', model: 'gemma-4-26b-a4b-it' },
+          { apiKey: 'key2', model: 'gemma-4-31b-it' },
+        ],
+      };
+
+      const provider = await createProvider(config);
+
+      expect(provider).toBeDefined();
+      expect(typeof provider.complete).toBe('function');
+      // RoundRobinProvider exposes the same LLMProvider surface
+      expect(provider.constructor.name).toBe('RoundRobinProvider');
+    });
+
+    it('should accept an optional email on each provider entry', async () => {
+      const config: LLMConfig = {
+        provider: 'gemini',
+        providers: [
+          { email: 'baleentest001@gmail.com', apiKey: 'key1', model: 'gemma-4-31b-it' },
+          { email: 'baleentest001@gmail.com', apiKey: 'key2', model: 'gemma-4-26b-a4b-it' },
+        ],
+      };
+
+      const provider = await createProvider(config);
+
+      expect(provider.constructor.name).toBe('RoundRobinProvider');
+      expect(config.providers?.[0].email).toBe('baleentest001@gmail.com');
+    });
+
+    it('should throw when providers[] is empty', async () => {
+      const config: LLMConfig = {
+        provider: 'gemini',
+        providers: [],
+      };
+
+      await expect(createProvider(config)).rejects.toThrow();
     });
   });
 

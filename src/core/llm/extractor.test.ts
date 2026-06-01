@@ -106,7 +106,7 @@ describe('memory extractor', () => {
       expect.any(String),
       expect.objectContaining({
         systemPrompt: expect.stringContaining('durable memory records'),
-        maxTokens: 1500,
+        maxTokens: 4000,
       }),
     );
     expect(records).toEqual([

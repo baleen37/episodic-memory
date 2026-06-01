@@ -8,14 +8,41 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { GeminiProvider } from './gemini-provider.js';
 import type { LLMOptions } from './types.js';
 
-// Helper function to create a mock successful response
+// Helper function to create a mock successful response.
+// Mirrors the real SDK shape: a single answer part is exposed both via
+// candidates[0].content.parts and the aggregated text() accessor.
 const mockSuccessResponse = (text = 'Test response', promptTokens = 10, outputTokens = 5) => ({
   response: {
     text: () => text,
+    candidates: [{ content: { parts: [{ text }] } }],
     usageMetadata: {
       promptTokenCount: promptTokens,
       candidatesTokenCount: outputTokens,
       totalTokenCount: promptTokens + outputTokens,
+    },
+  },
+});
+
+// Helper for thinking models (Gemma 4): the response carries a thought part
+// followed by the real answer part. The SDK's text() concatenates both, but
+// content.parts distinguishes them via the `thought` flag.
+const mockThinkingResponse = (thoughtText: string, answerText: string) => ({
+  response: {
+    text: () => thoughtText + answerText,
+    candidates: [
+      {
+        content: {
+          parts: [
+            { thought: true, text: thoughtText },
+            { thought: false, text: answerText },
+          ],
+        },
+      },
+    ],
+    usageMetadata: {
+      promptTokenCount: 10,
+      candidatesTokenCount: 20,
+      totalTokenCount: 30,
     },
   },
 });
@@ -99,6 +126,23 @@ describe('GeminiProvider', () => {
 
       const result = await provider.complete('test prompt', options);
       expect(result.text).toBeDefined();
+    });
+  });
+
+  describe('thinking models (Gemma 4)', () => {
+    it('should exclude thought parts and return only the answer text', async () => {
+      const generateContent = mock(async () =>
+        mockThinkingResponse(
+          '*   Goal: extract records\n    *   Output JSON only.',
+          '[{"kind":"fact","text":"x"}]'
+        )
+      );
+      mockGetGenerativeModel.mockReturnValueOnce({ generateContent });
+
+      const provider = new GeminiProvider('test-api-key', 'gemma-4-31b-it');
+      const result = await provider.complete('extract');
+
+      expect(result.text).toBe('[{"kind":"fact","text":"x"}]');
     });
   });
 
