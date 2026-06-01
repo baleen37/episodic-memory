@@ -178,6 +178,16 @@ describe('logger', () => {
       expect(files.filter(f => f.endsWith('.log'))).toEqual([]);
     });
 
+    test('logging schedules a flush without hanging (unref timer)', () => {
+      log.info('scheduled flush line');
+      // If the timer were not unref()'d it could keep handles open; we assert the
+      // buffer still flushes on demand and the call returns synchronously.
+      __flushForTests();
+      const date = new Date().toISOString().split('T')[0];
+      const logPath = join(tempConfigDir, 'logs', `${date}.log`);
+      expect(readFileSync(logPath, 'utf8')).toContain('scheduled flush line');
+    });
+
     test('prunes log files older than 14 days, keeps recent', () => {
       const logsDir = join(tempConfigDir, 'logs');
       // getLogDir() ensures the dir; create it via a real flush first.

@@ -28,6 +28,19 @@ function getThreshold(): number {
 const FLUSH_LINE_THRESHOLD = 64;
 let buffer: string[] = [];
 
+const FLUSH_INTERVAL_MS = 1000;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleFlush(): void {
+  if (flushTimer !== null) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushLogBuffer();
+  }, FLUSH_INTERVAL_MS);
+  // Do not keep a finishing CLI process alive just for a pending flush.
+  flushTimer.unref?.();
+}
+
 const RETENTION_DAYS = 14;
 let retentionDone = false;
 
@@ -75,7 +88,13 @@ function flushLogBuffer(): void {
 function bufferLine(line: string): void {
   buffer.push(line);
   if (buffer.length >= FLUSH_LINE_THRESHOLD) {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
     flushLogBuffer();
+  } else {
+    scheduleFlush();
   }
 }
 
@@ -95,6 +114,28 @@ export const log = {
   info:  (msg: string, meta?: Record<string, unknown>) => emit('info',  msg, meta),
   debug: (msg: string, meta?: Record<string, unknown>) => emit('debug', msg, meta),
 };
+
+// ---------------------------------------------------------------------------
+// Exit hooks — flush the buffer so the tail is always written on process exit.
+// ---------------------------------------------------------------------------
+
+let exitHooksRegistered = false;
+
+function registerExitHooks(): void {
+  if (exitHooksRegistered) return;
+  exitHooksRegistered = true;
+  process.on('exit', () => flushLogBuffer());
+  process.on('SIGINT', () => {
+    flushLogBuffer();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    flushLogBuffer();
+    process.exit(143);
+  });
+}
+
+registerExitHooks();
 
 // ---------------------------------------------------------------------------
 // Legacy shims — keep for existing callers in src/core/llm/
@@ -128,6 +169,10 @@ export function logDebug(message: string, data?: Record<string, unknown>): void 
 
 /** Test-only: synchronously flush the file buffer. */
 export function __flushForTests(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
   flushLogBuffer();
 }
 
