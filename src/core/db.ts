@@ -15,33 +15,39 @@ if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV 
 }
 
 export const CURRENT_EMBEDDING_VERSION = 2;
+export const CURRENT_EXTRACTION_VERSION = 1;
 
-export interface ExchangeInsert {
+export type MemoryRecordKind = 'fact' | 'event';
+export type MemoryRecordStatus = 'active' | 'superseded';
+export type ExtractionStatus = 'done' | 'empty' | 'errored';
+
+export interface MemoryRecordInsert {
+  kind: MemoryRecordKind;
+  text: string;
+  sourceKind: string;
   archivePath: string;
   lineStart: number;
   lineEnd: number;
-  sourceKind: string;
-  sessionId: string | null;
+  observedAt: number | null;
   project: string | null;
-  cwd: string | null;
-  gitBranch: string | null;
-  model: string | null;
-  provider: string | null;
-  metadataJson: string | null;
-  timestamp: number | null;
-  userText: string;
-  assistantText: string;
-  embeddingText: string;
-  embeddingVersion: number;
+  confidence?: number;
+  status?: MemoryRecordStatus;
+  supersedesId?: number | null;
+  dedupeKey: string;
+  extractionVersion: number;
+  embeddingVersion?: number | null;
 }
 
-export interface ToolCallInsert {
-  exchangeId: number;
-  toolName: string | null;
-  callId: string | null;
-  input: string | null;
-  output: string | null;
-  status: string | null;
+export interface ExtractionStateInsert {
+  sourceKind: string;
+  archivePath: string;
+  lineStart: number;
+  lineEnd: number;
+  sourceHash: string;
+  extractionVersion: number;
+  status: ExtractionStatus;
+  errorMessage?: string | null;
+  retryAfter?: number | null;
 }
 
 export interface PendingEvent {
@@ -114,156 +120,191 @@ function createDatabase(wipe: boolean): Database {
 
 function createSchema(db: Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS exchanges (
+    CREATE TABLE IF NOT EXISTS memory_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK (kind IN ('fact', 'event')),
+      text TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
       archive_path TEXT NOT NULL,
       line_start INTEGER NOT NULL,
       line_end INTEGER NOT NULL,
-      source_kind TEXT NOT NULL,
-      session_id TEXT,
+      observed_at INTEGER,
       project TEXT,
-      cwd TEXT,
-      git_branch TEXT,
-      model TEXT,
-      provider TEXT,
-      metadata_json TEXT,
-      timestamp INTEGER,
-      user_text TEXT NOT NULL,
-      assistant_text TEXT NOT NULL,
-      embedding_text TEXT NOT NULL,
-      embedding_version INTEGER NOT NULL DEFAULT 0,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
+      supersedes_id INTEGER,
+      dedupe_key TEXT NOT NULL,
+      extraction_version INTEGER NOT NULL,
+      embedding_version INTEGER,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(archive_path, line_start, line_end)
+      updated_at INTEGER NOT NULL
     )
   `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_archive_path ON exchanges(archive_path)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_source_kind ON exchanges(source_kind)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_exchanges_timestamp ON exchanges(timestamp DESC)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_kind ON memory_records(kind)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_archive_path ON memory_records(archive_path)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_observed_at ON memory_records(observed_at)');
 
   db.exec(`
-    CREATE TABLE IF NOT EXISTS tool_calls (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      exchange_id INTEGER NOT NULL REFERENCES exchanges(id) ON DELETE CASCADE,
-      tool_name TEXT,
-      call_id TEXT,
-      input TEXT,
-      output TEXT,
-      status TEXT,
-      created_at INTEGER NOT NULL
-    )
-  `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_exchange_id ON tool_calls(exchange_id)');
-
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vec_exchanges USING vec0(
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_records USING vec0(
       embedding float[${EMBEDDING_DIM}]
     )
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS extraction_state (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_kind TEXT NOT NULL,
+      archive_path TEXT NOT NULL,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER NOT NULL,
+      source_hash TEXT NOT NULL,
+      extraction_version INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
+      error_message TEXT,
+      retry_after INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)');
 }
 
-export function insertExchange(db: Database, exchange: ExchangeInsert): number {
+export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): number {
   const now = Date.now();
   const result = db.query(`
-    INSERT INTO exchanges (
-      archive_path, line_start, line_end, source_kind, session_id, project, cwd,
-      git_branch, model, provider, metadata_json, timestamp, user_text,
-      assistant_text, embedding_text, embedding_version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memory_records (
+      kind, text, source_kind, archive_path, line_start, line_end,
+      observed_at, project, confidence, status, supersedes_id,
+      dedupe_key, extraction_version, embedding_version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(dedupe_key) DO UPDATE SET
+      kind = excluded.kind,
+      text = excluded.text,
+      source_kind = excluded.source_kind,
+      archive_path = excluded.archive_path,
+      line_start = excluded.line_start,
+      line_end = excluded.line_end,
+      observed_at = excluded.observed_at,
+      project = excluded.project,
+      confidence = excluded.confidence,
+      status = excluded.status,
+      supersedes_id = excluded.supersedes_id,
+      extraction_version = excluded.extraction_version,
+      embedding_version = excluded.embedding_version,
+      updated_at = excluded.updated_at
   `).run(
-    exchange.archivePath,
-    exchange.lineStart,
-    exchange.lineEnd,
-    exchange.sourceKind,
-    exchange.sessionId,
-    exchange.project,
-    exchange.cwd,
-    exchange.gitBranch,
-    exchange.model,
-    exchange.provider,
-    exchange.metadataJson,
-    exchange.timestamp,
-    exchange.userText,
-    exchange.assistantText,
-    exchange.embeddingText,
-    exchange.embeddingVersion,
+    record.kind,
+    record.text,
+    record.sourceKind,
+    record.archivePath,
+    record.lineStart,
+    record.lineEnd,
+    record.observedAt,
+    record.project,
+    record.confidence ?? 1.0,
+    record.status ?? 'active',
+    record.supersedesId ?? null,
+    record.dedupeKey,
+    record.extractionVersion,
+    record.embeddingVersion ?? null,
     now,
-    now
+    now,
   );
 
-  return result.lastInsertRowid as number;
+  if (result.lastInsertRowid) {
+    return result.lastInsertRowid as number;
+  }
+
+  const row = db.query('SELECT id FROM memory_records WHERE dedupe_key = ?').get(record.dedupeKey) as { id: number } | null;
+  if (!row) throw new Error(`Failed to resolve memory record for dedupe key: ${record.dedupeKey}`);
+  return row.id;
 }
 
-export function insertToolCall(db: Database, toolCall: ToolCallInsert): number {
-  const result = db.query(`
-    INSERT INTO tool_calls (exchange_id, tool_name, call_id, input, output, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    toolCall.exchangeId,
-    toolCall.toolName,
-    toolCall.callId,
-    toolCall.input,
-    toolCall.output,
-    toolCall.status,
-    Date.now()
-  );
-
-  return result.lastInsertRowid as number;
+export function insertMemoryRecordVector(db: Database, memoryRecordId: number, embedding: number[]): void {
+  db.query('INSERT OR REPLACE INTO vec_memory_records(rowid, embedding) VALUES (?, ?)')
+    .run(memoryRecordId, Buffer.from(new Float32Array(embedding).buffer));
 }
 
-export function insertExchangeVector(db: Database, exchangeId: number, embedding: number[]): void {
-  db.query('INSERT OR REPLACE INTO vec_exchanges(rowid, embedding) VALUES (?, ?)')
-    .run(exchangeId, Buffer.from(new Float32Array(embedding).buffer));
-}
-
-export function deleteExchangeIndexForArchivePath(db: Database, archivePath: string): void {
-  const rows = db.query('SELECT id FROM exchanges WHERE archive_path = ?').all(archivePath) as Array<{ id: number }>;
+export function deleteMemoryIndexForArchivePath(db: Database, archivePath: string): void {
+  const rows = db.query('SELECT id FROM memory_records WHERE archive_path = ?').all(archivePath) as Array<{ id: number }>;
   const ids = rows.map(row => row.id);
 
   if (ids.length > 0) {
     const placeholders = ids.map(() => '?').join(',');
-    db.query(`DELETE FROM vec_exchanges WHERE rowid IN (${placeholders})`).run(...ids);
+    db.query(`DELETE FROM vec_memory_records WHERE rowid IN (${placeholders})`).run(...ids);
   }
 
-  db.query('DELETE FROM exchanges WHERE archive_path = ?').run(archivePath);
+  db.query('DELETE FROM memory_records WHERE archive_path = ?').run(archivePath);
+  db.query('DELETE FROM extraction_state WHERE archive_path = ?').run(archivePath);
 }
 
-export function deleteExchangeIndexForArchivePathPrefix(db: Database, archivePathPrefix: string): void {
+export function deleteMemoryIndexForArchivePathPrefix(db: Database, archivePathPrefix: string): void {
   const childPrefix = `${archivePathPrefix}${path.sep}%`;
-  const rows = db.query('SELECT id FROM exchanges WHERE archive_path = ? OR archive_path LIKE ?')
+  const rows = db.query('SELECT id FROM memory_records WHERE archive_path = ? OR archive_path LIKE ?')
     .all(archivePathPrefix, childPrefix) as Array<{ id: number }>;
   const ids = rows.map(row => row.id);
 
   if (ids.length > 0) {
     const placeholders = ids.map(() => '?').join(',');
-    db.query(`DELETE FROM vec_exchanges WHERE rowid IN (${placeholders})`).run(...ids);
+    db.query(`DELETE FROM vec_memory_records WHERE rowid IN (${placeholders})`).run(...ids);
   }
 
-  db.query('DELETE FROM exchanges WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
+  db.query('DELETE FROM memory_records WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
+  db.query('DELETE FROM extraction_state WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
 }
 
-export function getArchivePathsNeedingReindex(db: Database, archivePaths: string[]): string[] {
-  const paths = new Set<string>();
-  const stmt = db.query(`
-    SELECT COUNT(exchanges.id) AS count,
-           SUM(CASE WHEN exchanges.embedding_version != ? OR vec_exchanges.rowid IS NULL THEN 1 ELSE 0 END) AS staleCount
-    FROM exchanges
-    LEFT JOIN vec_exchanges ON vec_exchanges.rowid = exchanges.id
-    WHERE exchanges.archive_path = ?
-  `);
+export function upsertExtractionState(db: Database, state: ExtractionStateInsert): void {
+  const now = Date.now();
+  db.query(`
+    INSERT INTO extraction_state (
+      source_kind, archive_path, line_start, line_end, source_hash,
+      extraction_version, status, error_message, retry_after, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(archive_path, line_start, line_end, source_hash, extraction_version)
+    DO UPDATE SET
+      source_kind = excluded.source_kind,
+      status = excluded.status,
+      error_message = excluded.error_message,
+      retry_after = excluded.retry_after,
+      updated_at = excluded.updated_at
+  `).run(
+    state.sourceKind,
+    state.archivePath,
+    state.lineStart,
+    state.lineEnd,
+    state.sourceHash,
+    state.extractionVersion,
+    state.status,
+    state.errorMessage ?? null,
+    state.retryAfter ?? null,
+    now,
+    now,
+  );
+}
 
-  for (const archivePath of archivePaths) {
-    const row = stmt.get(CURRENT_EMBEDDING_VERSION, archivePath) as { count: number; staleCount: number | null };
-    if (row.count === 0 || (row.staleCount ?? 0) > 0) {
-      paths.add(archivePath);
-    }
-  }
-
-  return [...paths];
+export function hasCompletedExtractionState(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): boolean {
+  const row = db.query(`
+    SELECT status FROM extraction_state
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+      AND source_hash = ? AND extraction_version = ?
+  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion) as { status: string } | null;
+  return row?.status === 'done' || row?.status === 'empty';
 }
 
 function throwObservationSchemaRemoved(): never {
-  throw new Error('Observation schema has been removed; use exchange schema APIs instead');
+  throw new Error('Observation schema has been removed; use memory record schema APIs instead');
 }
 
 export function insertPendingEvent(db: Database, event: PendingEvent): number {

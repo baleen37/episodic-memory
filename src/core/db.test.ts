@@ -1,133 +1,172 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { initDatabase, insertExchange, insertToolCall, deleteExchangeIndexForArchivePath, getArchivePathsNeedingReindex, CURRENT_EMBEDDING_VERSION, insertPendingEvent, insertObservation, createObservation, getAllPendingEvents, getRecentObservations, searchObservations, getObservationById, getObservation, getObservationsByIds } from './db.js';
+import {
+  CURRENT_EMBEDDING_VERSION,
+  CURRENT_EXTRACTION_VERSION,
+  createObservation,
+  deleteMemoryIndexForArchivePath,
+  getAllPendingEvents,
+  getObservation,
+  getObservationById,
+  getObservationsByIds,
+  getRecentObservations,
+  initDatabase,
+  insertMemoryRecord,
+  insertMemoryRecordVector,
+  insertObservation,
+  insertPendingEvent,
+  searchObservations,
+  upsertExtractionState,
+  hasCompletedExtractionState,
+} from './db.js';
 
 let db: ReturnType<typeof initDatabase> | null = null;
+
+function openTestDatabase(): NonNullable<typeof db> {
+  process.env.TEST_DB_PATH = ':memory:';
+  db = initDatabase();
+  return db;
+}
 
 afterEach(() => {
   db?.close();
   db = null;
 });
 
-describe('exchange database schema', () => {
-  test('creates exchange schema tables', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+describe('memory record database schema', () => {
+  test('creates memory record tables and indexes', () => {
+    const db = openTestDatabase();
 
-    const tables = db.query("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual')").all() as Array<{ name: string }>;
-    const names = tables.map(t => t.name);
+    const rows = db.query(`
+      SELECT name FROM sqlite_master
+      WHERE type IN ('table', 'index', 'virtual')
+      ORDER BY name
+    `).all() as Array<{ name: string }>;
+    const names = rows.map(row => row.name);
 
-    expect(names).toContain('exchanges');
-    expect(names).toContain('tool_calls');
-    expect(names).toContain('vec_exchanges');
+    expect(names).toContain('memory_records');
+    expect(names).toContain('vec_memory_records');
+    expect(names).toContain('extraction_state');
+    expect(names).toContain('idx_memory_records_dedupe_key');
+    expect(names).toContain('idx_memory_records_status');
+    expect(names).toContain('idx_memory_records_archive_path');
+    expect(names).toContain('idx_extraction_state_archive_path');
+    expect(names).toContain('idx_extraction_state_status');
   });
 
-  test('creates tool call exchange id index', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+  test('upserts memory records by dedupe key and stores vectors', () => {
+    const db = openTestDatabase();
 
-    const indexes = db.query("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>;
-    const names = indexes.map(index => index.name);
-
-    expect(names).toContain('idx_tool_calls_exchange_id');
-  });
-
-  test('inserts exchange and cascades tool calls on delete', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-
-    const exchangeId = insertExchange(db, {
-      archivePath: '/tmp/archive/claude-projects/session.jsonl',
-      lineStart: 1,
-      lineEnd: 2,
+    const id = insertMemoryRecord(db, {
+      kind: 'fact',
+      text: 'memmem stores fact and event memory records.',
       sourceKind: 'claude-projects',
-      sessionId: 'session-1',
-      project: 'project-a',
-      cwd: '/tmp/project-a',
-      gitBranch: 'main',
-      model: 'claude-sonnet',
-      provider: 'anthropic',
-      metadataJson: JSON.stringify({ version: '1.0.0' }),
-      timestamp: 1710000000000,
-      userText: 'How should we index transcripts?',
-      assistantText: 'Use exchange rows.',
-      embeddingText: 'How should we index transcripts?\nUse exchange rows.',
-      embeddingVersion: CURRENT_EMBEDDING_VERSION,
-    });
-
-    insertToolCall(db, {
-      exchangeId,
-      toolName: 'Read',
-      callId: 'toolu_1',
-      input: '{"file_path":"src/core/db.ts"}',
-      output: 'file content',
-      status: 'success',
-    });
-
-    deleteExchangeIndexForArchivePath(db, '/tmp/archive/claude-projects/session.jsonl');
-
-    const toolCount = db.query('SELECT COUNT(*) AS count FROM tool_calls').get() as { count: number };
-    expect(toolCount.count).toBe(0);
-  });
-
-  test('finds archive paths missing exchange rows or stale embeddings', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-
-    insertExchange(db, {
-      archivePath: '/tmp/archive/codex-sessions/rollout.jsonl',
+      archivePath: '/archive/a.jsonl',
       lineStart: 1,
       lineEnd: 3,
-      sourceKind: 'codex-sessions',
-      sessionId: 'codex-session',
-      project: 'project-b',
-      cwd: '/tmp/project-b',
-      gitBranch: null,
-      model: 'gpt-5.1',
-      provider: 'openai',
-      metadataJson: null,
-      timestamp: 1710000000000,
-      userText: 'Run tests',
-      assistantText: 'Tests passed',
-      embeddingText: 'Run tests\nTests passed',
-      embeddingVersion: CURRENT_EMBEDDING_VERSION - 1,
-    });
-
-    const paths = getArchivePathsNeedingReindex(db, ['/tmp/archive/codex-sessions/rollout.jsonl', '/tmp/archive/claude-projects/new.jsonl']);
-    expect(paths.sort()).toEqual(['/tmp/archive/claude-projects/new.jsonl', '/tmp/archive/codex-sessions/rollout.jsonl']);
-  });
-
-  test('finds archive paths with current exchange rows but missing vector rows', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-
-    insertExchange(db, {
-      archivePath: '/tmp/archive/claude-projects/no-vector.jsonl',
-      lineStart: 1,
-      lineEnd: 2,
-      sourceKind: 'claude-projects',
-      sessionId: 'session-without-vector',
-      project: 'project-c',
-      cwd: '/tmp/project-c',
-      gitBranch: 'main',
-      model: 'claude-sonnet',
-      provider: 'anthropic',
-      metadataJson: null,
-      timestamp: 1710000000000,
-      userText: 'Index this',
-      assistantText: 'Missing vector row',
-      embeddingText: 'Index this\nMissing vector row',
+      observedAt: 1780272000000,
+      project: 'memmem',
+      confidence: 0.9,
+      dedupeKey: 'fact:memmem-memory-records',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
       embeddingVersion: CURRENT_EMBEDDING_VERSION,
     });
 
-    const paths = getArchivePathsNeedingReindex(db, ['/tmp/archive/claude-projects/no-vector.jsonl']);
-    expect(paths).toEqual(['/tmp/archive/claude-projects/no-vector.jsonl']);
+    insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.01));
+
+    const memory = db.query('SELECT id, kind, text FROM memory_records WHERE dedupe_key = ?')
+      .get('fact:memmem-memory-records') as { id: number; kind: string; text: string };
+    expect(memory.id).toBe(id);
+    expect(memory.kind).toBe('fact');
+
+    const vector = db.query('SELECT rowid FROM vec_memory_records WHERE rowid = ?').get(id) as { rowid: number } | null;
+    expect(vector?.rowid).toBe(id);
+
+    const sameId = insertMemoryRecord(db, {
+      kind: 'fact',
+      text: 'memmem stores compact fact and event memory records.',
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/a.jsonl',
+      lineStart: 1,
+      lineEnd: 3,
+      observedAt: 1780272000000,
+      project: 'memmem',
+      dedupeKey: 'fact:memmem-memory-records',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+    });
+    expect(sameId).toBe(id);
+
+    const updated = db.query('SELECT text FROM memory_records WHERE id = ?').get(id) as { text: string };
+    expect(updated.text).toBe('memmem stores compact fact and event memory records.');
+  });
+
+  test('upserts extraction state and detects completed unchanged spans', () => {
+    const db = openTestDatabase();
+
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/state.jsonl',
+      lineStart: 4,
+      lineEnd: 8,
+      sourceHash: 'hash-1',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      status: 'errored',
+      errorMessage: 'temporary failure',
+      retryAfter: 1780272000000,
+    });
+    expect(hasCompletedExtractionState(db, '/archive/state.jsonl', 4, 8, 'hash-1', CURRENT_EXTRACTION_VERSION)).toBe(false);
+
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/state.jsonl',
+      lineStart: 4,
+      lineEnd: 8,
+      sourceHash: 'hash-1',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      status: 'done',
+    });
+
+    expect(hasCompletedExtractionState(db, '/archive/state.jsonl', 4, 8, 'hash-1', CURRENT_EXTRACTION_VERSION)).toBe(true);
+    const count = db.query('SELECT COUNT(*) AS count FROM extraction_state').get() as { count: number };
+    expect(count.count).toBe(1);
+  });
+
+  test('deletes memory records, vectors, and extraction state for an archive path', () => {
+    const db = openTestDatabase();
+
+    const id = insertMemoryRecord(db, {
+      kind: 'event',
+      text: 'The user approved event fact memory architecture.',
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/b.jsonl',
+      lineStart: 10,
+      lineEnd: 12,
+      observedAt: 1780272000000,
+      project: null,
+      dedupeKey: 'event:approval',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+    });
+    insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.02));
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/b.jsonl',
+      lineStart: 10,
+      lineEnd: 12,
+      sourceHash: 'abc',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      status: 'done',
+    });
+
+    deleteMemoryIndexForArchivePath(db, '/archive/b.jsonl');
+
+    expect(db.query('SELECT COUNT(*) AS count FROM memory_records').get()).toEqual({ count: 0 });
+    expect(db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get()).toEqual({ count: 0 });
+    expect(db.query('SELECT COUNT(*) AS count FROM extraction_state').get()).toEqual({ count: 0 });
   });
 
   test('legacy observation schema exports fail with explicit removed-schema errors', async () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+    const db = openTestDatabase();
 
-    expect(() => insertPendingEvent(db!, {
+    expect(() => insertPendingEvent(db, {
       sessionId: 'session-1',
       project: 'project-a',
       toolName: 'Read',
@@ -135,19 +174,19 @@ describe('exchange database schema', () => {
       timestamp: 1710000000000,
       createdAt: 1710000000000,
     })).toThrow('Observation schema has been removed');
-    expect(() => insertObservation(db!, {
+    expect(() => insertObservation(db, {
       title: 'Legacy observation',
       content: 'Legacy content',
       project: 'project-a',
       timestamp: 1710000000000,
       createdAt: 1710000000000,
     })).toThrow('Observation schema has been removed');
-    await expect(createObservation(db!, 'Legacy observation', 'Legacy content', 'project-a')).rejects.toThrow('Observation schema has been removed');
-    expect(() => getAllPendingEvents(db!, 'session-1')).toThrow('Observation schema has been removed');
-    expect(() => getRecentObservations(db!)).toThrow('Observation schema has been removed');
-    expect(() => searchObservations(db!)).toThrow('Observation schema has been removed');
-    expect(() => getObservationById(db!, 1)).toThrow('Observation schema has been removed');
-    expect(() => getObservation(db!, 1)).toThrow('Observation schema has been removed');
-    expect(() => getObservationsByIds(db!, [1])).toThrow('Observation schema has been removed');
+    await expect(createObservation(db, 'Legacy observation', 'Legacy content', 'project-a')).rejects.toThrow('Observation schema has been removed');
+    expect(() => getAllPendingEvents(db, 'session-1')).toThrow('Observation schema has been removed');
+    expect(() => getRecentObservations(db)).toThrow('Observation schema has been removed');
+    expect(() => searchObservations(db)).toThrow('Observation schema has been removed');
+    expect(() => getObservationById(db, 1)).toThrow('Observation schema has been removed');
+    expect(() => getObservation(db, 1)).toThrow('Observation schema has been removed');
+    expect(() => getObservationsByIds(db, [1])).toThrow('Observation schema has been removed');
   });
 });
