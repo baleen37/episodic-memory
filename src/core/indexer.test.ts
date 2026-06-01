@@ -238,6 +238,59 @@ describe('reindexArchiveFile', () => {
     expect(rows).toEqual([{ lineStart: 1 }, { lineStart: 2 }]);
   });
 
+  test('keeps duplicate fact from another archive when one archive reindexes empty', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePathA = join(archiveDir, 'session-a.jsonl');
+    const archivePathB = join(archiveDir, 'session-b.jsonl');
+    writeFileSync(archivePathA, 'same durable fact');
+    writeFileSync(archivePathB, 'same durable fact');
+
+    const parser: ArchiveParser = (content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+      text: content,
+    }];
+
+    let returnEmpty = false;
+    const provider: LLMProvider = {
+      async complete() {
+        return {
+          text: JSON.stringify(returnEmpty ? [] : [{ kind: 'fact', text: 'Shared extracted fact.', dedupe_key: 'shared-fact', confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    await reindexArchiveFile(db, archivePathA, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePathB, 'claude-projects', parser, provider);
+    returnEmpty = true;
+    writeFileSync(archivePathB, 'changed to no extracted memory');
+    await reindexArchiveFile(db, archivePathB, 'claude-projects', parser, provider);
+
+    const rows = db.query('SELECT archive_path AS archivePath, dedupe_key AS dedupeKey FROM memory_records ORDER BY archive_path')
+      .all() as Array<{ archivePath: string; dedupeKey: string }>;
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
+
+    expect(rows).toEqual([{ archivePath: archivePathA, dedupeKey: 'shared-fact' }]);
+    expect(vectorCount.count).toBe(1);
+  });
+
   test('preserves existing span index when embedding fails during replacement', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();

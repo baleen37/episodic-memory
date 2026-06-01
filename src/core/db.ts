@@ -140,7 +140,8 @@ function createSchema(db: Database): void {
       updated_at INTEGER NOT NULL
     )
   `);
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key)');
+  db.exec('DROP INDEX IF EXISTS idx_memory_records_dedupe_key');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key, archive_path, line_start, line_end)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_kind ON memory_records(kind)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_memory_records_archive_path ON memory_records(archive_path)');
@@ -182,13 +183,10 @@ export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): nu
       observed_at, project, confidence, status, supersedes_id,
       dedupe_key, extraction_version, embedding_version, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(dedupe_key) DO UPDATE SET
+    ON CONFLICT(dedupe_key, archive_path, line_start, line_end) DO UPDATE SET
       kind = excluded.kind,
       text = excluded.text,
       source_kind = excluded.source_kind,
-      archive_path = excluded.archive_path,
-      line_start = excluded.line_start,
-      line_end = excluded.line_end,
       observed_at = excluded.observed_at,
       project = excluded.project,
       confidence = excluded.confidence,
@@ -216,8 +214,11 @@ export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): nu
     now,
   );
 
-  const row = db.query('SELECT id FROM memory_records WHERE dedupe_key = ?').get(record.dedupeKey) as { id: number } | null;
-  if (!row) throw new Error(`Failed to resolve memory record for dedupe key: ${record.dedupeKey}`);
+  const row = db.query(`
+    SELECT id FROM memory_records
+    WHERE dedupe_key = ? AND archive_path = ? AND line_start = ? AND line_end = ?
+  `).get(record.dedupeKey, record.archivePath, record.lineStart, record.lineEnd) as { id: number } | null;
+  if (!row) throw new Error(`Failed to resolve memory record for scoped dedupe key: ${record.dedupeKey}`);
   return row.id;
 }
 

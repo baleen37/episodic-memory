@@ -53,7 +53,7 @@ describe('memory record database schema', () => {
     expect(names).toContain('idx_extraction_state_status');
   });
 
-  test('upserts memory records by dedupe key and stores vectors', () => {
+  test('upserts memory records by scoped dedupe key and stores vectors', () => {
     const db = openTestDatabase();
 
     const id = insertMemoryRecord(db, {
@@ -108,6 +108,24 @@ describe('memory record database schema', () => {
 
     const updated = db.query('SELECT text FROM memory_records WHERE id = ?').get(id) as { text: string };
     expect(updated.text).toBe('memmem stores compact fact and event memory records.');
+
+    const differentSpanId = insertMemoryRecord(db, {
+      kind: 'fact',
+      text: 'memmem stores fact and event memory records.',
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/b.jsonl',
+      lineStart: 1,
+      lineEnd: 3,
+      observedAt: 1780272000000,
+      project: 'memmem',
+      dedupeKey: 'fact:memmem-memory-records',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+    });
+    expect(differentSpanId).not.toBe(id);
+
+    const count = db.query('SELECT COUNT(*) AS count FROM memory_records WHERE dedupe_key = ?')
+      .get('fact:memmem-memory-records') as { count: number };
+    expect(count.count).toBe(2);
   });
 
   test('upserts extraction state and detects completed unchanged spans', () => {

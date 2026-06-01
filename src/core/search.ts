@@ -175,10 +175,8 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Memo
   }
 
   const filterParts = buildFilterParts(options);
-  const candidateLimit = Math.max(
-    limit,
-    (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count,
-  );
+  const vectorCount = (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count;
+  const candidateLimit = Math.min(vectorCount, Math.max(limit * 64, 1000));
   const stmt = db.query(`
     SELECT
       m.id,
