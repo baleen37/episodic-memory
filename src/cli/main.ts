@@ -109,6 +109,20 @@ COMMANDS:
   stats     Print memory index statistics
   verify    Verify memory index integrity
 
+SEARCH OPTIONS:
+  --limit <number>        Maximum number of results
+  --after <YYYY-MM-DD>    Only include records after this date
+  --before <YYYY-MM-DD>   Only include records before this date
+  --source-kind <kind>    Filter by transcript source kind
+
+READ OPTIONS:
+  --start-line <number>   First archive line to read
+  --end-line <number>     Last archive line to read
+
+EXAMPLES:
+  memmem search "source of truth" --limit 5
+  memmem read /archive/session.jsonl --start-line 3 --end-line 8
+
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory
   CONVERSATION_MEMORY_DB_PATH      Override database path
