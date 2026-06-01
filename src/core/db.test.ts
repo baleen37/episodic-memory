@@ -72,6 +72,7 @@ describe('memory record database schema', () => {
     });
 
     insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.01));
+    insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.02));
 
     const memory = db.query('SELECT id, kind, text FROM memory_records WHERE dedupe_key = ?')
       .get('fact:memmem-memory-records') as { id: number; kind: string; text: string };
@@ -80,6 +81,16 @@ describe('memory record database schema', () => {
 
     const vector = db.query('SELECT rowid FROM vec_memory_records WHERE rowid = ?').get(id) as { rowid: number } | null;
     expect(vector?.rowid).toBe(id);
+
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/unrelated.jsonl',
+      lineStart: 20,
+      lineEnd: 25,
+      sourceHash: 'unrelated-hash',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      status: 'done',
+    });
 
     const sameId = insertMemoryRecord(db, {
       kind: 'fact',

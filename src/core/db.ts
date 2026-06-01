@@ -176,7 +176,7 @@ function createSchema(db: Database): void {
 
 export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): number {
   const now = Date.now();
-  const result = db.query(`
+  db.query(`
     INSERT INTO memory_records (
       kind, text, source_kind, archive_path, line_start, line_end,
       observed_at, project, confidence, status, supersedes_id,
@@ -216,17 +216,14 @@ export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): nu
     now,
   );
 
-  if (result.lastInsertRowid) {
-    return result.lastInsertRowid as number;
-  }
-
   const row = db.query('SELECT id FROM memory_records WHERE dedupe_key = ?').get(record.dedupeKey) as { id: number } | null;
   if (!row) throw new Error(`Failed to resolve memory record for dedupe key: ${record.dedupeKey}`);
   return row.id;
 }
 
 export function insertMemoryRecordVector(db: Database, memoryRecordId: number, embedding: number[]): void {
-  db.query('INSERT OR REPLACE INTO vec_memory_records(rowid, embedding) VALUES (?, ?)')
+  db.query('DELETE FROM vec_memory_records WHERE rowid = ?').run(memoryRecordId);
+  db.query('INSERT INTO vec_memory_records(rowid, embedding) VALUES (?, ?)')
     .run(memoryRecordId, Buffer.from(new Float32Array(embedding).buffer));
 }
 
