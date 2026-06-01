@@ -2,7 +2,7 @@ import { createClaudeProjectsAdapter, createClaudeTranscriptsAdapter } from './c
 import { createCodexSessionsAdapter } from './codex.js';
 import type { SourceAdapter } from './types.js';
 
-export type { ParsedExchange, ParseContext, SourceAdapter, ToolCallRecord } from './types.js';
+export type { ParseContext, SourceAdapter, TranscriptSpan } from './types.js';
 
 export function getBuiltInSourceAdapters(): SourceAdapter[] {
   return [createClaudeProjectsAdapter(), createClaudeTranscriptsAdapter(), createCodexSessionsAdapter()];

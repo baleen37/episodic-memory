@@ -2,7 +2,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const searchTool: Tool = {
   name: 'search',
-  description: 'Search indexed transcript exchanges. Returns compact transcript matches with archive path, line range, source kind, project, timestamp, snippet, and score.',
+  description: 'Search indexed event/fact memory records. Returns compact source-linked memories with kind, text, archive path, line range, source kind, project, timestamp, and score.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -38,7 +38,7 @@ export const searchTool: Tool = {
     additionalProperties: false,
   },
   annotations: {
-    title: 'Search Transcript Memory',
+    title: 'Search Memory Records',
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,

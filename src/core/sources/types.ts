@@ -1,12 +1,4 @@
-export interface ToolCallRecord {
-  toolName: string | null;
-  callId: string | null;
-  input: string | null;
-  output: string | null;
-  status: string | null;
-}
-
-export interface ParsedExchange {
+export interface TranscriptSpan {
   archivePath: string;
   lineStart: number;
   lineEnd: number;
@@ -18,11 +10,8 @@ export interface ParsedExchange {
   model: string | null;
   provider: string | null;
   metadataJson: string | null;
-  timestamp: number | null;
-  userText: string;
-  assistantText: string;
-  embeddingText: string;
-  toolCalls: ToolCallRecord[];
+  observedAt: number | null;
+  text: string;
 }
 
 export interface ParseContext {
@@ -34,5 +23,5 @@ export interface SourceAdapter {
   kind: string;
   roots(): string[];
   detect(filePath: string): boolean;
-  parse(content: string, context: ParseContext): ParsedExchange[];
+  parse(content: string, context: ParseContext): TranscriptSpan[];
 }

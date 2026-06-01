@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Memmem",
     "shortDescription": "Search indexed Claude Code and Codex transcripts.",
-    "longDescription": "Memmem archives local Claude Code and Codex transcripts, indexes exchanges, and exposes transcript search and reading through MCP tools and skills.",
+    "longDescription": "Memmem archives local Claude Code and Codex transcripts, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through MCP tools and skills.",
     "developerName": "Baleen",
     "category": "Productivity",
     "capabilities": [

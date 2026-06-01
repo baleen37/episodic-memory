@@ -17,15 +17,16 @@ interface SearchOptions {
   queryNormalizerProvider?: QueryNormalizerProvider;
 }
 
-export interface ExchangeSearchResult {
+export interface MemorySearchResult {
   id: number;
+  kind: 'fact' | 'event';
+  text: string;
+  sourceKind: string;
   archivePath: string;
   lineStart: number;
   lineEnd: number;
-  sourceKind: string;
+  observedAt: number | null;
   project: string | null;
-  timestamp: number | null;
-  snippet: string;
   score?: number;
 }
 
@@ -54,6 +55,11 @@ function isoToTimestamp(isoDate: string): number {
   return Date.UTC(year, month - 1, day);
 }
 
+function isoToExclusiveNextDayTimestamp(isoDate: string): number {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  return Date.UTC(year, month - 1, day + 1);
+}
+
 interface FilterParts {
   clause: string;
   params: Array<string | number>;
@@ -74,23 +80,22 @@ function buildFilterParts(options: Pick<SearchOptions, 'after' | 'before' | 'sou
   const params: Array<string | number> = [];
 
   if (after) {
-    filters.push('e.timestamp >= ?');
+    filters.push('m.observed_at >= ?');
     params.push(isoToTimestamp(after));
   }
 
   if (before) {
-    const [year, month, day] = before.split('-').map(Number);
-    filters.push('e.timestamp < ?');
-    params.push(Date.UTC(year, month - 1, day + 1));
+    filters.push('m.observed_at < ?');
+    params.push(isoToExclusiveNextDayTimestamp(before));
   }
 
   if (sourceKind) {
-    filters.push('e.source_kind = ?');
+    filters.push('m.source_kind = ?');
     params.push(sourceKind);
   }
 
   if (projects && projects.length > 0) {
-    filters.push(`e.project IN (${projects.map(() => '?').join(', ')})`);
+    filters.push(`m.project IN (${projects.map(() => '?').join(', ')})`);
     params.push(...projects);
   }
 
@@ -98,18 +103,11 @@ function buildFilterParts(options: Pick<SearchOptions, 'after' | 'before' | 'sou
     const fileFilters: string[] = [];
     for (const file of files) {
       fileFilters.push(`(
-        e.archive_path LIKE ? ESCAPE '\\'
-        OR e.user_text LIKE ? ESCAPE '\\'
-        OR e.assistant_text LIKE ? ESCAPE '\\'
-        OR EXISTS (
-          SELECT 1
-          FROM tool_calls tc
-          WHERE tc.exchange_id = e.id
-            AND (tc.input LIKE ? ESCAPE '\\' OR tc.output LIKE ? ESCAPE '\\')
-        )
+        m.archive_path LIKE ? ESCAPE '\\'
+        OR m.text LIKE ? ESCAPE '\\'
       )`);
       const pattern = makeLikePattern(file);
-      params.push(pattern, pattern, pattern, pattern, pattern);
+      params.push(pattern, pattern);
     }
     filters.push(`(${fileFilters.join(' OR ')})`);
   }
@@ -119,11 +117,6 @@ function buildFilterParts(options: Pick<SearchOptions, 'after' | 'before' | 'sou
     params,
     hasFilters: filters.length > 0,
   };
-}
-
-function makeSnippet(userText: string, assistantText: string): string {
-  const text = [userText, assistantText].filter(Boolean).join('\n').replace(/\s+/g, ' ').trim();
-  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
 async function normalizeQuery(query: string, provider?: QueryNormalizerProvider): Promise<string> {
@@ -142,25 +135,26 @@ async function normalizeQuery(query: string, provider?: QueryNormalizerProvider)
 
 function mapRow(row: {
   id: number;
+  kind: 'fact' | 'event';
+  text: string;
   archivePath: string;
   lineStart: number;
   lineEnd: number;
   sourceKind: string;
   project: string | null;
-  timestamp: number | null;
-  userText: string;
-  assistantText: string;
+  observedAt: number | null;
   distance?: number;
-}): ExchangeSearchResult {
-  const result: ExchangeSearchResult = {
+}): MemorySearchResult {
+  const result: MemorySearchResult = {
     id: row.id,
+    kind: row.kind,
+    text: row.text.length > 400 ? `${row.text.slice(0, 397)}...` : row.text,
+    sourceKind: row.sourceKind,
     archivePath: row.archivePath,
     lineStart: row.lineStart,
     lineEnd: row.lineEnd,
-    sourceKind: row.sourceKind,
+    observedAt: row.observedAt,
     project: row.project,
-    timestamp: row.timestamp,
-    snippet: makeSnippet(row.userText, row.assistantText),
   };
 
   if (row.distance !== undefined) {
@@ -170,7 +164,7 @@ function mapRow(row: {
   return result;
 }
 
-async function vectorSearch(query: string, options: SearchOptions): Promise<ExchangeSearchResult[]> {
+async function vectorSearch(query: string, options: SearchOptions): Promise<MemorySearchResult[]> {
   const { db, limit = 10 } = options;
   log.debug('vector search start', { query, limit });
   const vecStart = Date.now();
@@ -181,25 +175,25 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
   }
 
   const filterParts = buildFilterParts(options);
-  const candidateLimit = filterParts.hasFilters
-    ? Math.max(limit, (db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number }).count)
-    : limit;
+  const vectorCount = (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count;
+  const candidateLimit = Math.min(vectorCount, Math.max(limit * 64, 1000));
   const stmt = db.query(`
     SELECT
-      e.id,
-      e.archive_path AS archivePath,
-      e.line_start AS lineStart,
-      e.line_end AS lineEnd,
-      e.source_kind AS sourceKind,
-      e.project,
-      e.timestamp,
-      e.user_text AS userText,
-      e.assistant_text AS assistantText,
+      m.id,
+      m.kind,
+      m.text,
+      m.archive_path AS archivePath,
+      m.line_start AS lineStart,
+      m.line_end AS lineEnd,
+      m.source_kind AS sourceKind,
+      m.project,
+      m.observed_at AS observedAt,
       vec.distance AS distance
-    FROM vec_exchanges vec
-    INNER JOIN exchanges e ON e.id = vec.rowid
+    FROM vec_memory_records vec
+    INNER JOIN memory_records m ON m.id = vec.rowid
     WHERE vec.embedding MATCH ?
       AND vec.k = ?
+      AND m.status = 'active'
       ${filterParts.clause}
     ORDER BY vec.distance ASC
     LIMIT ?
@@ -216,29 +210,27 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Exch
   return rows.map(mapRow);
 }
 
-function textSearch(queries: string[], options: SearchOptions): ExchangeSearchResult[] {
+function textSearch(queries: string[], options: SearchOptions): MemorySearchResult[] {
   const { db, limit = 10 } = options;
   const filterParts = buildFilterParts(options);
-  const queryClauses = queries.map(() => `(e.user_text LIKE ? ESCAPE '\\' OR e.assistant_text LIKE ? ESCAPE '\\')`);
-  const queryParams = queries.flatMap(query => {
-    const pattern = makeLikePattern(query);
-    return [pattern, pattern];
-  });
+  const queryClauses = queries.map(() => 'm.text LIKE ? ESCAPE \'\\\'');
+  const queryParams = queries.map(query => makeLikePattern(query));
   const stmt = db.query(`
     SELECT
-      e.id,
-      e.archive_path AS archivePath,
-      e.line_start AS lineStart,
-      e.line_end AS lineEnd,
-      e.source_kind AS sourceKind,
-      e.project,
-      e.timestamp,
-      e.user_text AS userText,
-      e.assistant_text AS assistantText
-    FROM exchanges e
+      m.id,
+      m.kind,
+      m.text,
+      m.archive_path AS archivePath,
+      m.line_start AS lineStart,
+      m.line_end AS lineEnd,
+      m.source_kind AS sourceKind,
+      m.project,
+      m.observed_at AS observedAt
+    FROM memory_records m
     WHERE (${queryClauses.join(' OR ')})
+      AND m.status = 'active'
       ${filterParts.clause}
-    ORDER BY e.timestamp DESC
+    ORDER BY m.observed_at DESC
     LIMIT ?
   `);
 
@@ -254,7 +246,7 @@ function textSearch(queries: string[], options: SearchOptions): ExchangeSearchRe
 export async function search(
   query: string,
   options: SearchOptions
-): Promise<ExchangeSearchResult[]> {
+): Promise<MemorySearchResult[]> {
   const { limit = 10, after, before } = options;
 
   if (after) validateISODate(after, '--after');
@@ -262,24 +254,12 @@ export async function search(
 
   const normalizedQuery = await normalizeQuery(query, options.queryNormalizerProvider);
   const vectorResults = await vectorSearch(normalizedQuery, options);
-  const combined: ExchangeSearchResult[] = [...vectorResults];
-  const seenIds = new Set(vectorResults.map(result => result.id));
+  const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
+  const fallbackResults = textSearch(textQueries, options);
+  log.debug('text fallback', { queries: textQueries, count: fallbackResults.length });
 
-  if (combined.length < limit) {
-    const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
-    const textResults = textSearch(textQueries, options);
-    log.debug('text fallback', { queries: textQueries, count: textResults.length });
-    for (const result of textResults) {
-      if (combined.length >= limit) {
-        break;
-      }
-      if (seenIds.has(result.id)) {
-        continue;
-      }
-      combined.push(result);
-      seenIds.add(result.id);
-    }
-  }
-
-  return combined.slice(0, limit);
+  const combined = new Map<number, MemorySearchResult>();
+  for (const result of vectorResults) combined.set(result.id, result);
+  for (const result of fallbackResults) if (!combined.has(result.id)) combined.set(result.id, result);
+  return Array.from(combined.values()).slice(0, limit);
 }

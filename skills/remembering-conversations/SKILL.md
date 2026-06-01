@@ -1,6 +1,6 @@
 ---
 name: remembering-conversations
-description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using indexed transcript exchanges.
+description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using indexed event/fact memory records.
 version: 1.0.0
 ---
 
@@ -25,8 +25,8 @@ Task tool:
 
 The agent will:
 
-1. Search indexed transcript exchanges with `search`.
-2. Read archived transcript lines with `read` only when snippets are not enough.
+1. Search indexed event/fact memory records with `search`. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
+2. Read archived transcript lines with `read` only when memory records are not enough.
 3. Synthesize concise findings.
 4. Return actionable insights with `archive_path:line_start-line_end` sources.
 
@@ -86,7 +86,7 @@ Use `archive_path`, `line_start`, and `line_end` from search results:
 
 - Always cite conversation paths and line ranges.
 - Past decisions may not apply directly; explain context before recommending reuse.
-- Search snippets are usually enough; use `read` for missing rationale or surrounding context.
+- Search results are usually enough; use `read` for missing rationale or surrounding context.
 
 ## Further Reading
 

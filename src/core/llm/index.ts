@@ -31,12 +31,12 @@ export { loadConfig, createProvider } from './config.js';
 
 // Types and functions from extractor.ts
 export type {
-  EventSummary,
-  ExtractedObservation,
-  PreviousObservation,
+  TranscriptSpanForExtraction,
+  ExtractedMemoryRecord,
+  ExtractMemoryOptions,
 } from './extractor.js';
 export {
-  buildBatchExtractPrompt,
-  parseBatchExtractResponse,
-  extractFromBatch,
+  buildMemoryExtractPrompt,
+  parseMemoryExtractResponse,
+  extractMemoryRecordsFromSpan,
 } from './extractor.js';

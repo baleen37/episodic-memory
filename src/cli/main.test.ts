@@ -1,5 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { getHelpText, parseSearchArgs, parseReadArgs } from './main.js';
+import { runSearchCli } from './search.js';
+import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord } from '../core/db.js';
 
 describe('CLI argument parsing', () => {
   test('parses search args', () => {
@@ -63,8 +68,64 @@ describe('CLI argument parsing', () => {
     expect(help).toContain('sync');
     expect(help).toContain('search');
     expect(help).toContain('read');
-    expect(help).not.toContain('record');
-    expect(help).not.toContain('extract');
+    expect(help).toContain('stats');
+    expect(help).toContain('verify');
+    expect(help).toContain('memmem - Event/fact memory for Claude Code and Codex transcripts');
+    expect(help).toContain('sync      Copy transcripts and extract memory records');
+    expect(help).toContain('search    Search indexed memory records');
+    expect(help).toContain('read      Read archived transcript lines');
+    expect(help).toContain('stats     Print memory index statistics');
+    expect(help).toContain('verify    Verify memory index integrity');
     expect(help).not.toContain('recall');
+  });
+});
+
+
+describe('CLI search output', () => {
+  let dir: string | null = null;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = null;
+    delete process.env.TEST_DB_PATH;
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+  });
+
+  test('prints memory record fields without snippets', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'memmem-cli-search-'));
+    process.env.TEST_DB_PATH = join(dir, 'test.db');
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+
+    const db = initDatabase();
+    insertMemoryRecord(db, {
+      kind: 'fact',
+      text: 'The archive is the source of truth.',
+      sourceKind: 'claude-projects',
+      archivePath: '/archive/a.jsonl',
+      lineStart: 4,
+      lineEnd: 8,
+      observedAt: Date.UTC(2026, 5, 1),
+      project: 'memmem',
+      dedupeKey: 'cli-search-memory',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+    db.close();
+
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (value?: unknown) => { lines.push(String(value ?? '')); };
+    try {
+      await runSearchCli({ query: 'source of truth', limit: 10 });
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = lines.join('\n');
+    expect(output).toContain('## [fact, claude-projects, 2026-06-01] memmem');
+    expect(output).toContain('The archive is the source of truth.');
+    expect(output).toContain('Source: /archive/a.jsonl:4-8');
+    expect(output).not.toContain('snippet');
+    expect(output).not.toContain('Path:');
   });
 });

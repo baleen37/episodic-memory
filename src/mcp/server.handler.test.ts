@@ -5,7 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { handleRead, handleSearch } from './handlers.js';
 import { ReadInputSchema, SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
-import { CURRENT_EMBEDDING_VERSION, initDatabase, insertExchange } from '../core/db.js';
+import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord } from '../core/db.js';
 
 describe('MCP Server Handlers', () => {
   let db: Database;
@@ -32,23 +32,18 @@ describe('MCP Server Handlers', () => {
   });
 
   describe('handleSearch', () => {
-    test('returns transcript search results with string IDs', async () => {
-      insertExchange(db, {
+    test('returns memory search results with string IDs', async () => {
+      insertMemoryRecord(db, {
+        kind: 'event',
+        text: 'test query content answer text',
         archivePath: '/archive/claude-projects/session.jsonl',
         lineStart: 1,
         lineEnd: 2,
         sourceKind: 'claude-projects',
-        sessionId: 'session-1',
         project: 'memmem',
-        cwd: null,
-        gitBranch: null,
-        model: null,
-        provider: null,
-        metadataJson: null,
-        timestamp: 1234567890000,
-        userText: 'test query content',
-        assistantText: 'answer text',
-        embeddingText: 'test query content answer text',
+        observedAt: 1234567890000,
+        dedupeKey: 'server-handler-test',
+        extractionVersion: CURRENT_EXTRACTION_VERSION,
         embeddingVersion: CURRENT_EMBEDDING_VERSION,
       });
 
@@ -58,6 +53,8 @@ describe('MCP Server Handlers', () => {
       expect(results).toHaveLength(1);
       expect(typeof results[0].id).toBe('string');
       expect(results[0]).toMatchObject({
+        kind: 'event',
+        text: 'test query content answer text',
         archive_path: '/archive/claude-projects/session.jsonl',
         line_start: 1,
         line_end: 2,
@@ -67,7 +64,7 @@ describe('MCP Server Handlers', () => {
       });
     });
 
-    test('returns empty array when no transcript results exist', async () => {
+    test('returns empty array when no memory results exist', async () => {
       const params = SearchInputSchema.parse({ query: 'absolutely_nonexistent_xyz_query' });
       const results = await handleSearch(params, db);
 

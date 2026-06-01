@@ -2,26 +2,40 @@ import { describe, expect, test } from 'bun:test';
 import { parseCodexJsonl } from './codex.js';
 
 describe('parseCodexJsonl', () => {
-  test('parses Codex response items into exchanges and tool calls', () => {
+  test('parses Codex response items into spans', () => {
     const jsonl = [
       JSON.stringify({ type: 'session_meta', payload: { id: 'codex-session', cwd: '/repo', git: { branch: 'main' }, model: 'gpt-5.1', provider: 'openai' } }),
-      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run tests' }] } }),
+      JSON.stringify({ type: 'response_item', timestamp: '2026-05-26T00:00:00.000Z', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run tests' }] } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'call-1', name: 'shell', arguments: '{"cmd":"bun test"}' } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'pass' } }),
-      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Tests passed.' }] } }),
+      JSON.stringify({ type: 'response_item', timestamp: '2026-05-26T00:00:01.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Tests passed.' }] } }),
     ].join('\n');
 
-    const exchanges = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
+    const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
 
-    expect(exchanges).toHaveLength(1);
-    expect(exchanges[0].sourceKind).toBe('codex-sessions');
-    expect(exchanges[0].sessionId).toBe('codex-session');
-    expect(exchanges[0].userText).toBe('Run tests');
-    expect(exchanges[0].assistantText).toBe('Tests passed.');
-    expect(exchanges[0].toolCalls).toEqual([{ toolName: 'shell', callId: 'call-1', input: '{"cmd":"bun test"}', output: 'pass', status: 'success' }]);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({
+      archivePath: '/archive/codex-sessions/rollout.jsonl',
+      sourceKind: 'codex-sessions',
+      lineStart: 2,
+      lineEnd: 5,
+      sessionId: 'codex-session',
+      project: null,
+      cwd: null,
+      gitBranch: null,
+      model: 'gpt-5.1',
+      provider: 'codex',
+      metadataJson: JSON.stringify({ source: 'codex' }),
+      observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+      text: 'User: Run tests\nAssistant: Tests passed.',
+    });
+    expect(spans[0].text).toContain('User: Run tests');
+    expect(spans[0].text).toContain('Assistant: Tests passed.');
+    expect('userText' in spans[0]).toBe(false);
+    expect('assistantText' in spans[0]).toBe(false);
   });
 
-  test('parses Codex tool variants and turn context metadata', () => {
+  test('parses Codex tool variants without exposing tool calls', () => {
     const jsonl = [
       JSON.stringify({ type: 'session_meta', payload: { id: 'codex-session', cwd: '/old', model_provider: 'openai' } }),
       JSON.stringify({ type: 'turn_context', payload: { cwd: '/repo', model: 'gpt-5.2' } }),
@@ -35,18 +49,15 @@ describe('parseCodexJsonl', () => {
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] } }),
     ].join('\n');
 
-    const exchanges = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
+    const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
 
-    expect(exchanges).toHaveLength(1);
-    expect(exchanges[0]).toMatchObject({ cwd: '/repo', model: 'gpt-5.2', provider: 'openai', timestamp: Date.parse('2026-05-26T00:00:00.000Z') });
-    expect(exchanges[0].toolCalls).toEqual([
-      { toolName: 'apply_patch', callId: 'custom-1', input: '{"patch":"diff"}', output: 'patched', status: 'success' },
-      { toolName: 'tool_search_call', callId: 'search-1', input: 'parser', output: '[{"path":"src/core/sources/codex.ts"}]', status: 'success' },
-      { toolName: 'local_shell_call', callId: 'shell-1', input: '{"cmd":"bun test src/core/sources"}', output: 'pass', status: 'success' },
-    ]);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({ model: 'gpt-5.2', provider: 'codex', observedAt: Date.parse('2026-05-26T00:00:00.000Z') });
+    expect(spans[0].text).toBe('User: Search and run\nAssistant: Done.');
+    expect('toolCalls' in spans[0]).toBe(false);
   });
 
-  test('snapshots turn context metadata per exchange', () => {
+  test('snapshots turn context metadata per span', () => {
     const jsonl = [
       JSON.stringify({ type: 'session_meta', payload: { id: 'codex-session', model_provider: 'openai' } }),
       JSON.stringify({ type: 'turn_context', payload: { cwd: '/repo-a', model: 'model-a' } }),
@@ -57,10 +68,10 @@ describe('parseCodexJsonl', () => {
       JSON.stringify({ type: 'response_item', timestamp: '2026-05-26T00:00:03.000Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Second done.' }] } }),
     ].join('\n');
 
-    const exchanges = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
+    const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
 
-    expect(exchanges).toHaveLength(2);
-    expect(exchanges[0]).toMatchObject({ userText: 'First', cwd: '/repo-a', model: 'model-a', timestamp: Date.parse('2026-05-26T00:00:00.000Z') });
-    expect(exchanges[1]).toMatchObject({ userText: 'Second', cwd: '/repo-b', model: 'model-b', timestamp: Date.parse('2026-05-26T00:00:02.000Z') });
+    expect(spans).toHaveLength(2);
+    expect(spans[0]).toMatchObject({ model: 'model-a', observedAt: Date.parse('2026-05-26T00:00:00.000Z'), text: 'User: First\nAssistant: First done.' });
+    expect(spans[1]).toMatchObject({ model: 'model-b', observedAt: Date.parse('2026-05-26T00:00:02.000Z'), text: 'User: Second\nAssistant: Second done.' });
   });
 });

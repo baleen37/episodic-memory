@@ -68,11 +68,11 @@ describe('LLM Types', () => {
     it('should create options with both fields', () => {
       const options: LLMOptions = {
         maxTokens: 2048,
-        systemPrompt: 'Summarize this text.',
+        systemPrompt: 'Extract event/fact memory records.',
       };
 
       expect(options.maxTokens).toBe(2048);
-      expect(options.systemPrompt).toBe('Summarize this text.');
+      expect(options.systemPrompt).toBe('Extract event/fact memory records.');
     });
   });
 
@@ -188,9 +188,9 @@ describe('LLM Types', () => {
     });
   });
 
-  describe('Type compatibility with existing TokenUsage', () => {
-    it('should match summarizer TokenUsage structure', () => {
-      // Verify compatibility with existing summarizer.ts TokenUsage
+  describe('Type compatibility with shared TokenUsage', () => {
+    it('should match shared TokenUsage structure', () => {
+      // Verify compatibility with shared LLM TokenUsage
       const existingUsage: TokenUsage = {
         input_tokens: 100,
         output_tokens: 50,
