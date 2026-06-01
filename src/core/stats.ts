@@ -36,10 +36,9 @@ export function getMemoryStats(db: Database): MemoryStats {
   `).all() as Array<{ sourceKind: string; count: number }>;
 
   const topProjects = db.query(`
-    SELECT project, COUNT(*) AS count
+    SELECT COALESCE(project, '(unknown)') AS project, COUNT(*) AS count
     FROM memory_records
-    WHERE project IS NOT NULL AND project != ''
-    GROUP BY project
+    GROUP BY COALESCE(project, '(unknown)')
     ORDER BY count DESC, project ASC
     LIMIT 10
   `).all() as Array<{ project: string; count: number }>;

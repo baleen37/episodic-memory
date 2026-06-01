@@ -1,10 +1,20 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector } from './db.js';
 import { getMemoryStats } from './stats.js';
 
+let db: Database | null = null;
+
+afterEach(() => {
+  db?.close();
+  db = null;
+  delete process.env.TEST_DB_PATH;
+});
+
 describe('getMemoryStats', () => {
   test('counts memory records and vectors', () => {
-    const db = initDatabase();
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
 
     const id = insertMemoryRecord(db, {
       kind: 'fact',
@@ -14,7 +24,7 @@ describe('getMemoryStats', () => {
       lineStart: 1,
       lineEnd: 3,
       observedAt: 1780272000000,
-      project: 'memmem',
+      project: null,
       dedupeKey: 'fact:stats-memory-record',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
       embeddingVersion: CURRENT_EMBEDDING_VERSION,
@@ -29,5 +39,6 @@ describe('getMemoryStats', () => {
     expect(stats.eventCount).toBe(0);
     expect(stats.vectorizedRecords).toBe(1);
     expect(stats.missingVectors).toBe(0);
+    expect(stats.topProjects).toEqual([{ project: '(unknown)', count: 1 }]);
   });
 });
