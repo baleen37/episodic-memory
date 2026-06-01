@@ -1,12 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'fs';
 import { log } from './logger.js';
 
 describe('logger', () => {
   let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, 'write'>>;
   let originalLevel: string | undefined;
+  let originalConfigDir: string | undefined;
+  let tempConfigDir: string;
 
   beforeEach(() => {
     originalLevel = process.env.MEMMEM_LOG_LEVEL;
+    originalConfigDir = process.env.CONVERSATION_MEMORY_CONFIG_DIR;
+    tempConfigDir = mkdtempSync(join(tmpdir(), 'memmem-log-'));
+    process.env.CONVERSATION_MEMORY_CONFIG_DIR = tempConfigDir;
     stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 
@@ -16,6 +24,12 @@ describe('logger', () => {
     } else {
       process.env.MEMMEM_LOG_LEVEL = originalLevel;
     }
+    if (originalConfigDir === undefined) {
+      delete process.env.CONVERSATION_MEMORY_CONFIG_DIR;
+    } else {
+      process.env.CONVERSATION_MEMORY_CONFIG_DIR = originalConfigDir;
+    }
+    rmSync(tempConfigDir, { recursive: true, force: true });
     stderrSpy.mockRestore();
   });
 
