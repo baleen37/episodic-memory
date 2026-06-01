@@ -41,7 +41,7 @@ Rules:
 Response format:
 [
   {"kind":"fact","text":"Memmem stores source-linked fact/event memory records.","confidence":0.9,"dedupeKey":"memmem-memory-records"},
-  {"kind":"event","text":"The user asked to replace the observation extractor with a memory-record extractor.","confidence":0.8}
+  {"kind":"event","text":"The user asked to replace legacy transcript indexing with a memory-record extractor.","confidence":0.8}
 ]`;
 
 function stripMarkdownFences(response: string): string {

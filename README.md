@@ -284,7 +284,7 @@ plugins/memmem/
 
 ## Upgrading to the memory record index
 
-**IMPORTANT**: This release is a breaking local index change. The old observation database is not compatible
+**IMPORTANT**: This release is a breaking local index change. The pre-memory-record database is not compatible
 with the memory record schema. Delete the old database before rebuilding the index.
 
 ### Migration Steps

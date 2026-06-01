@@ -188,9 +188,9 @@ describe('LLM Types', () => {
     });
   });
 
-  describe('Type compatibility with existing TokenUsage', () => {
-    it('should match summarizer TokenUsage structure', () => {
-      // Verify compatibility with existing summarizer.ts TokenUsage
+  describe('Type compatibility with shared TokenUsage', () => {
+    it('should match shared TokenUsage structure', () => {
+      // Verify compatibility with shared LLM TokenUsage
       const existingUsage: TokenUsage = {
         input_tokens: 100,
         output_tokens: 50,
