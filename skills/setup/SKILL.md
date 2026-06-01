@@ -1,5 +1,5 @@
 ---
-name: configure
+name: setup
 description: This skill provides configuration guidance for the memmem plugin. Invoke explicitly when user requests to configure plugin settings.
 version: 1.0.0
 ---
