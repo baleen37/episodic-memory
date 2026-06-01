@@ -7,8 +7,8 @@ version: 1.0.0
 # Configure Conversation Memory
 
 This skill provides guidance for configuring the memmem plugin,
-including LLM settings for summarization, API key configuration, project
-exclusions, and environment variables.
+including LLM settings for memory-record extraction, API key configuration,
+project exclusions, and environment variables.
 
 ## Config File Location
 
@@ -26,9 +26,9 @@ mkdir -p ~/.config/memmem
 
 ## LLM Provider Configuration
 
-Conversation summarization requires an LLM provider. Without configuration,
-conversations will be indexed but not summarized (you'll see
-`[Not summarized - no LLM config found]` placeholders).
+Archive sync and `read` do not require an LLM provider configuration.
+Memory extraction during indexing does require a configured LLM provider.
+Without one, transcript spans are skipped and no memory rows are created for those spans.
 
 ### Supported Providers
 
@@ -111,7 +111,7 @@ project-c
 Test your configuration:
 
 ```bash
-# Sync conversations with summarization
+# Sync transcripts and extract memory records when a provider is configured
 memmem sync
 
 # Enable debug logging
@@ -156,16 +156,16 @@ tail -f ~/.config/memmem/logs/$(date +%Y-%m-%d).log
 - Check provider documentation for available models
 - Use default model (omit `model` field)
 
-### No Summaries Generated
+### No Memory Records Generated
 
-**Symptoms:** Conversations indexed but `[Not summarized - no LLM config found]`
-appears
+**Symptoms:** Archive sync/read works, but indexed memory search has no results or logs show skipped spans.
 
 **Solution:**
 
 - Verify config.json exists at `~/.config/memmem/config.json`
 - Check config.json has valid JSON syntax
 - Ensure `provider` and `apiKey` fields are present
+- Re-run `memmem sync` after configuring the provider so extraction can create memory rows
 
 ## Example Configurations
 
