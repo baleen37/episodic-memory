@@ -82,6 +82,7 @@ assert_contains "- name: Align standalone plugin metadata"
 assert_contains ".claude-plugin/plugin.json"
 assert_contains ".codex-plugin/plugin.json"
 assert_contains "- name: Verify standalone plugin metadata"
+assert_contains "git push"
 assert_contains "permissions:"
 assert_contains "contents: write"
 
