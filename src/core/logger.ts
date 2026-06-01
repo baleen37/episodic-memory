@@ -6,6 +6,9 @@
  *   silent                         (disables all output)
  */
 
+import { appendFileSync } from 'fs';
+import { getLogFilePath } from './paths.js';
+
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 const LEVELS: Record<string, number> = {
@@ -21,6 +24,27 @@ function getThreshold(): number {
   return LEVELS[raw] ?? LEVELS['info'];
 }
 
+const FLUSH_LINE_THRESHOLD = 64;
+let buffer: string[] = [];
+
+function flushLogBuffer(): void {
+  if (buffer.length === 0) return;
+  const lines = buffer.join(''); // each buffered entry already ends with '\n'
+  buffer = [];
+  try {
+    appendFileSync(getLogFilePath(), lines);
+  } catch {
+    // Logging must never break the primary operation; drop on failure.
+  }
+}
+
+function bufferLine(line: string): void {
+  buffer.push(line);
+  if (buffer.length >= FLUSH_LINE_THRESHOLD) {
+    flushLogBuffer();
+  }
+}
+
 function emit(level: LogLevel, msg: string, meta?: Record<string, unknown>): void {
   if (getThreshold() < LEVELS[level]) return;
   const ts = new Date().toISOString();
@@ -28,6 +52,7 @@ function emit(level: LogLevel, msg: string, meta?: Record<string, unknown>): voi
     ? `[${ts}] ${level.toUpperCase()} ${msg} ${JSON.stringify(meta)}\n`
     : `[${ts}] ${level.toUpperCase()} ${msg}\n`;
   process.stderr.write(line);
+  bufferLine(line);
 }
 
 export const log = {
@@ -65,4 +90,9 @@ export function logError(message: string, error?: unknown, data?: Record<string,
 /** @deprecated use log.debug */
 export function logDebug(message: string, data?: Record<string, unknown>): void {
   log.debug(message, data);
+}
+
+/** Test-only: synchronously flush the file buffer. */
+export function __flushForTests(): void {
+  flushLogBuffer();
 }

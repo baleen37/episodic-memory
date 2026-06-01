@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, utimesSync } from 'fs';
-import { log } from './logger.js';
+import { log, __flushForTests } from './logger.js';
 
 describe('logger', () => {
   let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, 'write'>>;
@@ -30,6 +30,7 @@ describe('logger', () => {
       process.env.CONVERSATION_MEMORY_CONFIG_DIR = originalConfigDir;
     }
     rmSync(tempConfigDir, { recursive: true, force: true });
+    __flushForTests();
     stderrSpy.mockRestore();
   });
 
@@ -141,6 +142,17 @@ describe('logger', () => {
       expect(stderrSpy).toHaveBeenCalledTimes(1);
       expect(stdoutSpy).not.toHaveBeenCalled();
       stdoutSpy.mockRestore();
+    });
+  });
+
+  describe('file sink', () => {
+    test('flushed info line is written to today log file', () => {
+      log.info('file sink line');
+      __flushForTests();
+      const date = new Date().toISOString().split('T')[0];
+      const logPath = join(tempConfigDir, 'logs', `${date}.log`);
+      expect(existsSync(logPath)).toBe(true);
+      expect(readFileSync(logPath, 'utf8')).toContain('INFO file sink line');
     });
   });
 });
