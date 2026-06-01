@@ -81,6 +81,57 @@ describe('reindexArchiveFile', () => {
     expect(state?.status).toBe('done');
   });
 
+  test('skips extraction for unchanged completed spans and keeps existing memory index', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'same transcript content');
+
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+      text: 'User prefers durable memory records over exchange indexing.',
+    }];
+
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        return {
+          text: JSON.stringify([{ kind: 'fact', text: 'Durable fact.', confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
+
+    expect(result.spansSkipped).toBe(1);
+    expect(result.memoryRecordsIndexed).toBe(0);
+    expect(completeCalls).toBe(1);
+    expect(memoryCount.count).toBe(1);
+    expect(vectorCount.count).toBe(1);
+  });
+
   test('removes existing memory index when conversation marker asks not to index', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();

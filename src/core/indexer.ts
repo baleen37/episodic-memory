@@ -55,6 +55,24 @@ function makeDedupeKey(kind: string, text: string): string {
   return hashText(normalized);
 }
 
+function deleteMemoryIndexForSpan(db: Database, span: TranscriptSpan): void {
+  const rows = db.query(`
+    SELECT id FROM memory_records
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+  `).all(span.archivePath, span.lineStart, span.lineEnd) as Array<{ id: number }>;
+  const ids = rows.map(row => row.id);
+
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    db.query(`DELETE FROM vec_memory_records WHERE rowid IN (${placeholders})`).run(...ids);
+  }
+
+  db.query(`
+    DELETE FROM memory_records
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+  `).run(span.archivePath, span.lineStart, span.lineEnd);
+}
+
 export async function reindexArchiveFile(
   db: Database,
   archivePath: string,
@@ -76,8 +94,6 @@ export async function reindexArchiveFile(
     spansErrored: 0,
     memoryRecordsIndexed: 0,
   };
-
-  deleteMemoryIndexForArchivePath(db, archivePath);
 
   if (!provider) {
     result.spansSkipped = spans.length;
@@ -109,6 +125,8 @@ export async function reindexArchiveFile(
         project: span.project,
         text: span.text,
       }, { maxRecords: 10 });
+
+      deleteMemoryIndexForSpan(db, span);
 
       if (records.length === 0) {
         upsertExtractionState(db, {
