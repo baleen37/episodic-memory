@@ -64,13 +64,35 @@ export interface RateLimitsConfig {
  *
  * Defines the structure of the config file at ~/.config/memmem/config.json
  */
-export interface LLMConfig {
-  /** Provider: 'gemini' or 'zai' */
-  provider: LLMProviderType;
+/**
+ * A single (apiKey, model) combination for round-robin rotation.
+ */
+export interface ProviderEntry {
+  /**
+   * Optional account email this key belongs to. Purely informational — it
+   * labels which Google account issued the key, since the key itself cannot be
+   * traced back to an account via the API.
+   */
+  email?: string;
   /** API key for the provider */
   apiKey: string;
   /** Optional model name (defaults depend on provider) */
   model?: string;
+}
+
+export interface LLMConfig {
+  /** Provider: 'gemini' or 'zai' */
+  provider: LLMProviderType;
+  /** API key for the provider (single-provider mode) */
+  apiKey?: string;
+  /** Optional model name (defaults depend on provider) */
+  model?: string;
+  /**
+   * Optional list of (apiKey, model) combinations. When present, calls rotate
+   * across these entries and fail over to the next on error, pooling free-tier
+   * quota across keys/models.
+   */
+  providers?: ProviderEntry[];
   /** Optional rate limiter configuration */
   ratelimit?: RateLimitsConfig;
 }
@@ -116,8 +138,10 @@ export function loadConfig(): LLMConfig | null {
     const configContent = configFileDeps.readFileSync(configPath, 'utf-8');
     const config = JSON.parse(configContent) as LLMConfig;
 
-    // Validate required fields
-    if (!config.provider || !config.apiKey) {
+    // Validate required fields. Either a single apiKey or a non-empty
+    // providers[] (round-robin mode) must be present.
+    const hasProviders = Array.isArray(config.providers) && config.providers.length > 0;
+    if (!config.provider || (!config.apiKey && !hasProviders)) {
       console.warn('Invalid config: missing provider or apiKey field');
       return null;
     }
@@ -159,7 +183,18 @@ export function loadConfig(): LLMConfig | null {
  * ```
  */
 export async function createProvider(config: LLMConfig): Promise<LLMProvider> {
-  const { provider, apiKey, model } = config;
+  const { provider, apiKey, model, providers } = config;
+
+  // Round-robin mode: build one provider per (apiKey, model) entry and rotate.
+  if (providers) {
+    const { RoundRobinProvider } = await import('./round-robin-provider.js');
+    const built = await Promise.all(
+      providers.map((entry) =>
+        createProvider({ provider, apiKey: entry.apiKey, model: entry.model }),
+      ),
+    );
+    return new RoundRobinProvider(built);
+  }
 
   if (!apiKey) {
     throw new Error('Provider requires an apiKey');

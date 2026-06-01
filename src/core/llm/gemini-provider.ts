@@ -128,10 +128,34 @@ export class GeminiProvider implements LLMProvider {
    */
   private parseResult(result: GenerateContentResult): LLMResult {
     const response = result.response;
-    const text = response.text() ?? '';
+    const text = this.extractAnswerText(response);
     const usage = this.extractUsage(response);
 
     return { text, usage };
+  }
+
+  /**
+   * Extracts the answer text from a Gemini response.
+   *
+   * Thinking models (e.g. Gemma 4) emit reasoning as parts flagged with
+   * `thought: true` ahead of the real answer. The SDK's `text()` accessor
+   * concatenates every part, which corrupts JSON answers. This collects only
+   * the non-thought parts, falling back to `text()` when no parts are present.
+   */
+  private extractAnswerText(response: EnhancedGenerateContentResponse): string {
+    // The `thought` flag is present at runtime for thinking models but is not
+    // yet in the SDK's Part type, so widen the part shape locally.
+    const parts = response.candidates?.[0]?.content?.parts as
+      | Array<{ text?: string; thought?: boolean }>
+      | undefined;
+    if (parts && parts.length > 0) {
+      const answer = parts
+        .filter((part) => part.thought !== true)
+        .map((part) => part.text ?? '')
+        .join('');
+      return answer;
+    }
+    return response.text() ?? '';
   }
 
   /**
