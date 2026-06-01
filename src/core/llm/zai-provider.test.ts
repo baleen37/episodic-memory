@@ -108,7 +108,7 @@ describe('ZAIProvider', () => {
       const provider = new ZAIProvider('test-api-key');
       const options: LLMOptions = {
         maxTokens: 4096,
-        systemPrompt: 'Write concise summaries.',
+        systemPrompt: 'Write concise event/fact memory records.',
       };
 
       const result = await provider.complete('test prompt', options);
@@ -252,10 +252,10 @@ describe('ZAIProvider', () => {
       fetchSpy.mockRestore();
     });
 
-    it('should handle simple summarization prompt', async () => {
+    it('should handle simple extraction prompt', async () => {
       const provider = new ZAIProvider('test-api-key');
 
-      const prompt = 'Summarize this conversation in one sentence.';
+      const prompt = 'Extract event/fact memory records from this transcript span.';
       const result = await provider.complete(prompt);
 
       expect(result.text).toBeDefined();
@@ -269,21 +269,21 @@ describe('ZAIProvider', () => {
         Assistant: Hi there!
         User: How are you?
         Assistant: I'm doing well, thanks!
-        [many more exchanges...]
+        [many more transcript events...]
       `;
 
       const result = await provider.complete(longPrompt, { maxTokens: 2048 });
       expect(result.text).toBeDefined();
     });
 
-    it('should handle custom system prompt for summarization', async () => {
+    it('should handle custom system prompt for extraction', async () => {
       const provider = new ZAIProvider('test-api-key');
 
       const options: LLMOptions = {
-        systemPrompt: 'Write concise, factual summaries. Output ONLY the summary.',
+        systemPrompt: 'Extract concise event/fact memory records. Output ONLY valid JSON.',
       };
 
-      const result = await provider.complete('Summarize this text', options);
+      const result = await provider.complete('Extract memory records from this text', options);
       expect(result.text).toBeDefined();
     });
   });

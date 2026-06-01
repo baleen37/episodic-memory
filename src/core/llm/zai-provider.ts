@@ -2,7 +2,7 @@
  * ZAIProvider - LLM provider implementation using Z.AI's GLM API.
  *
  * This provider uses native fetch (no SDK) for minimal dependencies.
- * It implements the LLMProvider interface to enable conversation summarization with GLM models.
+ * It implements the LLMProvider interface to enable memory-record extraction with GLM models.
  */
 
 import type { LLMProvider, LLMOptions, LLMResult, TokenUsage } from './types.js';
@@ -64,8 +64,8 @@ const DEFAULT_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
  * @example
  * ```ts
  * const provider = new ZAIProvider('your-api-key', 'glm-4.7');
- * const result = await provider.complete('Summarize this text');
- * console.log(result.text); // The generated summary
+ * const result = await provider.complete('Extract event/fact memory records from this transcript span');
+ * console.log(result.text); // The generated completion
  * console.log(result.usage); // Token usage information
  * ```
  */

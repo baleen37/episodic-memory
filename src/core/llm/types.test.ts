@@ -68,11 +68,11 @@ describe('LLM Types', () => {
     it('should create options with both fields', () => {
       const options: LLMOptions = {
         maxTokens: 2048,
-        systemPrompt: 'Summarize this text.',
+        systemPrompt: 'Extract event/fact memory records.',
       };
 
       expect(options.maxTokens).toBe(2048);
-      expect(options.systemPrompt).toBe('Summarize this text.');
+      expect(options.systemPrompt).toBe('Extract event/fact memory records.');
     });
   });
 

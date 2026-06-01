@@ -155,7 +155,7 @@ export function loadConfig(): LLMConfig | null {
  *   model: 'gemini-2.0-flash'
  * };
  * const provider = await createProvider(config);
- * const result = await provider.complete('Extract observations');
+ * const result = await provider.complete('Extract event/fact memory records');
  * ```
  */
 export async function createProvider(config: LLMConfig): Promise<LLMProvider> {

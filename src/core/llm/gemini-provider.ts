@@ -2,7 +2,7 @@
  * GeminiProvider - LLM provider implementation using Google's Gemini API.
  *
  * This provider uses the @google/generative-ai SDK.
- * It implements the LLMProvider interface to enable conversation summarization with Gemini models.
+ * It implements the LLMProvider interface to enable memory-record extraction with Gemini models.
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -18,7 +18,7 @@ import { getLLMRateLimiter } from '../ratelimiter.js';
 
 /**
  * Default model to use for Gemini API calls.
- * gemini-2.0-flash is fast and cost-effective for summarization tasks.
+ * gemini-2.0-flash is fast and cost-effective for memory-record extraction tasks.
  */
 const DEFAULT_MODEL = 'gemini-2.0-flash';
 
@@ -28,8 +28,8 @@ const DEFAULT_MODEL = 'gemini-2.0-flash';
  * @example
  * ```ts
  * const provider = new GeminiProvider('your-api-key', 'gemini-2.0-flash');
- * const result = await provider.complete('Summarize this text');
- * console.log(result.text); // The generated summary
+ * const result = await provider.complete('Extract event/fact memory records from this transcript span');
+ * console.log(result.text); // The generated completion
  * console.log(result.usage); // Token usage information
  * ```
  */

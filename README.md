@@ -282,7 +282,7 @@ plugins/memmem/
 - `typescript`: Type checking
 - `bun-types`: Bun runtime and test types
 
-## Upgrading to the transcript index
+## Upgrading to the memory record index
 
 **IMPORTANT**: This release is a breaking local index change. The old observation database is not compatible
 with the memory record schema. Delete the old database before rebuilding the index.
