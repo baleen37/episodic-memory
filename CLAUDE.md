@@ -29,6 +29,7 @@ bun test path/to/file.test.ts   # Run single test file
 bun test --watch                # Watch mode
 bun run build                   # Bundle with Bun.build (scripts/build.mjs)
 bun run typecheck               # tsc --noEmit
+bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli.mjs)
 ```
 
 **CRITICAL**: Always use `bun` — this project uses `bun:sqlite` (built-in) and `bun test`.
@@ -47,6 +48,10 @@ bun run typecheck               # tsc --noEmit
 | `src/core/read.ts` | Archived transcript line reading/rendering |
 | `src/core/embeddings.ts` | Xenova/multilingual-e5-small embeddings (384-dim) with passage/query prefix routing |
 | `src/core/ratelimiter.ts` | Token bucket rate limiter (singleton, configurable) |
+| `src/core/llm/config.ts` | LLM config loading + `createProvider()` factory; supports single-provider and `providers[]` round-robin modes |
+| `src/core/llm/extractor.ts` | Bounded, schema-validated fact/event extraction from transcript spans |
+| `src/core/llm/{gemini,zai}-provider.ts` | Provider implementations behind the `LLMProvider` interface (`src/core/llm/types.ts`) |
+| `src/core/llm/round-robin-provider.ts` | Rotates across multiple `(apiKey, model)` entries to spread rate limits |
 | `src/cli/sync.ts` | CLI sync command: copy transcripts to archive and index changed files |
 | `src/cli/search.ts` | CLI search command |
 | `src/cli/read.ts` | CLI read command |
@@ -111,6 +116,18 @@ Built-in adapters:
 - `codex-sessions`: Codex session JSONL transcripts under `CODEX_HOME`.
 
 Adapters discover roots, detect JSONL files, parse transcript spans for extraction, and preserve source-specific metadata where available.
+
+### LLM Provider Layer
+
+`src/core/llm/` is the only LLM-dependent subsystem; it is used by the indexer's extractor to turn transcript spans into memory records. Everything behind the `LLMProvider` interface (`types.ts`).
+
+- `loadConfig()` reads the `llm` section of `~/.config/memmem/config.json`; returns `null` when unconfigured, which is why sync/read work without any provider.
+- `createProvider(config)` is the single factory. Two configuration shapes:
+  - **Single provider**: `{ provider: 'gemini' | 'zai', apiKey, model }`.
+  - **Round-robin**: `{ providers: [{ provider, apiKey, model }, ...] }` → `RoundRobinProvider` rotates across entries to spread per-key rate limits.
+- `extractor.ts` enforces the bounded/idempotent/schema-validated/failure-tolerant contract from Memory Architecture Principles; spans that fail extraction are skipped, not retried unbounded (tracked via `extraction_state`).
+
+When adding a provider: implement `LLMProvider`, export it from `index.ts`, and wire it into `createProvider()` and the `LLMProviderType` union in `config.ts`.
 
 ### MCP Surface
 
