@@ -154,5 +154,17 @@ describe('logger', () => {
       expect(existsSync(logPath)).toBe(true);
       expect(readFileSync(logPath, 'utf8')).toContain('INFO file sink line');
     });
+
+    test('auto-flushes after 64 buffered lines', () => {
+      for (let i = 0; i < 64; i++) {
+        log.info(`bulk line ${i}`);
+      }
+      const date = new Date().toISOString().split('T')[0];
+      const logPath = join(tempConfigDir, 'logs', `${date}.log`);
+      expect(existsSync(logPath)).toBe(true);
+      const contents = readFileSync(logPath, 'utf8');
+      expect(contents).toContain('bulk line 0');
+      expect(contents).toContain('bulk line 63');
+    });
   });
 });
