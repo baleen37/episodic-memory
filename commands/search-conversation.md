@@ -1,15 +1,15 @@
 ---
 name: search-conversation
-description: Search through past conversations using indexed transcript exchanges
+description: Search indexed event/fact memory records
 argument-hint: [<query>]
 ---
 
-You are helping the user search conversation history with the memmem transcript index.
+Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 
 ## How This Command Works
 
 1. Call `mcp__plugin_memmem_memmem__search` with the user's query.
-2. Review the returned snippets and source metadata.
+2. Review the returned memory records and source metadata.
 3. If more context is needed, call `mcp__plugin_memmem_memmem__read` with the returned `archive_path`, `line_start`, and `line_end`.
 4. Synthesize findings with clear sources.
 
@@ -42,7 +42,8 @@ Search results include:
 - `source_kind`
 - `project`
 - `timestamp`
-- `snippet`
+- `kind`
+- `text`
 - `score`
 
 ## Read More Context
@@ -61,7 +62,7 @@ Use the line range from search results, expanding it slightly when needed.
 
 ## Response Guidance
 
-- Present the most relevant matches with date, project/source kind, snippet, and archive line range.
+- Present the most relevant matches with date, project/source kind, memory text, and archive line range.
 - Summarize patterns, decisions, gotchas, and recommendations.
 - Cite sources as `archive_path:line_start-line_end`.
 - If no results are found, suggest broader terms or removing filters.

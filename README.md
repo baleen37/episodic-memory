@@ -1,21 +1,20 @@
 # Memmem
 
-Memmem - Conversation memory with transcript search across Claude Code and Codex sessions.
+Memmem - Persistent conversation memory across Claude Code and Codex sessions.
 
 ## Purpose
 
-Gives Claude persistent memory across sessions by archiving local transcripts, indexing transcript exchanges,
-and providing semantic/text search plus transcript reading. Based on [@obra/episodic-memory](https://github.com/obra/episodic-memory)
+memmem syncs local Claude Code and Codex transcripts into an archive, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through CLI and MCP. Based on [@obra/episodic-memory](https://github.com/obra/episodic-memory)
 with integration into the Claude Code plugin ecosystem.
 
 ## Features
 
 - **Transcript Sync**: Copies Claude Code and Codex transcripts into a local archive
-- **Exchange Search**: Searches indexed user/assistant transcript exchanges
+- **Memory Search**: Searches indexed event/fact memory records
 - **Semantic Search**: Vector embeddings for intelligent similarity matching
 - **Text Search**: Fast exact-text matching for specific terms
 - **Source Filtering**: Filter by source kind and date range
-- **Conversation Reading**: Archived transcript retrieval with line ranges
+- **Archive Reading**: Archived transcript retrieval with line ranges
 - **Inline Exclusion Markers**: Exclude sensitive conversations with `DO NOT INDEX THIS CHAT`
 - **CLI Interface**: Direct CLI access for manual operations
 
@@ -23,12 +22,12 @@ with integration into the Claude Code plugin ecosystem.
 
 ### `search-conversation`
 
-Specialized agent for searching and synthesizing conversation history from indexed transcript exchanges.
+Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 Saves context by searching first and reading archive lines only when needed.
 
 **The agent automatically:**
 
-1. Searches transcript exchanges
+1. Searches event/fact memory records
 2. Reads raw transcript lines only if needed
 3. Synthesizes findings into a concise summary
 4. Returns actionable insights with sources
@@ -66,14 +65,14 @@ These tools are exposed for advanced usage.
 
 ### `memmem__search`
 
-Searches indexed transcript exchanges.
+Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 
 **Parameters:**
 
 - `query` (string, required): Search query
 - `limit` (number, optional): Maximum results to return (1-50, default: 10)
-- `before` (string, optional): Only conversations before this date (YYYY-MM-DD)
-- `after` (string, optional): Only conversations after this date (YYYY-MM-DD)
+- `before` (string, optional): Only memories before this date (YYYY-MM-DD)
+- `after` (string, optional): Only memories after this date (YYYY-MM-DD)
 - `source_kind` (string, optional): Filter to a source kind such as `claude-projects` or `codex-sessions`
 
 **Example:**
@@ -107,7 +106,7 @@ The plugin automatically:
 
 1. Creates `~/.config/memmem/` directory
 2. Syncs and indexes transcripts via the SessionStart hook
-3. Provides MCP tools for transcript search and reading
+3. Provides MCP tools for memory search and archive reading
 
 ## How It Works
 
@@ -122,9 +121,9 @@ memmem sync
 This:
 
 1. Copies Claude Code and Codex transcripts into `~/.config/memmem/conversation-archive/`
-2. Reindexes changed archive files into transcript exchanges
+2. Extracts source-linked event/fact memory records from changed archive files
 3. Generates embeddings using Transformers.js
-4. Stores exchange metadata and vectors in SQLite
+4. Stores memory record metadata and vectors in SQLite
 5. Runs in background
 
 ### Storage Structure
@@ -133,7 +132,7 @@ This:
 ~/.config/memmem/
 ├── conversation-archive/     # Copied source transcripts
 ├── conversation-index/
-│   └── conversations.db      # SQLite database with exchange embeddings
+│   └── conversations.db      # SQLite database with memory record embeddings
 └── config.json               # User settings (optional)
 ```
 
@@ -206,9 +205,19 @@ memmem --help
 # Copy and index transcripts
 memmem sync
 
-# Search indexed transcript exchanges
-memmem search "query"
+# Search indexed event/fact memory records
+memmem search "what did we decide about memory records?"
+```
 
+Expected output example:
+
+```md
+## [event, claude-projects, 2026-06-01] memmem
+The user decided to remove exchange as the primary concept and use event/fact memory records.
+Source: /path/to/archive.jsonl:120-124
+```
+
+```bash
 # Read archived transcript lines
 memmem read /path/to/archive.jsonl --start-line 1 --end-line 20
 ```
@@ -268,7 +277,7 @@ plugins/memmem/
 ## Upgrading to the transcript index
 
 **IMPORTANT**: This release is a breaking local index change. The old observation database is not compatible
-with the transcript exchange schema. Delete the old database before rebuilding the index.
+with the memory record schema. Delete the old database before rebuilding the index.
 
 ### Migration Steps
 

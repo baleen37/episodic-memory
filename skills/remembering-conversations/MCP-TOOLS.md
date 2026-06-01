@@ -1,6 +1,6 @@
 # MCP Tools API Reference
 
-This document provides the memmem MCP tool reference for indexed transcript search.
+This document provides the memmem MCP tool reference for indexed event/fact memory record search.
 
 **Warning:** Direct MCP tool usage can waste context. Prefer the `search-conversation` agent unless you need manual control.
 
@@ -8,7 +8,7 @@ This document provides the memmem MCP tool reference for indexed transcript sear
 
 The current flow is:
 
-1. `search()` indexed transcript exchanges.
+1. `search()` indexed event/fact memory records.
 2. `read()` archived transcript lines for selected results when more context is needed.
 3. Synthesize findings and cite archive paths with line ranges.
 
@@ -16,7 +16,7 @@ The current flow is:
 
 ## search
 
-Search indexed transcript exchanges using hybrid semantic and text matching.
+Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 
 ### Parameters
 
@@ -62,7 +62,8 @@ Search results include:
   "source_kind": "claude-projects",
   "project": "my-project",
   "timestamp": 1780000000000,
-  "snippet": "User and assistant exchange snippet...",
+  "kind": "event",
+  "text": "The user decided to use source-linked event/fact memory records.",
   "score": 0.82
 }
 ```
@@ -100,7 +101,7 @@ Read archived transcript lines.
 }
 ```
 
-Expand the line range if the matching exchange needs surrounding context:
+Expand the line range if the matching memory record needs surrounding context or raw transcript evidence:
 
 ```json
 {
@@ -124,10 +125,10 @@ Expand the line range if the matching exchange needs surrounding context:
 ## Recommended Direct Workflow
 
 ```typescript
-// Step 1: Search transcript exchanges
+// Step 1: Search event/fact memory records
 { query: "authentication", limit: 10 }
 
-// Step 2: Read a promising result if the snippet is not enough
+// Step 2: Read a promising result if the memory record is not enough
 {
   path: result.archive_path,
   startLine: result.line_start,
@@ -145,7 +146,7 @@ Expand the line range if the matching exchange needs surrounding context:
 | Context usage | Manual management | Reads only what is needed |
 | Workflow | Manual search then read | Automatic search/read/synthesis |
 | Sources | Must track manually | Included in response |
-| Output | Raw snippets/transcript lines | Curated insights |
+| Output | Raw memory records/transcript lines | Curated insights |
 
 ## See Also
 
