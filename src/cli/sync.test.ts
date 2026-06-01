@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { initDatabase } from '../core/db.js';
+import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector, upsertExtractionState } from '../core/db.js';
 import { __setModelForTests } from '../core/embeddings.js';
 import { syncTranscripts } from './sync.js';
 
@@ -15,6 +15,7 @@ const originalEnv = {
   TEST_DB_PATH: process.env.TEST_DB_PATH,
   CONVERSATION_MEMORY_DB_PATH: process.env.CONVERSATION_MEMORY_DB_PATH,
   MEMMEM_DB_PATH: process.env.MEMMEM_DB_PATH,
+  HOME: process.env.HOME,
 };
 
 afterEach(() => {
@@ -28,6 +29,7 @@ afterEach(() => {
   restoreEnv('TEST_DB_PATH');
   restoreEnv('CONVERSATION_MEMORY_DB_PATH');
   restoreEnv('MEMMEM_DB_PATH');
+  restoreEnv('HOME');
   __setModelForTests(null, null);
 });
 
@@ -53,7 +55,10 @@ describe('syncTranscripts', () => {
     const result = await syncTranscripts(db);
 
     expect(result.copied).toBe(2);
-    expect(result.indexed).toBe(2);
+    expect(result.archived).toBe(2);
+    expect(result.spansConsidered).toBe(2);
+    expect(result.spansSkipped).toBe(2);
+    expect(result.memoryRecordsIndexed).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'session.jsonl'))).toBe(true);
     expect(existsSync(join(archiveDir, 'codex-sessions', 'rollout.jsonl'))).toBe(true);
   });
@@ -76,33 +81,40 @@ describe('syncTranscripts', () => {
     utimesSync(archivePath, future, future);
 
     const result = await syncTranscripts(db);
-    const row = db.query('SELECT user_text FROM exchanges WHERE archive_path = ?').get(archivePath) as { user_text: string };
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records WHERE archive_path = ?').get(archivePath) as { count: number };
 
-    expect(result.indexed).toBe(1);
-    expect(row.user_text).toBe('New question');
+    expect(result.archived).toBe(1);
+    expect(result.spansConsidered).toBe(1);
+    expect(result.spansSkipped).toBe(1);
+    expect(memoryCount.count).toBe(0);
   });
 
-  test('reindexes archive-only files when vectors are missing', async () => {
+  test('reindexes archive-only files when provider is missing and keeps memory rows unchanged', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-projects', 'proj', 'session.jsonl');
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
     writeClaudeTranscript(sourcePath, 'Archive question', 'Archive answer');
     setupEnv(claudeDir, codexDir, archiveDir);
     db = initDatabase();
     setGoodEmbeddingModel();
     await syncTranscripts(db);
+    seedMemoryRecord(db, archivePath);
 
     unlinkSync(sourcePath);
-    db.query('DELETE FROM vec_exchanges').run();
+    db.query('DELETE FROM vec_memory_records').run();
 
     const result = await syncTranscripts(db);
-    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_exchanges').get() as { count: number };
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
 
-    expect(result.indexed).toBe(1);
-    expect(vectorCount.count).toBe(1);
+    expect(result.archived).toBe(1);
+    expect(result.spansSkipped).toBe(1);
+    expect(memoryCount.count).toBe(1);
+    expect(vectorCount.count).toBe(0);
   });
 
-  test('counts indexed as archive files, not exchanges', async () => {
+  test('counts archived files separately from transcript spans', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
@@ -117,10 +129,33 @@ describe('syncTranscripts', () => {
     setGoodEmbeddingModel();
 
     const result = await syncTranscripts(db);
-    const exchangeCount = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
 
-    expect(result.indexed).toBe(1);
-    expect(exchangeCount.count).toBe(2);
+    expect(result.archived).toBe(1);
+    expect(result.spansConsidered).toBe(2);
+    expect(result.spansSkipped).toBe(2);
+    expect(memoryCount.count).toBe(0);
+  });
+
+  test('copies archives without memory rows when LLM provider is missing', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
+    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
+    writeClaudeTranscript(sourcePath, 'Provider question', 'Provider answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+
+    const result = await syncTranscripts(db);
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+
+    expect(result.copied).toBe(1);
+    expect(result.archived).toBe(1);
+    expect(result.spansConsidered).toBe(1);
+    expect(result.spansSkipped).toBe(1);
+    expect(result.memoryRecordsIndexed).toBe(0);
+    expect(memoryCount.count).toBe(0);
+    expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'session.jsonl'))).toBe(true);
   });
 
   test('does not copy or index transcripts below a .no-memmem directory', async () => {
@@ -135,11 +170,11 @@ describe('syncTranscripts', () => {
     setGoodEmbeddingModel();
 
     const result = await syncTranscripts(db);
-    const exchangeCount = db.query('SELECT COUNT(*) AS count FROM exchanges').get() as { count: number };
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
 
     expect(result.copied).toBe(0);
-    expect(result.indexed).toBe(0);
-    expect(exchangeCount.count).toBe(0);
+    expect(result.archived).toBe(0);
+    expect(memoryCount.count).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-projects', 'ignored', 'session.jsonl'))).toBe(false);
   });
 
@@ -154,14 +189,17 @@ describe('syncTranscripts', () => {
     db = initDatabase();
     setGoodEmbeddingModel();
     await syncTranscripts(db);
+    seedMemoryRecord(db, archivePath);
 
     writeFileSync(join(sourceDir, '.no-memmem'), '');
 
     const result = await syncTranscripts(db);
-    const exchangeCount = db.query('SELECT COUNT(*) AS count FROM exchanges WHERE archive_path = ?').get(archivePath) as { count: number };
+    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records WHERE archive_path = ?').get(archivePath) as { count: number };
+    const stateCount = db.query('SELECT COUNT(*) AS count FROM extraction_state WHERE archive_path = ?').get(archivePath) as { count: number };
 
-    expect(result.indexed).toBe(0);
-    expect(exchangeCount.count).toBe(0);
+    expect(result.archived).toBe(0);
+    expect(memoryCount.count).toBe(0);
+    expect(stateCount.count).toBe(0);
     expect(existsSync(archivePath)).toBe(false);
   });
 });
@@ -181,6 +219,7 @@ function setupEnv(claudeDir: string, codexDir: string, archiveDir: string): void
   process.env.TEST_ARCHIVE_DIR = archiveDir;
   process.env.TEST_DB_PATH = ':memory:';
   process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
+  process.env.HOME = dir ?? claudeDir;
   delete process.env.MEMMEM_DB_PATH;
 }
 
@@ -193,6 +232,32 @@ function writeClaudeTranscript(filePath: string, userText: string, assistantText
     JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: userText } }),
     JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: assistantText } }),
   ].join('\n'));
+}
+
+function seedMemoryRecord(database: ReturnType<typeof initDatabase>, archivePath: string): void {
+  const id = insertMemoryRecord(database, {
+    kind: 'fact',
+    text: 'Seeded memory record.',
+    sourceKind: 'claude-projects',
+    archivePath,
+    lineStart: 1,
+    lineEnd: 2,
+    observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
+    project: 'proj',
+    dedupeKey: `seed:${archivePath}`,
+    extractionVersion: CURRENT_EXTRACTION_VERSION,
+    embeddingVersion: CURRENT_EMBEDDING_VERSION,
+  });
+  insertMemoryRecordVector(database, id, Array.from({ length: 384 }, () => 0.1));
+  upsertExtractionState(database, {
+    sourceKind: 'claude-projects',
+    archivePath,
+    lineStart: 1,
+    lineEnd: 2,
+    sourceHash: 'seed-hash',
+    extractionVersion: CURRENT_EXTRACTION_VERSION,
+    status: 'done',
+  });
 }
 
 function restoreEnv(key: keyof typeof originalEnv): void {

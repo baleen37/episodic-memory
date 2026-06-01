@@ -3,14 +3,20 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, s
 import path from 'path';
 import { deleteMemoryIndexForArchivePathPrefix, openDatabase } from '../core/db.js';
 import { reindexArchiveFile } from '../core/indexer.js';
+import { loadConfig, createProvider } from '../core/llm/index.js';
+import type { LLMProvider } from '../core/llm/types.js';
 import { log } from '../core/logger.js';
 import { getArchiveDir } from '../core/paths.js';
 import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/index.js';
 
 export interface SyncResult {
   copied: number;
-  indexed: number;
-  skipped: number;
+  archived: number;
+  spansConsidered: number;
+  spansSkipped: number;
+  spansEmpty: number;
+  spansErrored: number;
+  memoryRecordsIndexed: number;
 }
 
 interface ArchiveFile {
@@ -21,7 +27,16 @@ interface ArchiveFile {
 export async function syncTranscripts(db: Database): Promise<SyncResult> {
   const archiveDir = getArchiveDir();
   const archiveFiles = new Map<string, ArchiveFile>();
-  let copied = 0;
+  const provider = await loadExtractionProvider();
+  const result: SyncResult = {
+    copied: 0,
+    archived: 0,
+    spansConsidered: 0,
+    spansSkipped: 0,
+    spansEmpty: 0,
+    spansErrored: 0,
+    memoryRecordsIndexed: 0,
+  };
 
   for (const adapter of getBuiltInSourceAdapters()) {
     for (const root of adapter.roots()) {
@@ -29,7 +44,7 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
       for (const sourcePath of findJsonlFiles(root, adapter, excludedSourceDirs)) {
         const archivePath = path.join(archiveDir, adapter.kind, path.relative(root, sourcePath));
         if (copyIfNewer(sourcePath, archivePath)) {
-          copied++;
+          result.copied++;
         }
         if (existsSync(archivePath)) {
           archiveFiles.set(archivePath, { adapter, archivePath });
@@ -55,30 +70,41 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
     log.info(`Indexing ${total} archive file${total === 1 ? '' : 's'}...`);
   }
 
-  let indexed = 0;
+  let archived = 0;
   const progressInterval = Math.max(1, Math.floor(total / 20));
   for (const file of archiveFiles.values()) {
-    await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse);
-    indexed++;
-    if (indexed % progressInterval === 0 || indexed === total) {
-      log.info(`  ${indexed}/${total} indexed`);
+    const reindexResult = await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse, provider);
+    result.spansConsidered += reindexResult.spansConsidered;
+    result.spansSkipped += reindexResult.spansSkipped;
+    result.spansEmpty += reindexResult.spansEmpty;
+    result.spansErrored += reindexResult.spansErrored;
+    result.memoryRecordsIndexed += reindexResult.memoryRecordsIndexed;
+    archived++;
+    if (archived % progressInterval === 0 || archived === total) {
+      log.info(`  ${archived}/${total} indexed`);
     }
   }
 
-  return {
-    copied,
-    indexed,
-    skipped: 0,
-  };
+  result.archived = archived;
+  return result;
 }
 
 export async function runSyncCli(): Promise<void> {
   const db = openDatabase();
   try {
     const result = await syncTranscripts(db);
-    log.info(`Done.`, { copied: result.copied, indexed: result.indexed, skipped: result.skipped });
+    log.info(`Done.`, { ...result });
   } finally {
     db.close();
+  }
+}
+
+async function loadExtractionProvider(): Promise<LLMProvider | null> {
+  try {
+    const config = loadConfig();
+    return config ? await createProvider(config) : null;
+  } catch {
+    return null;
   }
 }
 
