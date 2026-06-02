@@ -5,6 +5,7 @@ import {
   CURRENT_EMBEDDING_VERSION,
   CURRENT_EXTRACTION_VERSION,
   deleteMemoryIndexForArchivePath,
+  getExtractionAttemptCount,
   hasCompletedExtractionState,
   insertMemoryRecord,
   insertMemoryRecordVector,
@@ -233,6 +234,7 @@ export async function reindexArchiveFile(
             sourceHash,
             extractionVersion: CURRENT_EXTRACTION_VERSION,
             status: 'empty',
+            attemptCount: 0,
           });
           return 0;
         }
@@ -263,6 +265,7 @@ export async function reindexArchiveFile(
           sourceHash,
           extractionVersion: CURRENT_EXTRACTION_VERSION,
           status: 'done',
+          attemptCount: 0,
         });
         return preparedRecords.length;
       });
@@ -274,6 +277,16 @@ export async function reindexArchiveFile(
         result.memoryRecordsIndexed += indexedCount;
       }
     } catch (error) {
+      const now = Date.now();
+      const prevAttempts = getExtractionAttemptCount(
+        db,
+        span.archivePath,
+        span.lineStart,
+        span.lineEnd,
+        sourceHash,
+        CURRENT_EXTRACTION_VERSION,
+      );
+      const attemptCount = prevAttempts + 1;
       upsertExtractionState(db, {
         sourceKind: span.sourceKind,
         archivePath: span.archivePath,
@@ -283,7 +296,8 @@ export async function reindexArchiveFile(
         extractionVersion: CURRENT_EXTRACTION_VERSION,
         status: 'errored',
         errorMessage: error instanceof Error ? error.message : String(error),
-        retryAfter: Date.now() + 60 * 60 * 1000,
+        attemptCount,
+        retryAfter: computeRetryAfter(attemptCount, now),
       });
       result.spansErrored++;
     }
