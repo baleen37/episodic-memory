@@ -83,10 +83,11 @@ marketplace.json을 package.json 버전에 맞춘다.
 ## 기존 워크플로우와의 관계
 
 - **`on-release.yml`**: 변경 없음. Release published를 받아 마켓플레이스로 전파. ✅
-- **`update-versions.yml`**: 일단 그대로 둔다. 매시간 cron으로 메타데이터를
-  정렬하지만, 이제 semantic-release가 한 커밋에서 4개 파일을 모두 갱신하므로
-  역할이 겹친다. 다만 외부 마켓플레이스 dispatch 액션도 호출하므로 완전히
-  지우기는 애매하다. 구현 후 충돌 여부를 보고 판단한다.
+- **`update-versions.yml`**: `schedule: cron` 트리거만 제거한다. 이제
+  semantic-release가 한 커밋에서 4개 파일을 모두 갱신하므로 매시간 cron 정렬은
+  역할이 겹쳐 불필요하다. `workflow_dispatch`(수동)와
+  `repository_dispatch: update_versions`(마켓플레이스 경유 진입점)는 유지하고,
+  파일 내 align/verify/commit 로직도 그대로 둔다. 즉 자동 정기 실행만 사라진다.
 
 ## 리스크 / 트레이드오프
 
@@ -107,3 +108,5 @@ marketplace.json을 package.json 버전에 맞춘다.
 - [ ] 태그 vX.Y.Z와 GitHub Release가 생성된다.
 - [ ] release 커밋이 `[skip ci]`로 워크플로우 재트리거 시 새 릴리스를 만들지 않는다.
 - [ ] on-release.yml이 새 Release에서 트리거된다.
+- [ ] update-versions.yml에서 `schedule: cron`이 제거되고 workflow_dispatch /
+      repository_dispatch는 유지된다.
