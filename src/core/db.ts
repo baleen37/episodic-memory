@@ -114,6 +114,8 @@ function createDatabase(wipe: boolean): Database {
   sqliteVec.load(db);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA busy_timeout = 5000');
+  db.exec('PRAGMA synchronous = NORMAL');
   createSchema(db);
 
   return db;
