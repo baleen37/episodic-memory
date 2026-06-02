@@ -31,7 +31,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const hooks = loadHooksJson();
 
     expect(hooks).toHaveProperty('hooks');
-    expect(Object.keys(hooks.hooks)).toEqual(['SessionStart']);
+    expect(Object.keys(hooks.hooks)).toEqual(['SessionStart', 'Stop']);
 
     const sessionStartHooks = hooks.hooks.SessionStart;
     expect(Array.isArray(sessionStartHooks)).toBe(true);
@@ -50,11 +50,34 @@ describe('hooks.json sync-only hook configuration', () => {
     });
   });
 
+  it('runs sync on Stop for mid-session freshness', () => {
+    const hooks = loadHooksJson();
+
+    const stopHooks = hooks.hooks.Stop;
+    expect(Array.isArray(stopHooks)).toBe(true);
+    expect(stopHooks).toHaveLength(1);
+
+    const [hookGroup] = stopHooks;
+    expect(Array.isArray(hookGroup.hooks)).toBe(true);
+    expect(hookGroup.hooks).toHaveLength(1);
+
+    const [hook] = hookGroup.hooks;
+    expect(hook).toEqual({
+      type: 'command',
+      command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      async: true,
+    });
+  });
+
   it('does not reference old observation hook commands', () => {
     const hooks = loadHooksJson();
     const commands = getCommandHooks(hooks);
 
-    expect(commands).toEqual(['sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync']);
+    // Both SessionStart and Stop run the same sync command.
+    expect(commands).toEqual([
+      'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+    ]);
     for (const command of commands) {
       expect(command).not.toContain('recall');
       expect(command).not.toContain('record');
