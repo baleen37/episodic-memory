@@ -22,11 +22,12 @@ GitHub Release가 published 되면 외부 baleen-marketplace로 `update_versions
   외부 `baleen37/baleen-marketplace` repo로 `update_versions` repository_dispatch를
   전송한다. **여기서 memmem 쪽 체인은 끝난다** — dispatch를 받은 마켓플레이스
   repo가 자체적으로 버전 동기화를 처리하며, memmem repo로 되돌아오는 호출은 없다.
-- **메타데이터 정렬** (`update-versions.yml`, 기존): memmem repo로 직접 들어오는
-  `repository_dispatch: update_versions` 또는 수동 `workflow_dispatch`를 받아
-  plugin.json ×2와 marketplace.json을 package.json 버전에 맞춰 정렬하는 **독립
-  진입점**이다. 마켓플레이스 디스패치 체인의 일부가 아니며, 그동안 사실상
-  매시간 cron으로만 실행돼 왔다.
+- **메타데이터 정렬** (`update-versions.yml`, 기존 → **제거**): memmem repo로
+  들어오는 `repository_dispatch`/`workflow_dispatch`/cron을 받아 plugin.json ×2와
+  marketplace.json을 package.json 버전에 맞춰 정렬하던 독립 진입점이다.
+  마켓플레이스 디스패치 체인의 일부가 아니며, 사실상 cron으로만 실행돼 왔다.
+  semantic-release가 릴리스 시 같은 정렬을 수행하므로 **이 워크플로우와 전용
+  테스트 스크립트를 통째로 삭제한다**.
 
 ## Goal
 
@@ -96,26 +97,23 @@ marketplace.json은 별도로 버전을 써줘야 한다. → `@semantic-release
 
 ### 3. 버전 갱신 스크립트 (재사용)
 
-기존 `update-versions.yml`의 "Align standalone plugin metadata" 단계의 jq
-로직을 `scripts/sync-plugin-versions.sh` 같은 스크립트로 추출한다. semantic-release의
-`prepare` 단계(`@semantic-release/exec`)에서 호출하여 plugin.json ×2와
-marketplace.json을 package.json 버전에 맞춘다.
+삭제되는 `update-versions.yml`의 "Align standalone plugin metadata" 단계에 있던
+jq 로직을 `scripts/sync-plugin-versions.sh`로 옮긴다. semantic-release의 `prepare`
+단계(`@semantic-release/exec`)에서 호출하여 plugin.json ×2와 marketplace.json을
+package.json 버전에 맞춘다. 즉 정렬 책임이 cron 워크플로우에서 릴리스 파이프라인
+안으로 이동한다.
 
 ## 기존 워크플로우와의 관계
 
 - **`on-release.yml`** (마켓플레이스 디스패치): 변경 없음. Release published를
   받아 `baleen37/baleen-marketplace`로 dispatch. ✅
-- **`update-versions.yml`** (메타데이터 정렬): `schedule: cron` 트리거만 제거한다.
-  이제 semantic-release가 릴리스 시 한 커밋에서 4개 파일을 모두 갱신하므로 매시간
-  cron 정렬은 역할이 겹쳐 불필요하다. `workflow_dispatch`(수동)와
-  `repository_dispatch: update_versions`(독립 진입점)는 유지하고, 파일 내
-  align/verify/commit 로직도 그대로 둔다.
-
-  주의: 이 워크플로우는 마켓플레이스 디스패치 체인의 일부가 **아니다** — 별개의
-  독립 진입점이며, 그동안 사실상 cron으로만 실행돼 왔다. cron을 빼면 자동 실행은
-  사라지고 수동/외부 dispatch로만 남는다. semantic-release가 정렬을 대신하므로
-  의도된 결과지만, 이 워크플로우가 거의 휴면 상태가 된다는 점을 인지한다. (완전
-  삭제는 외부에서 이 repo로 직접 dispatch할 가능성을 닫으므로 이번 범위에서 제외.)
+- **`update-versions.yml`** (메타데이터 정렬): **파일 통째로 삭제**한다. 더불어
+  이 워크플로우 전용 테스트인 `scripts/verify-update-versions-workflow.test.sh`도
+  삭제한다(다른 곳에서 참조되지 않음을 확인함). 이 워크플로우는 마켓플레이스
+  디스패치 체인의 일부가 아니라 사실상 cron으로만 돌던 독립 정렬기였고, 그 정렬은
+  이제 semantic-release `prepare` 단계가 수행한다. 외부 마켓플레이스 액션
+  (`baleen37/baleen-marketplace/.github/actions/update-versions@main`) 호출도 이
+  파일에서만 일어나므로 함께 사라진다.
 
 ## 리스크 / 트레이드오프
 
@@ -136,5 +134,5 @@ marketplace.json을 package.json 버전에 맞춘다.
 - [ ] 태그 vX.Y.Z와 GitHub Release가 생성된다.
 - [ ] release 커밋이 `[skip ci]`로 워크플로우 재트리거 시 새 릴리스를 만들지 않는다.
 - [ ] on-release.yml이 새 Release에서 트리거된다.
-- [ ] update-versions.yml에서 `schedule: cron`이 제거되고 workflow_dispatch /
-      repository_dispatch는 유지된다.
+- [ ] update-versions.yml과 verify-update-versions-workflow.test.sh가 삭제되고,
+      두 파일에 대한 잔여 참조가 repo에 없다.
