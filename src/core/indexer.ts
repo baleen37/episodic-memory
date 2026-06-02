@@ -37,6 +37,22 @@ export function hasExclusionMarker(content: string): boolean {
   return EXCLUSION_MARKERS.some(marker => content.includes(marker));
 }
 
+export const BASE_DELAY_MS = 5 * 60 * 1000; // 5분
+export const ATTEMPT_CAP = 10;
+
+/**
+ * 지수 백오프 다음 재시도 시각. attemptCount는 이번 실패까지 포함한 누적 횟수.
+ * attemptCount >= ATTEMPT_CAP 이면 포기 의미로 null 반환(retry_after=NULL).
+ * 즉 10번째 실패(attemptCount=10)에서 null → 최대 9회 재시도 후 포기.
+ */
+export function computeRetryAfter(attemptCount: number, now: number): number | null {
+  if (attemptCount >= ATTEMPT_CAP) {
+    return null;
+  }
+  const delay = BASE_DELAY_MS * 2 ** (attemptCount - 1);
+  return now + delay;
+}
+
 function emptyResult(): ReindexArchiveResult {
   return {
     spansConsidered: 0,

@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { initDatabase } from './db.js';
 import { resetRateLimiters } from './ratelimiter.js';
 import { __setModelForTests } from './embeddings.js';
-import { reindexArchiveFile, type ArchiveParser } from './indexer.js';
+import { reindexArchiveFile, type ArchiveParser, computeRetryAfter, ATTEMPT_CAP, BASE_DELAY_MS } from './indexer.js';
 import type { LLMProvider } from './llm/types.js';
 
 let dir: string | null = null;
@@ -19,6 +19,25 @@ afterEach(() => {
   __setModelForTests(null, null);
   resetRateLimiters();
   delete process.env.TEST_DB_PATH;
+});
+
+test('computeRetryAfter: exponential 5min base, doubling', () => {
+  const now = 1_000_000;
+  expect(computeRetryAfter(1, now)).toBe(now + 5 * 60 * 1000);   // 5분
+  expect(computeRetryAfter(2, now)).toBe(now + 10 * 60 * 1000);  // 10분
+  expect(computeRetryAfter(3, now)).toBe(now + 20 * 60 * 1000);  // 20분
+  expect(computeRetryAfter(4, now)).toBe(now + 40 * 60 * 1000);  // 40분
+});
+
+test('computeRetryAfter: returns null at or above attempt cap (give up)', () => {
+  const now = 1_000_000;
+  expect(ATTEMPT_CAP).toBe(10);
+  expect(computeRetryAfter(ATTEMPT_CAP, now)).toBeNull();
+  expect(computeRetryAfter(ATTEMPT_CAP + 1, now)).toBeNull();
+});
+
+test('BASE_DELAY_MS is 5 minutes', () => {
+  expect(BASE_DELAY_MS).toBe(5 * 60 * 1000);
 });
 
 describe('reindexArchiveFile', () => {
