@@ -35,4 +35,6 @@ jobs:
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 릴리스 성공 후 successCmd가 baleen-marketplace로 디스패치할 때 쓴다.
+          MARKETPLACE_DISPATCH_TOKEN: ${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}
         run: npx semantic-release
