@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import { search, getMemoryRecordLocation } from '../core/search.js';
+import { search, searchMulti, getMemoryRecordLocation } from '../core/search.js';
 import { readConversation } from '../core/read.js';
 import type { SearchInput, FetchInput } from './schemas.js';
 
@@ -11,12 +11,15 @@ export interface SearchResult {
 }
 
 export async function handleSearch(params: SearchInput, db: Database): Promise<SearchResult[]> {
-  const results = await search(params.query, {
+  const options = {
     db,
     limit: params.limit,
     after: params.after,
     before: params.before,
-  });
+  };
+  const results = Array.isArray(params.query)
+    ? await searchMulti(params.query, options)
+    : await search(params.query, options);
 
   return results.map(result => {
     const card: SearchResult = {
