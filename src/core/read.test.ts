@@ -92,7 +92,21 @@ describe('read.ts', () => {
       expect(result).toBeNull();
     });
 
-    test('reads from JSONL file', () => {
+    test('requires both startLine and endLine before reading transcript content', () => {
+      const jsonlPath = join(tempDir, 'test-requires-range.jsonl');
+      const jsonl = [
+        createMessage({ type: 'user', message: { role: 'user', content: 'Do not read all of this' } }),
+        createMessage({ type: 'assistant', message: { role: 'assistant', content: 'Use a bounded range' } })
+      ].join('\n');
+
+      writeFileSync(jsonlPath, jsonl);
+
+      expect(readConversation(jsonlPath)).toBeNull();
+      expect(readConversation(jsonlPath, 1)).toBeNull();
+      expect(readConversation(jsonlPath, undefined, 2)).toBeNull();
+    });
+
+    test('reads from JSONL file with explicit line range', () => {
       const jsonlPath = join(tempDir, 'test-conversation.jsonl');
       const jsonl = [
         createMessage({ type: 'user', message: { role: 'user', content: 'Hello from JSONL!' } }),
@@ -104,7 +118,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation( jsonlPath);
+      const result = readConversation( jsonlPath, 1, 2);
 
       expect(result).not.toBeNull();
       expect(result).toContain('# Conversation');
@@ -123,7 +137,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation(jsonlPath);
+      const result = readConversation(jsonlPath, 1, 3);
 
       expect(result).not.toBeNull();
       expect(result).not.toBe('');
@@ -137,7 +151,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation(jsonlPath);
+      const result = readConversation(jsonlPath, 1, 1);
 
       expect(result).not.toBeNull();
       expect(result).not.toBe('');
@@ -149,7 +163,7 @@ describe('read.ts', () => {
       expect(result).toBeNull();
     });
 
-    test('respects startLine parameter when reading from JSONL', () => {
+    test('uses explicit line range start when reading from JSONL', () => {
       const jsonlPath = join(tempDir, 'test-pagination.jsonl');
       const jsonl = [
         createMessage({ type: 'user', message: { role: 'user', content: 'Message 1' } }),
@@ -166,13 +180,13 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation( jsonlPath, 3);
+      const result = readConversation( jsonlPath, 3, 4);
 
       expect(result).toContain('Message 2');
       expect(result).not.toContain('Message 1');
     });
 
-    test('respects endLine parameter when reading from JSONL', () => {
+    test('uses explicit line range end when reading from JSONL', () => {
       const jsonlPath = join(tempDir, 'test-pagination.jsonl');
       const jsonl = [
         createMessage({ type: 'user', message: { role: 'user', content: 'Message 1' } }),
@@ -189,7 +203,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation( jsonlPath, undefined, 2);
+      const result = readConversation( jsonlPath, 1, 2);
 
       expect(result).toContain('Message 1');
       expect(result).toContain('Response 1');
@@ -245,7 +259,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation( jsonlPath);
+      const result = readConversation( jsonlPath, 1, 2);
 
       expect(result).toContain('**Tool Use:** `read_file`');
       expect(result).toContain('**file_path:**');
@@ -269,7 +283,7 @@ describe('read.ts', () => {
 
       writeFileSync(jsonlPath, jsonl);
 
-      const result = readConversation( jsonlPath);
+      const result = readConversation( jsonlPath, 1, 2);
 
       expect(result).toContain('🔀 SIDECHAIN START');
       expect(result).toContain('🔀 SIDECHAIN END');
