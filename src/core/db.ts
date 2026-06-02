@@ -307,6 +307,24 @@ export function upsertExtractionState(db: Database, state: ExtractionStateInsert
   );
 }
 
+export function getExtractionAttemptCount(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): number {
+  const row = db.query(`
+    SELECT attempt_count AS attemptCount FROM extraction_state
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+      AND source_hash = ? AND extraction_version = ?
+  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion) as
+    | { attemptCount: number }
+    | null;
+  return row?.attemptCount ?? 0;
+}
+
 export function hasCompletedExtractionState(
   db: Database,
   archivePath: string,

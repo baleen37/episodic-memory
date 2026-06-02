@@ -19,6 +19,7 @@ import {
   searchObservations,
   upsertExtractionState,
   hasCompletedExtractionState,
+  getExtractionAttemptCount,
 } from './db.js';
 
 let db: ReturnType<typeof initDatabase> | null = null;
@@ -249,6 +250,19 @@ describe('memory record database schema', () => {
       'SELECT attempt_count AS attemptCount FROM extraction_state WHERE archive_path = ?'
     ).get('/b.jsonl') as { attemptCount: number };
     expect(row.attemptCount).toBe(0);
+  });
+
+  test('getExtractionAttemptCount returns current count, 0 when missing', () => {
+    const db = openTestDatabase();
+    // missing span → 0
+    expect(getExtractionAttemptCount(db, '/x.jsonl', 1, 5, 'h1', 1)).toBe(0);
+
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/x.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'errored', attemptCount: 4, retryAfter: 999,
+    });
+    expect(getExtractionAttemptCount(db, '/x.jsonl', 1, 5, 'h1', 1)).toBe(4);
   });
 
   test('legacy observation schema exports fail with explicit removed-schema errors', async () => {
