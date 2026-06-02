@@ -27,7 +27,7 @@ test('given-up span (attempt_count>=cap, retry_after null) is skipped', () => {
   upsertExtractionState(db, {
     sourceKind: 'claude-projects', archivePath: '/g.jsonl',
     lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
-    status: 'errored', attemptCount: 10, retryAfter: null,
+    status: 'errored', attemptCount: ATTEMPT_CAP, retryAfter: null,
   });
   expect(
     hasPendingRetryExtractionStateForTests(db, '/g.jsonl', 1, 5, 'h1', 1),

@@ -138,7 +138,7 @@ function hasPendingRetryExtractionState(
       AND source_hash = ? AND extraction_version = ? AND status = 'errored'
       AND (
         (retry_after IS NOT NULL AND retry_after > ?)
-        OR attempt_count >= ?
+        OR (attempt_count >= ? AND retry_after IS NULL)
       )
   `).get(
     archivePath, lineStart, lineEnd, sourceHash, extractionVersion,
