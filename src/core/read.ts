@@ -139,6 +139,11 @@ export function readConversation(
     return null;
   }
 
+  // Always require an explicit bounded line range before reading transcript content.
+  if (startLine === undefined || endLine === undefined) {
+    return null;
+  }
+
   // Read and format JSONL file
   const jsonlContent = fs.readFileSync(path, 'utf-8');
   return formatConversationAsMarkdown(jsonlContent, startLine, endLine);

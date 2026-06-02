@@ -14,8 +14,8 @@ interface SearchCliArgs {
 
 interface ReadCliArgs {
   path: string;
-  startLine?: number;
-  endLine?: number;
+  startLine: number;
+  endLine: number;
 }
 
 function requireOptionValue(args: string[], index: number, flag: string): string {
@@ -73,7 +73,7 @@ export function parseReadArgs(args: string[]): ReadCliArgs {
     throw new Error('read requires a path');
   }
 
-  const parsed: ReadCliArgs = { path };
+  const parsed: Partial<ReadCliArgs> & { path: string } = { path };
 
   for (let i = 2; i < args.length; i++) {
     const arg = args[i];
@@ -88,11 +88,14 @@ export function parseReadArgs(args: string[]): ReadCliArgs {
     }
   }
 
-  if (parsed.startLine !== undefined && parsed.endLine !== undefined && parsed.startLine > parsed.endLine) {
+  if (parsed.startLine === undefined || parsed.endLine === undefined) {
+    throw new Error('read requires --start-line and --end-line');
+  }
+  if (parsed.startLine > parsed.endLine) {
     throw new Error('--start-line must be less than or equal to --end-line');
   }
 
-  return parsed;
+  return { path: parsed.path, startLine: parsed.startLine, endLine: parsed.endLine };
 }
 
 export function getHelpText(): string {
@@ -116,8 +119,8 @@ SEARCH OPTIONS:
   --source-kind <kind>    Filter by transcript source kind
 
 READ OPTIONS:
-  --start-line <number>   First archive line to read
-  --end-line <number>     Last archive line to read
+  --start-line <number>   First archive line to read (required)
+  --end-line <number>     Last archive line to read (required)
 
 EXAMPLES:
   memmem search "source of truth" --limit 5

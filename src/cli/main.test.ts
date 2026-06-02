@@ -55,6 +55,12 @@ describe('CLI argument parsing', () => {
     expect(() => parseReadArgs(['read', '--start-line', '3'])).toThrow('read requires a path');
   });
 
+  test('requires both start and end line for read args', () => {
+    expect(() => parseReadArgs(['read', '/archive/session.jsonl'])).toThrow('read requires --start-line and --end-line');
+    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '3'])).toThrow('read requires --start-line and --end-line');
+    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--end-line', '8'])).toThrow('read requires --start-line and --end-line');
+  });
+
   test('rejects invalid numeric read option', () => {
     expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '0'])).toThrow('--start-line must be a positive integer');
   });
