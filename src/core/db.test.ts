@@ -225,6 +225,32 @@ describe('memory record database schema', () => {
     }
   });
 
+  test('upsertExtractionState persists attempt_count', () => {
+    const db = openTestDatabase();
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/a.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'errored', attemptCount: 3, retryAfter: 999,
+    });
+    const row = db.query(
+      'SELECT attempt_count AS attemptCount FROM extraction_state WHERE archive_path = ?'
+    ).get('/a.jsonl') as { attemptCount: number };
+    expect(row.attemptCount).toBe(3);
+  });
+
+  test('upsertExtractionState defaults attempt_count to 0 when omitted', () => {
+    const db = openTestDatabase();
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/b.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'done',
+    });
+    const row = db.query(
+      'SELECT attempt_count AS attemptCount FROM extraction_state WHERE archive_path = ?'
+    ).get('/b.jsonl') as { attemptCount: number };
+    expect(row.attemptCount).toBe(0);
+  });
+
   test('legacy observation schema exports fail with explicit removed-schema errors', async () => {
     const db = openTestDatabase();
 

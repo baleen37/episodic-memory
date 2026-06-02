@@ -48,6 +48,7 @@ export interface ExtractionStateInsert {
   status: ExtractionStatus;
   errorMessage?: string | null;
   retryAfter?: number | null;
+  attemptCount?: number;
 }
 
 export interface PendingEvent {
@@ -280,14 +281,15 @@ export function upsertExtractionState(db: Database, state: ExtractionStateInsert
   db.query(`
     INSERT INTO extraction_state (
       source_kind, archive_path, line_start, line_end, source_hash,
-      extraction_version, status, error_message, retry_after, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      extraction_version, status, error_message, retry_after, attempt_count, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_path, line_start, line_end, source_hash, extraction_version)
     DO UPDATE SET
       source_kind = excluded.source_kind,
       status = excluded.status,
       error_message = excluded.error_message,
       retry_after = excluded.retry_after,
+      attempt_count = excluded.attempt_count,
       updated_at = excluded.updated_at
   `).run(
     state.sourceKind,
@@ -299,6 +301,7 @@ export function upsertExtractionState(db: Database, state: ExtractionStateInsert
     state.status,
     state.errorMessage ?? null,
     state.retryAfter ?? null,
+    state.attemptCount ?? 0,
     now,
     now,
   );
