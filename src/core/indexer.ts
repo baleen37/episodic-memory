@@ -133,12 +133,32 @@ function hasPendingRetryExtractionState(
   extractionVersion: number,
 ): boolean {
   const row = db.query(`
-    SELECT retry_after AS retryAfter FROM extraction_state
+    SELECT 1 AS one FROM extraction_state
     WHERE archive_path = ? AND line_start = ? AND line_end = ?
       AND source_hash = ? AND extraction_version = ? AND status = 'errored'
-      AND retry_after IS NOT NULL AND retry_after > ?
-  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion, Date.now()) as { retryAfter: number } | null;
+      AND (
+        (retry_after IS NOT NULL AND retry_after > ?)
+        OR attempt_count >= ?
+      )
+  `).get(
+    archivePath, lineStart, lineEnd, sourceHash, extractionVersion,
+    Date.now(), ATTEMPT_CAP,
+  ) as { one: number } | null;
   return row !== null;
+}
+
+// Test-only export
+export function hasPendingRetryExtractionStateForTests(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): boolean {
+  return hasPendingRetryExtractionState(
+    db, archivePath, lineStart, lineEnd, sourceHash, extractionVersion,
+  );
 }
 
 interface PreparedMemoryRecord {

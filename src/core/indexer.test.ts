@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { initDatabase } from './db.js';
+import { initDatabase, upsertExtractionState } from './db.js';
 import { resetRateLimiters } from './ratelimiter.js';
 import { __setModelForTests } from './embeddings.js';
-import { reindexArchiveFile, type ArchiveParser, computeRetryAfter, ATTEMPT_CAP, BASE_DELAY_MS } from './indexer.js';
+import { reindexArchiveFile, type ArchiveParser, computeRetryAfter, ATTEMPT_CAP, BASE_DELAY_MS, hasPendingRetryExtractionStateForTests } from './indexer.js';
 import type { LLMProvider } from './llm/types.js';
 
 let dir: string | null = null;
@@ -19,6 +19,45 @@ afterEach(() => {
   __setModelForTests(null, null);
   resetRateLimiters();
   delete process.env.TEST_DB_PATH;
+});
+
+test('given-up span (attempt_count>=cap, retry_after null) is skipped', () => {
+  process.env.TEST_DB_PATH = ':memory:';
+  db = initDatabase();
+  upsertExtractionState(db, {
+    sourceKind: 'claude-projects', archivePath: '/g.jsonl',
+    lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+    status: 'errored', attemptCount: 10, retryAfter: null,
+  });
+  expect(
+    hasPendingRetryExtractionStateForTests(db, '/g.jsonl', 1, 5, 'h1', 1),
+  ).toBe(true); // true = skip
+});
+
+test('errored span still within backoff window is skipped', () => {
+  process.env.TEST_DB_PATH = ':memory:';
+  db = initDatabase();
+  upsertExtractionState(db, {
+    sourceKind: 'claude-projects', archivePath: '/w.jsonl',
+    lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+    status: 'errored', attemptCount: 2, retryAfter: Date.now() + 60_000,
+  });
+  expect(
+    hasPendingRetryExtractionStateForTests(db, '/w.jsonl', 1, 5, 'h1', 1),
+  ).toBe(true);
+});
+
+test('errored span past backoff window (not given up) is NOT skipped', () => {
+  process.env.TEST_DB_PATH = ':memory:';
+  db = initDatabase();
+  upsertExtractionState(db, {
+    sourceKind: 'claude-projects', archivePath: '/r.jsonl',
+    lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+    status: 'errored', attemptCount: 2, retryAfter: Date.now() - 60_000,
+  });
+  expect(
+    hasPendingRetryExtractionStateForTests(db, '/r.jsonl', 1, 5, 'h1', 1),
+  ).toBe(false); // false = eligible to retry
 });
 
 test('computeRetryAfter: exponential 5min base, doubling', () => {
@@ -404,6 +443,56 @@ describe('reindexArchiveFile', () => {
     expect(secondResult.spansSkipped).toBe(1);
     expect(secondResult.spansErrored).toBe(0);
     expect(completeCalls).toBe(1);
+  });
+
+  test('accumulates attempt_count across repeated extraction failures', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: 'Fact to fail on.',
+    }];
+    const provider: LLMProvider = {
+      async complete() {
+        throw new Error('provider always fails');
+      },
+    };
+
+    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    expect(firstResult.spansErrored).toBe(1);
+
+    const stateAfterFirst = db.query('SELECT status, attempt_count AS attemptCount FROM extraction_state').get() as { status: string; attemptCount: number } | null;
+    expect(stateAfterFirst?.status).toBe('errored');
+    expect(stateAfterFirst?.attemptCount).toBe(1);
+
+    // Manually set retry_after to past so the span is eligible for retry
+    db.query('UPDATE extraction_state SET retry_after = ? WHERE archive_path = ?').run(Date.now() - 1_000, archivePath);
+
+    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    expect(secondResult.spansErrored).toBe(1);
+
+    const stateAfterSecond = db.query('SELECT status, attempt_count AS attemptCount FROM extraction_state').get() as { status: string; attemptCount: number } | null;
+    expect(stateAfterSecond?.status).toBe('errored');
+    expect(stateAfterSecond?.attemptCount).toBe(2);
   });
 
   test('removes existing memory index when conversation marker asks not to index', async () => {
