@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector, upsertExtractionState } from '../core/db.js';
 import { __setModelForTests } from '../core/embeddings.js';
+import { acquireSyncLock } from '../core/lock.js';
 import { syncTranscripts } from './sync.js';
 
 let dir: string | null = null;
@@ -235,6 +236,36 @@ describe('syncTranscripts', () => {
     expect(memoryCount.count).toBe(0);
     expect(stateCount.count).toBe(0);
     expect(existsSync(archivePath)).toBe(false);
+  });
+});
+
+describe('runSyncCli lock', () => {
+  let lockDir: string;
+  beforeEach(() => {
+    lockDir = mkdtempSync(join(tmpdir(), 'memmem-synclock-'));
+    process.env.CONVERSATION_MEMORY_CONFIG_DIR = lockDir;
+    process.env.CLAUDE_CONFIG_DIR = join(lockDir, 'claude');
+    process.env.CODEX_HOME = join(lockDir, 'codex');
+  });
+  afterEach(() => {
+    delete process.env.CONVERSATION_MEMORY_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CODEX_HOME;
+    rmSync(lockDir, { recursive: true, force: true });
+  });
+
+  test('skips work when the lock is already held', async () => {
+    const held = acquireSyncLock();
+    expect(held).not.toBeNull();
+
+    const { runSyncCli } = await import('./sync.js');
+    await expect(runSyncCli()).resolves.toBeUndefined();
+
+    // Lock still held → runSyncCli must NOT have acquired/released it.
+    const second = acquireSyncLock();
+    expect(second).toBeNull();
+
+    held!();
   });
 });
 
