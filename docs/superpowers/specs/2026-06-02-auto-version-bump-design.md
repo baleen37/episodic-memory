@@ -6,18 +6,38 @@ Date: 2026-06-02
 
 main에 PR이 머지되어도 버전이 자동으로 올라가지 않는다. 커밋은 Conventional
 Commits 형식(`feat:`, `fix:`, `chore:` 등)으로 작성되어 있고, `on-release.yml`은
-GitHub Release가 published 되면 마켓플레이스로 전파하는 역할을 이미 한다. 그러나
-"버전 계산 → 태그 → Release 발행"이라는 시작점이 없어서, 예를 들어 `v1.1.2`
-이후 `feat(logger)`(#30)가 머지됐는데도 버전은 `1.1.2`에 머물러 있다.
+GitHub Release가 published 되면 외부 baleen-marketplace로 `update_versions`
+이벤트를 보내는 **마켓플레이스 디스패치** 역할을 이미 한다. 그러나
+"버전 계산 → 태그 → Release 발행"이라는 **릴리스 발행** 시작점이 없어서, 예를
+들어 `v1.1.2` 이후 `feat(logger)`(#30)가 머지됐는데도 버전은 `1.1.2`에 머물러
+있다.
+
+## 용어
+
+세 워크플로우의 역할을 다음 이름으로 구분한다.
+
+- **릴리스 발행** (`release.yml`, 신규): 버전 계산 → 메타데이터 갱신 → git
+  태그 → GitHub Release published.
+- **마켓플레이스 디스패치** (`on-release.yml`, 기존): Release published를 받아
+  외부 `baleen37/baleen-marketplace` repo로 `update_versions` repository_dispatch를
+  전송한다. **여기서 memmem 쪽 체인은 끝난다** — dispatch를 받은 마켓플레이스
+  repo가 자체적으로 버전 동기화를 처리하며, memmem repo로 되돌아오는 호출은 없다.
+- **메타데이터 정렬** (`update-versions.yml`, 기존): memmem repo로 직접 들어오는
+  `repository_dispatch: update_versions` 또는 수동 `workflow_dispatch`를 받아
+  plugin.json ×2와 marketplace.json을 package.json 버전에 맞춰 정렬하는 **독립
+  진입점**이다. 마켓플레이스 디스패치 체인의 일부가 아니며, 그동안 사실상
+  매시간 cron으로만 실행돼 왔다.
 
 ## Goal
 
-main 머지 시 자동으로:
+main 머지 시 **릴리스 발행**이 자동으로:
 1. Conventional Commits 기반 다음 버전 계산
 2. 버전 메타데이터 파일 4개 갱신
 3. git 태그 + GitHub Release published
 
-이후는 기존 `on-release.yml`이 받아 마켓플레이스로 전파한다.
+이후는 기존 **마켓플레이스 디스패치**(`on-release.yml`)가 Release를 받아 외부
+`baleen37/baleen-marketplace` repo로 `update_versions`를 보내고 거기서 끝난다.
+이 디스패치 체인은 변경 없이 유지된다.
 
 ## 비범위 (Out of Scope)
 
@@ -37,7 +57,8 @@ PR을 main에 머지 (커밋: feat/fix/...)
                  + .codex-plugin/plugin.json + .claude-plugin/marketplace.json 갱신
               3. 변경 커밋(chore(release): ... [skip ci]) + 태그(vX.Y.Z) 푸시
               4. GitHub Release published (자동 생성 체인지로그 포함)
-                    └─> 기존 on-release.yml 트리거 → 마켓플레이스 전파
+                    └─> 기존 on-release.yml 트리거
+                          └─> baleen37/baleen-marketplace로 dispatch → [거기서 끝]
 ```
 
 ## 구성 요소
@@ -82,12 +103,19 @@ marketplace.json을 package.json 버전에 맞춘다.
 
 ## 기존 워크플로우와의 관계
 
-- **`on-release.yml`**: 변경 없음. Release published를 받아 마켓플레이스로 전파. ✅
-- **`update-versions.yml`**: `schedule: cron` 트리거만 제거한다. 이제
-  semantic-release가 한 커밋에서 4개 파일을 모두 갱신하므로 매시간 cron 정렬은
-  역할이 겹쳐 불필요하다. `workflow_dispatch`(수동)와
-  `repository_dispatch: update_versions`(마켓플레이스 경유 진입점)는 유지하고,
-  파일 내 align/verify/commit 로직도 그대로 둔다. 즉 자동 정기 실행만 사라진다.
+- **`on-release.yml`** (마켓플레이스 디스패치): 변경 없음. Release published를
+  받아 `baleen37/baleen-marketplace`로 dispatch. ✅
+- **`update-versions.yml`** (메타데이터 정렬): `schedule: cron` 트리거만 제거한다.
+  이제 semantic-release가 릴리스 시 한 커밋에서 4개 파일을 모두 갱신하므로 매시간
+  cron 정렬은 역할이 겹쳐 불필요하다. `workflow_dispatch`(수동)와
+  `repository_dispatch: update_versions`(독립 진입점)는 유지하고, 파일 내
+  align/verify/commit 로직도 그대로 둔다.
+
+  주의: 이 워크플로우는 마켓플레이스 디스패치 체인의 일부가 **아니다** — 별개의
+  독립 진입점이며, 그동안 사실상 cron으로만 실행돼 왔다. cron을 빼면 자동 실행은
+  사라지고 수동/외부 dispatch로만 남는다. semantic-release가 정렬을 대신하므로
+  의도된 결과지만, 이 워크플로우가 거의 휴면 상태가 된다는 점을 인지한다. (완전
+  삭제는 외부에서 이 repo로 직접 dispatch할 가능성을 닫으므로 이번 범위에서 제외.)
 
 ## 리스크 / 트레이드오프
 
