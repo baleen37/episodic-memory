@@ -281,3 +281,46 @@ export async function search(
   for (const result of fallbackResults) if (!combined.has(result.id)) combined.set(result.id, result);
   return Array.from(combined.values()).slice(0, limit);
 }
+
+export async function searchMulti(
+  queries: string[],
+  options: SearchOptions
+): Promise<MemorySearchResult[]> {
+  const { limit = 10, after, before } = options;
+
+  if (after) validateISODate(after, '--after');
+  if (before) validateISODate(before, '--before');
+
+  if (queries.length === 1) {
+    return search(queries[0], options);
+  }
+
+  const candidateLimit = limit * 5;
+  const perQuery = await Promise.all(
+    queries.map(query => vectorSearch(query, { ...options, limit: candidateLimit })),
+  );
+
+  const byId = new Map<number, { record: MemorySearchResult; scores: number[] }>();
+  perQuery.forEach(results => {
+    for (const result of results) {
+      const entry = byId.get(result.id);
+      const score = result.score ?? 0;
+      if (entry) {
+        entry.scores.push(score);
+      } else {
+        byId.set(result.id, { record: result, scores: [score] });
+      }
+    }
+  });
+
+  const intersected: MemorySearchResult[] = [];
+  for (const { record, scores } of byId.values()) {
+    if (scores.length === queries.length) {
+      const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+      intersected.push({ ...record, score: mean });
+    }
+  }
+
+  intersected.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return intersected.slice(0, limit);
+}

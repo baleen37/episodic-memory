@@ -7,7 +7,8 @@ import {
   insertMemoryRecordVector,
 } from './db.js';
 import { __setModelForTests } from './embeddings.js';
-import { search } from './search.js';
+import { resetRateLimiters } from './ratelimiter.js';
+import { search, searchMulti } from './search.js';
 
 let db: ReturnType<typeof initDatabase> | null = null;
 
@@ -34,6 +35,7 @@ afterEach(() => {
   db?.close();
   db = null;
   __setModelForTests(null, null);
+  resetRateLimiters();
 });
 
 describe('memory search', () => {
@@ -327,5 +329,135 @@ describe('memory search', () => {
     expect(results.map(result => result.id)).toEqual([activeId]);
     expect(results[0].text).toHaveLength(400);
     expect(results[0].text.endsWith('...')).toBe(true);
+  });
+});
+
+// Helper: 384-dim 벡터를 만들되 index `hot`만 1.0, 나머지 0.0
+function hotVector(hot: number): number[] {
+  return Array.from({ length: 384 }, (_, i) => (i === hot ? 1.0 : 0.0));
+}
+
+describe('searchMulti', () => {
+  // 쿼리 텍스트 → 임베딩 벡터 매핑:
+  //   "alpha-query"  → hotVector(0)  (index 0 = 1.0)
+  //   "beta-query"   → hotVector(1)  (index 1 = 1.0)
+  //   그 외 (레코드 텍스트 등) → hotVector(2)  (기본값, 검색과 무관한 벡터)
+  function makeQueryEmbed() {
+    return async (_kind: string, text: string): Promise<number[]> => {
+      if (text === 'alpha-query') return hotVector(0);
+      if (text === 'beta-query') return hotVector(1);
+      return hotVector(2);
+    };
+  }
+
+  test('AND intersection: 두 쿼리 모두에 나타난 레코드만 반환한다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    // record1: hotVector(0) → alpha-query와 가깝, beta-query와 멈
+    const id1 = insertMemoryRecord(db, memory({ text: 'record alpha only', dedupeKey: 'multi-r1' }));
+    insertMemoryRecordVector(db, id1, hotVector(0));
+
+    // record2: hotVector(1) → beta-query와 가깝, alpha-query와 멈
+    const id2 = insertMemoryRecord(db, memory({ text: 'record beta only', dedupeKey: 'multi-r2' }));
+    insertMemoryRecordVector(db, id2, hotVector(1));
+
+    // record3: 벡터 없음 → 어느 vector search에서도 나오지 않음
+    const id3 = insertMemoryRecord(db, memory({ text: 'record no vector', dedupeKey: 'multi-r3' }));
+    void id3; // 의도적으로 벡터 미삽입
+
+    // candidateLimit = 10 * 5 = 50 → 벡터 있는 2개 레코드 모두 각 쿼리에서 반환됨
+    // alpha-query vectorSearch → [id1(dist≈0), id2(dist≈√2)]
+    // beta-query  vectorSearch → [id2(dist≈0), id1(dist≈√2)]
+    // 교집합 → id1, id2 모두 (둘 다 두 쿼리에 등장)
+    // record3는 벡터가 없으므로 어디에도 없음 → 교집합에 미포함
+    const results = await searchMulti(['alpha-query', 'beta-query'], { db, limit: 10 });
+
+    const ids = results.map(r => r.id);
+    expect(ids).toContain(id1);
+    expect(ids).toContain(id2);
+    expect(ids).not.toContain(id3);
+    expect(ids).toHaveLength(2);
+  });
+
+  test('mean scoring: 교집합 레코드의 score는 각 쿼리 score의 평균이다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    // alpha-query → hotVector(0) = [1,0,...], beta-query → hotVector(1) = [0,1,...]
+    // record vec = [0.7071, 0.7071, 0, ...] → 두 쿼리와 동일한 L2 거리
+    // L2^2 = (1-0.7071)^2 + (0-0.7071)^2 = 0.0858 + 0.4999 = 0.5857 (대칭)
+    // distance = sqrt(0.5857), score = 1/(1+sqrt(0.5857))
+    // 두 쿼리의 score가 동일하므로 mean = score
+    const vec = Array.from({ length: 384 }, (_, i) =>
+      i === 0 ? 0.7071 : i === 1 ? 0.7071 : 0.0,
+    );
+    const id = insertMemoryRecord(db, memory({ text: 'record both', dedupeKey: 'multi-mean' }));
+    insertMemoryRecordVector(db, id, vec);
+
+    // 예상 score: 두 쿼리 모두 동일한 L2 거리이므로 mean = 개별 score
+    const expectedDist = Math.sqrt((1 - 0.7071) ** 2 + (0 - 0.7071) ** 2);
+    const expectedScore = 1 / (1 + expectedDist);
+
+    const results = await searchMulti(['alpha-query', 'beta-query'], { db, limit: 10 });
+    const rec = results.find(r => r.id === id);
+
+    expect(rec).toBeDefined();
+    // score는 두 쿼리 score의 평균 = expectedScore (대칭이므로)
+    expect(rec!.score).toBeCloseTo(expectedScore, 3);
+  });
+
+  test('sort + limit: 결과는 score 내림차순이고 limit을 넘지 않는다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    // 5개 레코드 모두 두 쿼리 벡터 사이의 서로 다른 위치에 삽입
+    for (let i = 0; i < 5; i++) {
+      const w = (i + 1) / 6; // 0.166 ~ 0.833
+      const vec = Array.from({ length: 384 }, (_, dim) =>
+        dim === 0 ? w : dim === 1 ? (1 - w) : 0.0,
+      );
+      const rid = insertMemoryRecord(db, memory({ text: `sort record ${i}`, dedupeKey: `multi-sort-${i}` }));
+      insertMemoryRecordVector(db, rid, vec);
+    }
+
+    const results = await searchMulti(['alpha-query', 'beta-query'], { db, limit: 3 });
+
+    expect(results.length).toBeLessThanOrEqual(3);
+    for (let i = 1; i < results.length; i++) {
+      expect((results[i - 1].score ?? 0)).toBeGreaterThanOrEqual(results[i].score ?? 0);
+    }
+  });
+
+  test('empty intersection: 벡터가 없는 DB에서는 빈 배열을 반환한다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    // 레코드는 있지만 벡터 없음 → vectorSearch 결과 = 빈 배열 → 교집합 = 빈 배열
+    insertMemoryRecord(db, memory({ text: 'no vector record', dedupeKey: 'multi-empty' }));
+
+    const results = await searchMulti(['alpha-query', 'beta-query'], { db, limit: 10 });
+
+    expect(results).toEqual([]);
+  });
+
+  test('single-element array: search()와 동일한 id 집합을 반환한다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    for (let i = 0; i < 3; i++) {
+      const rid = insertMemoryRecord(db, memory({ text: `single test record ${i}`, dedupeKey: `multi-single-${i}` }));
+      insertMemoryRecordVector(db, rid, hotVector(i % 3));
+    }
+
+    const singleMulti = await searchMulti(['alpha-query'], { db, limit: 10 });
+    const singleSearch = await search('alpha-query', { db, limit: 10 });
+
+    expect(new Set(singleMulti.map(r => r.id))).toEqual(new Set(singleSearch.map(r => r.id)));
   });
 });
