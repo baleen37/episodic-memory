@@ -7,13 +7,13 @@ import {
 import { openDatabase } from '../core/db.js';
 import {
   SearchInputSchema,
-  ReadInputSchema,
+  FetchInputSchema,
   type SearchInput,
-  type ReadInput,
+  type FetchInput,
 } from './schemas.js';
 import {
   handleSearch,
-  handleRead,
+  handleFetch,
   type SearchResult,
 } from './handlers.js';
 import { allTools } from './tools.js';
@@ -22,8 +22,8 @@ export function handleError(error: unknown): string {
   return error instanceof Error ? `Error: ${error.message}` : `Error: ${String(error)}`;
 }
 
-export { SearchInputSchema, ReadInputSchema };
-export type { SearchInput, ReadInput, SearchResult };
+export { SearchInputSchema, FetchInputSchema };
+export type { SearchInput, FetchInput, SearchResult };
 
 const server = new Server(
   {
@@ -65,10 +65,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
-    if (name === 'read') {
-      const params = ReadInputSchema.parse(args);
-      const result = handleRead(params);
-      return { content: [{ type: 'text', text: result }] };
+    if (name === 'fetch') {
+      const params = FetchInputSchema.parse(args);
+      const db = openDatabase();
+      try {
+        const result = handleFetch(params, db);
+        return { content: [{ type: 'text', text: result }] };
+      } finally {
+        db.close();
+      }
     }
 
     throw new Error(`Unknown tool: ${name}`);

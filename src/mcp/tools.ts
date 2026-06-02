@@ -2,7 +2,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const searchTool: Tool = {
   name: 'search',
-  description: 'Search indexed event/fact memory records. Returns compact source-linked memories with kind, text, archive path, line range, source kind, project, timestamp, and score.',
+  description: 'Search indexed event/fact memory records. Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript for that memory.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -46,33 +46,22 @@ export const searchTool: Tool = {
   },
 };
 
-export const readTool: Tool = {
-  name: 'read',
-  description: 'Read a transcript archive file, optionally limited by 1-indexed line range.',
+export const fetchTool: Tool = {
+  name: 'fetch',
+  description: 'Fetch the full source transcript for a memory record returned by search. Takes the record id and returns the original conversation transcript (rendered as markdown) for that memory.',
   inputSchema: {
     type: 'object',
     properties: {
-      path: {
-        type: 'string',
-        minLength: 1,
-        description: 'Path to the JSONL transcript file',
-      },
-      startLine: {
-        type: 'integer',
-        minimum: 1,
-        description: 'Starting line number (1-indexed, inclusive)',
-      },
-      endLine: {
-        type: 'integer',
-        minimum: 1,
-        description: 'Ending line number (1-indexed, inclusive)',
+      id: {
+        anyOf: [{ type: 'string', minLength: 1 }, { type: 'integer' }],
+        description: 'Memory record id from a search result',
       },
     },
-    required: ['path'],
+    required: ['id'],
     additionalProperties: false,
   },
   annotations: {
-    title: 'Read Transcript',
+    title: 'Fetch Memory Source Transcript',
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -80,4 +69,4 @@ export const readTool: Tool = {
   },
 };
 
-export const allTools = [searchTool, readTool];
+export const allTools = [searchTool, fetchTool];

@@ -1,24 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import { SearchInputSchema, ReadInputSchema } from './schemas.js';
+import { SearchInputSchema, FetchInputSchema } from './schemas.js';
 
 describe('MCP schemas', () => {
   test('validates memory search input', () => {
-    expect(SearchInputSchema.parse({ query: 'memory search', limit: 5, source_kind: 'claude-projects' })).toEqual({
+    expect(SearchInputSchema.parse({ query: 'memory search', limit: 5 })).toEqual({
       query: 'memory search',
       limit: 5,
-      source_kind: 'claude-projects',
     });
   });
 
-  test('validates read input', () => {
-    expect(ReadInputSchema.parse({ path: '/archive/session.jsonl', startLine: 1, endLine: 3 })).toEqual({
-      path: '/archive/session.jsonl',
-      startLine: 1,
-      endLine: 3,
-    });
+  test('rejects unknown search filter keys', () => {
+    expect(() => SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-projects' })).toThrow();
   });
 
-  test('rejects read input when startLine is greater than endLine', () => {
-    expect(() => ReadInputSchema.parse({ path: '/archive/session.jsonl', startLine: 3, endLine: 1 })).toThrow();
+  test('validates fetch input with numeric id', () => {
+    expect(FetchInputSchema.parse({ id: 42 })).toEqual({ id: 42 });
+  });
+
+  test('validates fetch input with string id', () => {
+    expect(FetchInputSchema.parse({ id: '42' })).toEqual({ id: '42' });
   });
 });

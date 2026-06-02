@@ -1,26 +1,26 @@
 /**
  * MCP Server Tests
  *
- * Tests for the public memmem MCP search/read tool schemas.
+ * Tests for the public memmem MCP search/fetch tool schemas.
  */
 
 import { describe, test, expect } from 'bun:test';
-import { SearchInputSchema, ReadInputSchema } from './schemas.js';
+import { SearchInputSchema, FetchInputSchema } from './schemas.js';
 
 async function mockToolCall(toolName: string, args: unknown) {
   try {
     if (toolName === 'search') {
       SearchInputSchema.parse(args);
       return {
-        content: [{ type: 'text', text: JSON.stringify({ memories: [], count: 0 }, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify({ results: [] }, null, 2) }],
         isError: false,
       };
     }
 
-    if (toolName === 'read') {
-      ReadInputSchema.parse(args);
+    if (toolName === 'fetch') {
+      FetchInputSchema.parse(args);
       return {
-        content: [{ type: 'text', text: '# Transcript Archive\n\nMock content' }],
+        content: [{ type: 'text', text: '# Conversation\n\nMock content' }],
         isError: false,
       };
     }
@@ -106,21 +106,14 @@ describe('MCP Server - memmem__search tool', () => {
     });
   });
 
-  describe('Source kind filter validation', () => {
-    test('accepts source_kind filter', async () => {
-      const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-projects' });
-      expect(result.isError).toBe(false);
-    });
-
-    test('rejects empty source_kind', async () => {
-      const result = await mockToolCall('search', { query: 'test', source_kind: '' });
-      expect(result.isError).toBe(true);
-    });
-  });
-
   describe('Strict schema validation', () => {
     test('rejects unknown properties', async () => {
       const result = await mockToolCall('search', { query: 'test', unknownParam: 'value' });
+      expect(result.isError).toBe(true);
+    });
+
+    test('rejects removed source_kind filter', async () => {
+      const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-projects' });
       expect(result.isError).toBe(true);
     });
   });
@@ -133,54 +126,41 @@ describe('MCP Server - memmem__search tool', () => {
       expect(result.content[0].type).toBe('text');
     });
 
-    test('returns memory record container', async () => {
+    test('returns results container', async () => {
       const result = await mockToolCall('search', { query: 'test' });
       expect(result.isError).toBe(false);
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed).toHaveProperty('memories');
-      expect(parsed).toHaveProperty('count');
+      expect(parsed).toHaveProperty('results');
     });
   });
 });
 
-describe('MCP Server - memmem__read tool', () => {
-  describe('Archive path parameter validation', () => {
-    test('rejects empty path', async () => {
-      const result = await mockToolCall('read', { path: '' });
-      expect(result.isError).toBe(true);
-    });
-
-    test('accepts valid archive paths', async () => {
-      expect((await mockToolCall('read', { path: '/absolute/path/to/archive.jsonl' })).isError).toBe(false);
-      expect((await mockToolCall('read', { path: 'relative/path/to/archive.jsonl' })).isError).toBe(false);
-    });
-  });
-
-  describe('Line range parameters', () => {
-    test('accepts startLine and endLine parameters', async () => {
-      const result = await mockToolCall('read', { path: '/test/file.jsonl', startLine: 10, endLine: 50 });
+describe('MCP Server - memmem__fetch tool', () => {
+  describe('Id parameter validation', () => {
+    test('accepts numeric id', async () => {
+      const result = await mockToolCall('fetch', { id: 42 });
       expect(result.isError).toBe(false);
     });
 
-    test('rejects line numbers less than 1', async () => {
-      expect((await mockToolCall('read', { path: '/test/file.jsonl', startLine: 0 })).isError).toBe(true);
-      expect((await mockToolCall('read', { path: '/test/file.jsonl', endLine: 0 })).isError).toBe(true);
+    test('accepts string id', async () => {
+      const result = await mockToolCall('fetch', { id: '42' });
+      expect(result.isError).toBe(false);
     });
 
-    test('rejects non-integer startLine', async () => {
-      const result = await mockToolCall('read', { path: '/test/file.jsonl', startLine: 10.5 });
+    test('rejects empty string id', async () => {
+      const result = await mockToolCall('fetch', { id: '' });
       expect(result.isError).toBe(true);
     });
 
-    test('works without line range parameters', async () => {
-      const result = await mockToolCall('read', { path: '/test/file.jsonl' });
-      expect(result.isError).toBe(false);
+    test('rejects missing id', async () => {
+      const result = await mockToolCall('fetch', {});
+      expect(result.isError).toBe(true);
     });
   });
 
   describe('Output formatting', () => {
     test('returns text content type', async () => {
-      const result = await mockToolCall('read', { path: '/test/file.jsonl' });
+      const result = await mockToolCall('fetch', { id: 1 });
       expect(result.isError).toBe(false);
       expect(result.content[0].type).toBe('text');
     });
@@ -188,7 +168,7 @@ describe('MCP Server - memmem__read tool', () => {
 
   describe('Strict schema validation', () => {
     test('rejects unknown properties', async () => {
-      const result = await mockToolCall('read', { path: '/test/file.jsonl', unknownParam: 'value' });
+      const result = await mockToolCall('fetch', { id: 1, unknownParam: 'value' });
       expect(result.isError).toBe(true);
     });
   });
@@ -208,7 +188,7 @@ describe('MCP Server - Error handling', () => {
   });
 
   test('error responses have proper format', async () => {
-    const result = await mockToolCall('read', { path: '' });
+    const result = await mockToolCall('fetch', { id: '' });
     expect(result.isError).toBe(true);
     expect(result.content[0].type).toBe('text');
     expect(result.content[0].text).toMatch(/^Error:/);
@@ -222,25 +202,24 @@ describe('SearchInput Schema - Direct validation', () => {
       limit: 10,
       after: '2024-01-01',
       before: '2024-12-31',
-      source_kind: 'claude-projects',
     });
     expect(result.success).toBe(true);
   });
 });
 
-describe('ReadInput Schema - Direct validation', () => {
-  test('validates path only', () => {
-    const result = ReadInputSchema.safeParse({ path: '/path/to/file.jsonl' });
+describe('FetchInput Schema - Direct validation', () => {
+  test('validates numeric id', () => {
+    const result = FetchInputSchema.safeParse({ id: 7 });
     expect(result.success).toBe(true);
   });
 
-  test('validates path with line range', () => {
-    const result = ReadInputSchema.safeParse({ path: '/path/to/file.jsonl', startLine: 1, endLine: 100 });
+  test('validates string id', () => {
+    const result = FetchInputSchema.safeParse({ id: '7' });
     expect(result.success).toBe(true);
   });
 
-  test('rejects missing path', () => {
-    const result = ReadInputSchema.safeParse({});
+  test('rejects missing id', () => {
+    const result = FetchInputSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 });

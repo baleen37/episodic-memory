@@ -3,8 +3,8 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { handleRead, handleSearch } from './handlers.js';
-import { ReadInputSchema, SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
+import { handleFetch, handleSearch } from './handlers.js';
+import { FetchInputSchema, SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
 import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord } from '../core/db.js';
 
 describe('MCP Server Handlers', () => {
@@ -47,7 +47,7 @@ describe('MCP Server Handlers', () => {
         embeddingVersion: CURRENT_EMBEDDING_VERSION,
       });
 
-      const params = SearchInputSchema.parse({ query: 'test query', limit: 10, source_kind: 'claude-projects' });
+      const params = SearchInputSchema.parse({ query: 'test query', limit: 10 });
       const results = await handleSearch(params, db);
 
       expect(results).toHaveLength(1);
@@ -55,13 +55,10 @@ describe('MCP Server Handlers', () => {
       expect(results[0]).toMatchObject({
         kind: 'event',
         text: 'test query content answer text',
-        archive_path: '/archive/claude-projects/session.jsonl',
-        line_start: 1,
-        line_end: 2,
-        source_kind: 'claude-projects',
-        project: 'memmem',
-        timestamp: 1234567890000,
       });
+      expect(results[0]).not.toHaveProperty('archive_path');
+      expect(results[0]).not.toHaveProperty('source_kind');
+      expect(results[0]).not.toHaveProperty('timestamp');
     });
 
     test('returns empty array when no memory results exist', async () => {
@@ -72,26 +69,40 @@ describe('MCP Server Handlers', () => {
     });
   });
 
-  describe('handleRead', () => {
-    test('returns content for valid path', () => {
-      dir = mkdtempSync(join(tmpdir(), 'memmem-server-read-'));
-      const path = join(dir, 'session.jsonl');
-      writeFileSync(path, JSON.stringify({
+  describe('handleFetch', () => {
+    test('returns the source transcript for a record id', () => {
+      dir = mkdtempSync(join(tmpdir(), 'memmem-server-fetch-'));
+      const archivePath = join(dir, 'session.jsonl');
+      writeFileSync(archivePath, JSON.stringify({
         uuid: '1',
         type: 'user',
         timestamp: '2026-05-26T00:00:00.000Z',
         message: { role: 'user', content: 'Test content' },
       }) + '\n');
 
-      const params = ReadInputSchema.parse({ path });
-      const result = handleRead(params);
+      insertMemoryRecord(db, {
+        kind: 'fact',
+        text: 'server fetch record',
+        archivePath,
+        lineStart: 1,
+        lineEnd: 1,
+        sourceKind: 'claude-projects',
+        project: null,
+        observedAt: Date.UTC(2026, 4, 26),
+        dedupeKey: 'server-fetch',
+        extractionVersion: CURRENT_EXTRACTION_VERSION,
+        embeddingVersion: CURRENT_EMBEDDING_VERSION,
+      });
+
+      const params = FetchInputSchema.parse({ id: 1 });
+      const result = handleFetch(params, db);
 
       expect(result).toContain('Test content');
     });
 
-    test('throws error when file not found', () => {
-      const params = ReadInputSchema.parse({ path: '/nonexistent.jsonl' });
-      expect(() => handleRead(params)).toThrow('File not found: /nonexistent.jsonl');
+    test('throws when the record id is unknown', () => {
+      const params = FetchInputSchema.parse({ id: 999 });
+      expect(() => handleFetch(params, db)).toThrow('Memory record not found: 999');
     });
   });
 
