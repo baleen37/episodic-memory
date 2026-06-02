@@ -282,6 +282,11 @@ export async function search(
   return Array.from(combined.values()).slice(0, limit);
 }
 
+/**
+ * Multi-query AND search: returns memory records matching ALL queries, scored by the mean
+ * of per-query scores. Expects 2+ queries; a single-element array delegates to search().
+ * Note: queryNormalizerProvider is applied only on the single-query (delegated) path.
+ */
 export async function searchMulti(
   queries: string[],
   options: SearchOptions
@@ -295,13 +300,15 @@ export async function searchMulti(
     return search(queries[0], options);
   }
 
-  const candidateLimit = limit * 5;
+  // 교집합 recall 확보를 위해 각 쿼리에서 최종 limit의 배수만큼 후보를 수집한다.
+  const MULTI_CANDIDATE_MULTIPLIER = 5;
+  const candidateLimit = limit * MULTI_CANDIDATE_MULTIPLIER;
   const perQuery = await Promise.all(
     queries.map(query => vectorSearch(query, { ...options, limit: candidateLimit })),
   );
 
   const byId = new Map<number, { record: MemorySearchResult; scores: number[] }>();
-  perQuery.forEach(results => {
+  for (const results of perQuery) {
     for (const result of results) {
       const entry = byId.get(result.id);
       const score = result.score ?? 0;
@@ -311,7 +318,7 @@ export async function searchMulti(
         byId.set(result.id, { record: result, scores: [score] });
       }
     }
-  });
+  }
 
   const intersected: MemorySearchResult[] = [];
   for (const { record, scores } of byId.values()) {

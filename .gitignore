@@ -20,3 +20,5 @@ logs/
 
 # Git worktrees
 .worktrees/
+
+.claude/scheduled_tasks.lock
