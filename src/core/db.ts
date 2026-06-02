@@ -165,6 +165,7 @@ function createSchema(db: Database): void {
       status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
       error_message TEXT,
       retry_after INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
@@ -173,6 +174,24 @@ function createSchema(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)');
+  migrateExtractionState(db);
+}
+
+function migrateExtractionState(db: Database): void {
+  const cols = db
+    .query('PRAGMA table_info(extraction_state)')
+    .all() as Array<{ name: string }>;
+  const hasAttemptCount = cols.some((c) => c.name === 'attempt_count');
+  if (!hasAttemptCount) {
+    db.exec(
+      'ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+}
+
+// Test-only export
+export function migrateExtractionStateForTests(db: Database): void {
+  migrateExtractionState(db);
 }
 
 export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): number {
