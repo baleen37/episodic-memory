@@ -292,3 +292,11 @@ describe('memory record database schema', () => {
     expect(() => getObservationsByIds(db, [1])).toThrow('Observation schema has been removed');
   });
 });
+
+test('sets WAL safety pragmas', () => {
+  const database = openTestDatabase();
+  const busy = database.query('PRAGMA busy_timeout').get() as { timeout: number };
+  expect(busy.timeout).toBe(5000);
+  const sync = database.query('PRAGMA synchronous').get() as { synchronous: number };
+  expect(sync.synchronous).toBe(1); // 1 = NORMAL
+});

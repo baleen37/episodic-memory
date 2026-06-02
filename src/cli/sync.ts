@@ -6,6 +6,7 @@ import { reindexArchiveFile } from '../core/indexer.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { log } from '../core/logger.js';
+import { acquireSyncLock } from '../core/lock.js';
 import { getArchiveDir } from '../core/paths.js';
 import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/index.js';
 
@@ -98,12 +99,18 @@ export async function syncTranscripts(db: Database): Promise<SyncResult> {
 }
 
 export async function runSyncCli(): Promise<void> {
+  const release = acquireSyncLock();
+  if (!release) {
+    log.info('sync already running; skipping');
+    return;
+  }
   const db = openDatabase();
   try {
     const result = await syncTranscripts(db);
     log.info(`Done.`, { ...result });
   } finally {
     db.close();
+    release();
   }
 }
 
