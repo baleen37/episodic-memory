@@ -195,37 +195,34 @@ describe('memory record database schema', () => {
   });
 
   test('extraction_state has attempt_count column with default 0', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    const db = initDatabase();
-    try {
-      const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string; dflt_value: string }>;
-      const attempt = cols.find((c) => c.name === 'attempt_count');
-      expect(attempt).toBeDefined();
-      expect(attempt!.dflt_value).toBe('0');
-    } finally {
-      db.close();
-      delete process.env.TEST_DB_PATH;
-    }
+    const db = openTestDatabase();
+    const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string; dflt_value: string }>;
+    const attempt = cols.find((c) => c.name === 'attempt_count');
+    expect(attempt).toBeDefined();
+    expect(attempt!.dflt_value).toBe('0');
   });
 
   test('migration adds attempt_count to a pre-existing table missing it', () => {
     const db = new Database(':memory:');
-    db.exec(`
-      CREATE TABLE extraction_state (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_kind TEXT NOT NULL, archive_path TEXT NOT NULL,
-        line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
-        source_hash TEXT NOT NULL, extraction_version INTEGER NOT NULL,
-        status TEXT NOT NULL, error_message TEXT, retry_after INTEGER,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-        UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
-      )
-    `);
-    migrateExtractionStateForTests(db); // must be safe to call twice
-    migrateExtractionStateForTests(db);
-    const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string }>;
-    expect(cols.some((c) => c.name === 'attempt_count')).toBe(true);
-    db.close();
+    try {
+      db.exec(`
+        CREATE TABLE extraction_state (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_kind TEXT NOT NULL, archive_path TEXT NOT NULL,
+          line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
+          source_hash TEXT NOT NULL, extraction_version INTEGER NOT NULL,
+          status TEXT NOT NULL, error_message TEXT, retry_after INTEGER,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
+        )
+      `);
+      migrateExtractionStateForTests(db); // must be safe to call twice
+      migrateExtractionStateForTests(db);
+      const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string }>;
+      expect(cols.some((c) => c.name === 'attempt_count')).toBe(true);
+    } finally {
+      db.close();
+    }
   });
 
   test('legacy observation schema exports fail with explicit removed-schema errors', async () => {
