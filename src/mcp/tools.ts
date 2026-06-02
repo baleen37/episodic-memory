@@ -2,14 +2,16 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const searchTool: Tool = {
   name: 'search',
-  description: 'Search indexed event/fact memory records. Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript for that memory.',
+  description: 'Search indexed event/fact memory records. Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.',
   inputSchema: {
     type: 'object',
     properties: {
       query: {
-        type: 'string',
-        minLength: 2,
-        description: 'Search query string',
+        anyOf: [
+          { type: 'string', minLength: 2 },
+          { type: 'array', items: { type: 'string', minLength: 2 }, minItems: 2, maxItems: 5 },
+        ],
+        description: 'Search query. A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity).',
       },
       limit: {
         type: 'integer',
