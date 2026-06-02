@@ -48,6 +48,7 @@ export interface ExtractionStateInsert {
   status: ExtractionStatus;
   errorMessage?: string | null;
   retryAfter?: number | null;
+  attemptCount?: number;
 }
 
 export interface PendingEvent {
@@ -165,6 +166,7 @@ function createSchema(db: Database): void {
       status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
       error_message TEXT,
       retry_after INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
@@ -173,6 +175,24 @@ function createSchema(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)');
+  migrateExtractionState(db);
+}
+
+function migrateExtractionState(db: Database): void {
+  const cols = db
+    .query('PRAGMA table_info(extraction_state)')
+    .all() as Array<{ name: string }>;
+  const hasAttemptCount = cols.some((c) => c.name === 'attempt_count');
+  if (!hasAttemptCount) {
+    db.exec(
+      'ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+}
+
+// Test-only export
+export function migrateExtractionStateForTests(db: Database): void {
+  migrateExtractionState(db);
 }
 
 export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): number {
@@ -261,14 +281,15 @@ export function upsertExtractionState(db: Database, state: ExtractionStateInsert
   db.query(`
     INSERT INTO extraction_state (
       source_kind, archive_path, line_start, line_end, source_hash,
-      extraction_version, status, error_message, retry_after, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      extraction_version, status, error_message, retry_after, attempt_count, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(archive_path, line_start, line_end, source_hash, extraction_version)
     DO UPDATE SET
       source_kind = excluded.source_kind,
       status = excluded.status,
       error_message = excluded.error_message,
       retry_after = excluded.retry_after,
+      attempt_count = excluded.attempt_count,
       updated_at = excluded.updated_at
   `).run(
     state.sourceKind,
@@ -280,9 +301,28 @@ export function upsertExtractionState(db: Database, state: ExtractionStateInsert
     state.status,
     state.errorMessage ?? null,
     state.retryAfter ?? null,
+    state.attemptCount ?? 0,
     now,
     now,
   );
+}
+
+export function getExtractionAttemptCount(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): number {
+  const row = db.query(`
+    SELECT attempt_count AS attemptCount FROM extraction_state
+    WHERE archive_path = ? AND line_start = ? AND line_end = ?
+      AND source_hash = ? AND extraction_version = ?
+  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion) as
+    | { attemptCount: number }
+    | null;
+  return row?.attemptCount ?? 0;
 }
 
 export function hasCompletedExtractionState(

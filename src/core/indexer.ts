@@ -5,6 +5,7 @@ import {
   CURRENT_EMBEDDING_VERSION,
   CURRENT_EXTRACTION_VERSION,
   deleteMemoryIndexForArchivePath,
+  getExtractionAttemptCount,
   hasCompletedExtractionState,
   insertMemoryRecord,
   insertMemoryRecordVector,
@@ -35,6 +36,22 @@ export const EXCLUSION_MARKERS = [
 
 export function hasExclusionMarker(content: string): boolean {
   return EXCLUSION_MARKERS.some(marker => content.includes(marker));
+}
+
+export const BASE_DELAY_MS = 5 * 60 * 1000; // 5분
+export const ATTEMPT_CAP = 10;
+
+/**
+ * 지수 백오프 다음 재시도 시각. attemptCount는 이번 실패까지 포함한 누적 횟수.
+ * attemptCount >= ATTEMPT_CAP 이면 포기 의미로 null 반환(retry_after=NULL).
+ * 즉 10번째 실패(attemptCount=10)에서 null → 최대 9회 재시도 후 포기.
+ */
+export function computeRetryAfter(attemptCount: number, now: number): number | null {
+  if (attemptCount >= ATTEMPT_CAP) {
+    return null;
+  }
+  const delay = BASE_DELAY_MS * 2 ** (attemptCount - 1);
+  return now + delay;
 }
 
 function emptyResult(): ReindexArchiveResult {
@@ -116,12 +133,32 @@ function hasPendingRetryExtractionState(
   extractionVersion: number,
 ): boolean {
   const row = db.query(`
-    SELECT retry_after AS retryAfter FROM extraction_state
+    SELECT 1 AS one FROM extraction_state
     WHERE archive_path = ? AND line_start = ? AND line_end = ?
       AND source_hash = ? AND extraction_version = ? AND status = 'errored'
-      AND retry_after IS NOT NULL AND retry_after > ?
-  `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion, Date.now()) as { retryAfter: number } | null;
+      AND (
+        (retry_after IS NOT NULL AND retry_after > ?)
+        OR (attempt_count >= ? AND retry_after IS NULL)
+      )
+  `).get(
+    archivePath, lineStart, lineEnd, sourceHash, extractionVersion,
+    Date.now(), ATTEMPT_CAP,
+  ) as { one: number } | null;
   return row !== null;
+}
+
+// Test-only export
+export function hasPendingRetryExtractionStateForTests(
+  db: Database,
+  archivePath: string,
+  lineStart: number,
+  lineEnd: number,
+  sourceHash: string,
+  extractionVersion: number,
+): boolean {
+  return hasPendingRetryExtractionState(
+    db, archivePath, lineStart, lineEnd, sourceHash, extractionVersion,
+  );
 }
 
 interface PreparedMemoryRecord {
@@ -217,6 +254,7 @@ export async function reindexArchiveFile(
             sourceHash,
             extractionVersion: CURRENT_EXTRACTION_VERSION,
             status: 'empty',
+            attemptCount: 0,
           });
           return 0;
         }
@@ -247,6 +285,7 @@ export async function reindexArchiveFile(
           sourceHash,
           extractionVersion: CURRENT_EXTRACTION_VERSION,
           status: 'done',
+          attemptCount: 0,
         });
         return preparedRecords.length;
       });
@@ -258,6 +297,16 @@ export async function reindexArchiveFile(
         result.memoryRecordsIndexed += indexedCount;
       }
     } catch (error) {
+      const now = Date.now();
+      const prevAttempts = getExtractionAttemptCount(
+        db,
+        span.archivePath,
+        span.lineStart,
+        span.lineEnd,
+        sourceHash,
+        CURRENT_EXTRACTION_VERSION,
+      );
+      const attemptCount = prevAttempts + 1;
       upsertExtractionState(db, {
         sourceKind: span.sourceKind,
         archivePath: span.archivePath,
@@ -267,7 +316,8 @@ export async function reindexArchiveFile(
         extractionVersion: CURRENT_EXTRACTION_VERSION,
         status: 'errored',
         errorMessage: error instanceof Error ? error.message : String(error),
-        retryAfter: Date.now() + 60 * 60 * 1000,
+        attemptCount,
+        retryAfter: computeRetryAfter(attemptCount, now),
       });
       result.spansErrored++;
     }

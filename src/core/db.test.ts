@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import {
   CURRENT_EMBEDDING_VERSION,
   CURRENT_EXTRACTION_VERSION,
@@ -14,9 +15,11 @@ import {
   insertMemoryRecordVector,
   insertObservation,
   insertPendingEvent,
+  migrateExtractionStateForTests,
   searchObservations,
   upsertExtractionState,
   hasCompletedExtractionState,
+  getExtractionAttemptCount,
 } from './db.js';
 
 let db: ReturnType<typeof initDatabase> | null = null;
@@ -190,6 +193,76 @@ describe('memory record database schema', () => {
     expect(db.query('SELECT COUNT(*) AS count FROM memory_records').get()).toEqual({ count: 0 });
     expect(db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get()).toEqual({ count: 0 });
     expect(db.query('SELECT COUNT(*) AS count FROM extraction_state').get()).toEqual({ count: 0 });
+  });
+
+  test('extraction_state has attempt_count column with default 0', () => {
+    const db = openTestDatabase();
+    const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string; dflt_value: string }>;
+    const attempt = cols.find((c) => c.name === 'attempt_count');
+    expect(attempt).toBeDefined();
+    expect(attempt!.dflt_value).toBe('0');
+  });
+
+  test('migration adds attempt_count to a pre-existing table missing it', () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`
+        CREATE TABLE extraction_state (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_kind TEXT NOT NULL, archive_path TEXT NOT NULL,
+          line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
+          source_hash TEXT NOT NULL, extraction_version INTEGER NOT NULL,
+          status TEXT NOT NULL, error_message TEXT, retry_after INTEGER,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
+        )
+      `);
+      migrateExtractionStateForTests(db); // must be safe to call twice
+      migrateExtractionStateForTests(db);
+      const cols = db.query('PRAGMA table_info(extraction_state)').all() as Array<{ name: string }>;
+      expect(cols.some((c) => c.name === 'attempt_count')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  test('upsertExtractionState persists attempt_count', () => {
+    const db = openTestDatabase();
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/a.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'errored', attemptCount: 3, retryAfter: 999,
+    });
+    const row = db.query(
+      'SELECT attempt_count AS attemptCount FROM extraction_state WHERE archive_path = ?'
+    ).get('/a.jsonl') as { attemptCount: number };
+    expect(row.attemptCount).toBe(3);
+  });
+
+  test('upsertExtractionState defaults attempt_count to 0 when omitted', () => {
+    const db = openTestDatabase();
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/b.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'done',
+    });
+    const row = db.query(
+      'SELECT attempt_count AS attemptCount FROM extraction_state WHERE archive_path = ?'
+    ).get('/b.jsonl') as { attemptCount: number };
+    expect(row.attemptCount).toBe(0);
+  });
+
+  test('getExtractionAttemptCount returns current count, 0 when missing', () => {
+    const db = openTestDatabase();
+    // missing span → 0
+    expect(getExtractionAttemptCount(db, '/x.jsonl', 1, 5, 'h1', 1)).toBe(0);
+
+    upsertExtractionState(db, {
+      sourceKind: 'claude-projects', archivePath: '/x.jsonl',
+      lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
+      status: 'errored', attemptCount: 4, retryAfter: 999,
+    });
+    expect(getExtractionAttemptCount(db, '/x.jsonl', 1, 5, 'h1', 1)).toBe(4);
   });
 
   test('legacy observation schema exports fail with explicit removed-schema errors', async () => {
