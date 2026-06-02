@@ -345,7 +345,6 @@ export function formatConversationAsMarkdown(
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     const timestamp = new Date(msg.timestamp).toLocaleString();
-    const messageId = msg.uuid || `msg-${i}`;
 
     // Skip user messages that are just tool results
     if (msg.type === 'user' && Array.isArray(msg.message.content)) {
@@ -366,7 +365,7 @@ export function formatConversationAsMarkdown(
 
     // Format message header
     const roleLabel = getRoleLabel(msg.type, msg.isSidechain);
-    output += `### **${roleLabel}** (${timestamp}) {#${messageId}}\n\n`;
+    output += `### **${roleLabel}** (${timestamp})\n\n`;
 
     // Format message content
     if (msg.type === 'user') {
@@ -475,11 +474,6 @@ function formatAssistantMessage(
         }
       }
     }
-  }
-
-  // Add token usage if present
-  if (msg.message.usage) {
-    output += formatTokenUsage(msg.message.usage);
   }
 
   return output;

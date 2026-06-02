@@ -243,6 +243,24 @@ function textSearch(queries: string[], options: SearchOptions): MemorySearchResu
   return rows.map(mapRow);
 }
 
+export interface MemoryRecordLocation {
+  archivePath: string;
+  lineStart: number;
+  lineEnd: number;
+}
+
+export function getMemoryRecordLocation(db: Database, id: number): MemoryRecordLocation | null {
+  const row = db.query(`
+    SELECT
+      archive_path AS archivePath,
+      line_start AS lineStart,
+      line_end AS lineEnd
+    FROM memory_records
+    WHERE id = ? AND status = 'active'
+  `).get(id) as MemoryRecordLocation | null;
+  return row ?? null;
+}
+
 export async function search(
   query: string,
   options: SearchOptions

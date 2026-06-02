@@ -301,6 +301,26 @@ describe('read.ts', () => {
       expect(result).toContain('Hi there!');
     });
 
+    test('omits message UUID and token usage from rendered output', () => {
+      const jsonl = [
+        createMessage({ type: 'user', message: { role: 'user', content: 'Hello' } }),
+        createMessage({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: 'Hi there!',
+            usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80 },
+          },
+        }),
+      ].join('\n');
+
+      const result = formatConversationAsMarkdown(jsonl);
+
+      expect(result).not.toContain('{#');
+      expect(result).not.toContain('cache read:');
+      expect(result).not.toContain('_in:');
+    });
+
     test('handles line range with 1-indexed line numbers', () => {
       const jsonl = [
         createMessage({ type: 'user', message: { role: 'user', content: 'Message 1' } }),
