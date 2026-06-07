@@ -164,19 +164,21 @@ function mapRow(row: {
   return result;
 }
 
-async function vectorSearch(query: string, options: SearchOptions): Promise<MemorySearchResult[]> {
-  const { db, limit = 10 } = options;
-  log.debug('vector search start', { query, limit });
-  const vecStart = Date.now();
-  const embedding = await embedQuery(query);
+// sqlite-vec의 knn `vec.k`는 4096을 초과할 수 없다. 후보 폭(k)은 항상 이 값으로 클램프한다.
+const MAX_KNN_K = 4096;
 
-  if (!embedding) {
-    return [];
-  }
-
+/**
+ * vec_memory_records에서 distance 상위 후보를 조회한다.
+ * `k`는 ANN 탐색 폭(sqlite-vec knn k), `returnCount`는 최종 반환 개수다.
+ */
+function runVectorQuery(
+  embedding: number[],
+  k: number,
+  returnCount: number,
+  options: SearchOptions,
+): MemorySearchResult[] {
+  const { db } = options;
   const filterParts = buildFilterParts(options);
-  const vectorCount = (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count;
-  const candidateLimit = Math.min(vectorCount, Math.max(limit * 64, 1000));
   const stmt = db.query(`
     SELECT
       m.id,
@@ -201,13 +203,30 @@ async function vectorSearch(query: string, options: SearchOptions): Promise<Memo
 
   const rows = stmt.all(
     Buffer.from(new Float32Array(embedding).buffer),
-    candidateLimit,
+    k,
     ...filterParts.params,
-    limit,
+    returnCount,
   ) as Array<Parameters<typeof mapRow>[0]>;
 
-  log.debug('vector results', { count: rows.length, ms: Date.now() - vecStart });
   return rows.map(mapRow);
+}
+
+async function vectorSearch(query: string, options: SearchOptions): Promise<MemorySearchResult[]> {
+  const { db, limit = 10 } = options;
+  log.debug('vector search start', { query, limit });
+  const vecStart = Date.now();
+  const embedding = await embedQuery(query);
+
+  if (!embedding) {
+    return [];
+  }
+
+  const vectorCount = (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count;
+  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(limit * 64, 1000));
+  const results = runVectorQuery(embedding, k, limit, options);
+
+  log.debug('vector results', { count: results.length, ms: Date.now() - vecStart });
+  return results;
 }
 
 function textSearch(queries: string[], options: SearchOptions): MemorySearchResult[] {
@@ -300,11 +319,15 @@ export async function searchMulti(
     return search(queries[0], options);
   }
 
-  // 교집합 recall 확보를 위해 각 쿼리에서 최종 limit의 배수만큼 후보를 수집한다.
-  const MULTI_CANDIDATE_MULTIPLIER = 5;
-  const candidateLimit = limit * MULTI_CANDIDATE_MULTIPLIER;
-  const perQuery = await Promise.all(
-    queries.map(query => vectorSearch(query, { ...options, limit: candidateLimit })),
+  // AND 교집합 recall 확보를 위해 각 쿼리에서 distance 상위 후보를 넓게(knn k 상한까지) 수집한다.
+  // 후보 풀이 좁으면(이전: limit*5) 두 쿼리의 상위권이 겹치지 않아 교집합이 거의 항상 비었다.
+  // mean-score 재정렬이 품질을 보장하므로, 거리가 먼 교집합은 자동으로 뒤로 밀린다.
+  const { db } = options;
+  const vectorCount = (db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number }).count;
+  const candidateCount = Math.min(vectorCount, MAX_KNN_K);
+  const embeddings = await Promise.all(queries.map(query => embedQuery(query)));
+  const perQuery = embeddings.map(embedding =>
+    embedding ? runVectorQuery(embedding, candidateCount, candidateCount, options) : [],
   );
 
   const byId = new Map<number, { record: MemorySearchResult; scores: number[] }>();

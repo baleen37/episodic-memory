@@ -4,7 +4,7 @@
  * Returns: { installed: boolean, missing: string[] }
  */
 
-import { existsSync, statSync } from 'fs';
+import { existsSync, statSync, readdirSync } from 'fs';
 import { spawn } from 'child_process';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -38,15 +38,44 @@ export function checkBuildNeeded() {
     return { needsBuild: true, reason: 'dist/mcp-server.mjs not found' };
   }
 
+  const mcpServerMtime = statSync(mcpServerPath).mtimeMs;
+
   if (existsSync(packageJsonPath)) {
     const packageJsonMtime = statSync(packageJsonPath).mtimeMs;
-    const mcpServerMtime = statSync(mcpServerPath).mtimeMs;
     if (packageJsonMtime > mcpServerMtime) {
       return { needsBuild: true, reason: 'package.json newer than dist' };
     }
   }
 
+  // Rebuild when any source file is newer than the build output. The bundled
+  // plugin ships without src/, so skip this check when src/ is absent.
+  const srcDir = join(ROOT, 'src');
+  if (existsSync(srcDir)) {
+    const newest = newestSourceMtime(srcDir);
+    if (newest > mcpServerMtime) {
+      return { needsBuild: true, reason: 'src newer than dist' };
+    }
+  }
+
   return { needsBuild: false, reason: '' };
+}
+
+/**
+ * Find the newest mtime among non-test source files under a directory.
+ * @param {string} dir
+ * @returns {number} newest mtimeMs found, or 0
+ */
+function newestSourceMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      newest = Math.max(newest, newestSourceMtime(full));
+    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+      newest = Math.max(newest, statSync(full).mtimeMs);
+    }
+  }
+  return newest;
 }
 
 /**
