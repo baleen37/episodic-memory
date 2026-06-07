@@ -460,4 +460,35 @@ describe('searchMulti', () => {
 
     expect(new Set(singleMulti.map(r => r.id))).toEqual(new Set(singleSearch.map(r => r.id)));
   });
+
+  test('wide candidate pool: 각 쿼리 상위권 밖이지만 둘 다에 관련된 레코드도 교집합에 포함된다', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, makeQueryEmbed());
+
+    // 교집합 레코드 X: 두 쿼리(hotVector(0), hotVector(1)) 사이의 중간 지점.
+    // 각 쿼리에 대해 distance ≈ sqrt(0.5) 정도로 "어느 정도 관련" 있지만 최상위는 아님.
+    const xVec = Array.from({ length: 384 }, (_, i) => (i === 0 || i === 1 ? 0.5 : 0.0));
+    const xId = insertMemoryRecord(db, memory({ text: 'record relevant to both', dedupeKey: 'wide-x' }));
+    insertMemoryRecordVector(db, xId, xVec);
+
+    // noise 레코드를 많이 넣어 X를 각 쿼리의 상위 후보(limit*5=50) 밖으로 밀어낸다.
+    // alpha 쪽 noise: hotVector(0)에 X보다 가까운 [0.9, 0, ...] → alpha top에 들어와 X를 밀어냄.
+    // beta 쪽 noise: hotVector(1)에 가까운 [0, 0.9, ...] → beta top에 들어와 X를 밀어냄.
+    for (let i = 0; i < 60; i++) {
+      const aVec = Array.from({ length: 384 }, (_, d) => (d === 0 ? 0.9 : 0.0));
+      const aId = insertMemoryRecord(db, memory({ text: `alpha noise ${i}`, dedupeKey: `wide-a-${i}` }));
+      insertMemoryRecordVector(db, aId, aVec);
+
+      const bVec = Array.from({ length: 384 }, (_, d) => (d === 1 ? 0.9 : 0.0));
+      const bId = insertMemoryRecord(db, memory({ text: `beta noise ${i}`, dedupeKey: `wide-b-${i}` }));
+      insertMemoryRecordVector(db, bId, bVec);
+    }
+
+    // X는 두 쿼리 모두에 관련되므로 AND 교집합에 포함되어야 한다.
+    // 좁은 후보 풀(이전 구현: limit*5=50)에서는 X가 양쪽 상위 50 밖이라 누락되어 빈 결과가 났다(회귀 재현).
+    const results = await searchMulti(['alpha-query', 'beta-query'], { db, limit: 200 });
+
+    expect(results.map(r => r.id)).toContain(xId);
+  });
 });
