@@ -948,12 +948,3 @@ Expected: `index ✓`, `data ✓` (project columns do not affect integrity check
 git add -A
 git commit -m "test: project_name fixups across insertMemoryRecord callers"
 ```
-
----
-
-## Self-Review Notes
-
-- **Spec coverage:** Part A framework → Tasks 4, 5(wiring). Part B `resolveProject` (worktree norm, hybrid git, leaf fallback) → Tasks 1-3. `001-project-columns` schema + JSONL-cwd backfill → Task 6. New indexing path (claude has cwd, codex wiring) → Task 7. bun:sqlite pragma read/write & synchronous transaction → Tasks 4, 6. Coexistence with `migrateExtractionState` (registry starts v1, function untouched) → Task 5 step 3d. Backfill cost / read-per-transcript → Task 6 (distinct archive_path loop).
-- **Type consistency:** `ProjectInfo` `{ project, projectName }`, `GitReader.readRemoteOrgRepo(repoRoot)`, `Migration` `{ version, name, up }`, `runMigrationsWith`/`runMigrations`, `MemoryRecordInsert.projectName: string | null` — used consistently across tasks.
-- **No rollback** per design — registry has no `down`; confirmed throughout.
-- **Known ordering dependency:** Task 5 makes `projectName` required on `MemoryRecordInsert`; Task 5 step 3e adds a temporary `projectName: null` bridge in `indexer.ts` so typecheck stays green, replaced with resolved values in Task 7. Other test callers fixed in Task 8 step 1.
