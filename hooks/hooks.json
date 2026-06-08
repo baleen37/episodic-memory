@@ -7,8 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync",
-            "async": true
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync"
           }
         ]
       }
@@ -18,8 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync",
-            "async": true
+            "command": "sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync"
           }
         ]
       }

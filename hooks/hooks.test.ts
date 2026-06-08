@@ -46,7 +46,6 @@ describe('hooks.json sync-only hook configuration', () => {
     expect(hook).toEqual({
       type: 'command',
       command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
-      async: true,
     });
   });
 
@@ -65,8 +64,20 @@ describe('hooks.json sync-only hook configuration', () => {
     expect(hook).toEqual({
       type: 'command',
       command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
-      async: true,
     });
+  });
+
+  it('does not use unsupported async hook fields', () => {
+    const hooks = loadHooksJson();
+    const commandHooks = Object.values(hooks.hooks).flatMap((hookGroups: any) =>
+      hookGroups.flatMap((group: any) =>
+        group.hooks.filter((hook: any) => hook.type === 'command')
+      )
+    );
+
+    for (const hook of commandHooks) {
+      expect(hook).not.toHaveProperty('async');
+    }
   });
 
   it('does not reference old observation hook commands', () => {
