@@ -1,3 +1,5 @@
+import { execFileSync } from 'child_process';
+
 export interface ProjectInfo {
   project: string;
   projectName: string;
@@ -43,6 +45,22 @@ export function parseOrgRepo(remoteUrl: string): string | null {
   return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
 }
 
+export const defaultGitReader: GitReader = {
+  readRemoteOrgRepo(repoRoot: string): string | null {
+    try {
+      const url = execFileSync(
+        'git',
+        ['-C', repoRoot, 'config', '--get', 'remote.origin.url'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
+      if (!url) return null;
+      return parseOrgRepo(url);
+    } catch {
+      return null;
+    }
+  },
+};
+
 export function resolveProject(
   cwd: string | null,
   opts: ResolveProjectOptions = {},
@@ -51,7 +69,8 @@ export function resolveProject(
   const repoRoot = normalizeRepoRoot(cwd);
   if (!repoRoot) return UNKNOWN;
 
-  const orgRepo = opts.gitReader?.readRemoteOrgRepo(repoRoot) ?? null;
+  const reader = opts.gitReader ?? defaultGitReader;
+  const orgRepo = reader.readRemoteOrgRepo(repoRoot);
   if (orgRepo) {
     const name = orgRepo.split('/').filter(Boolean).pop() ?? orgRepo;
     return { project: orgRepo, projectName: name };

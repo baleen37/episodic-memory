@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveProject, parseOrgRepo } from './project.js';
+import { resolveProject, parseOrgRepo, defaultGitReader } from './project.js';
 
 const noGit = { readRemoteOrgRepo: () => null };
 
@@ -75,5 +75,16 @@ describe('resolveProject (git remote wins)', () => {
     );
     expect(r).toEqual({ project: 'croquis/memmem', projectName: 'memmem' });
     expect(seen).toEqual(['/Users/jito.hello/dev/wooto/memmem']);
+  });
+});
+
+describe('defaultGitReader', () => {
+  test('returns null for a non-existent path (no throw)', () => {
+    expect(defaultGitReader.readRemoteOrgRepo('/no/such/path/xyz')).toBeNull();
+  });
+
+  test('reads this repo as a real org/repo or null, never throws', () => {
+    const r = defaultGitReader.readRemoteOrgRepo(process.cwd());
+    expect(r === null || /\S+\/\S+/.test(r)).toBe(true);
   });
 });
