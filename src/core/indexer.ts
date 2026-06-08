@@ -13,6 +13,7 @@ import {
 } from './db.js';
 import { embedPassage } from './embeddings.js';
 import { extractMemoryRecordsFromSpan } from './llm/extractor.js';
+import { resolveProject } from './project.js';
 import type { LLMProvider } from './llm/types.js';
 import type { ExtractedMemoryRecord } from './llm/extractor.js';
 import type { ParseContext, TranscriptSpan } from './sources/types.js';
@@ -259,6 +260,7 @@ export async function reindexArchiveFile(
           return 0;
         }
 
+        const { project, projectName } = resolveProject(span.cwd);
         for (const { record, embedding } of preparedRecords) {
           const memoryRecordId = insertMemoryRecord(db, {
             kind: record.kind,
@@ -268,8 +270,8 @@ export async function reindexArchiveFile(
             lineStart: span.lineStart,
             lineEnd: span.lineEnd,
             observedAt: span.observedAt,
-            project: span.project,
-            projectName: null,
+            project,
+            projectName,
             confidence: record.confidence,
             dedupeKey: record.dedupeKey ?? makeDedupeKey(record.kind, record.text),
             extractionVersion: CURRENT_EXTRACTION_VERSION,

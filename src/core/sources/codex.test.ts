@@ -21,8 +21,8 @@ describe('parseCodexJsonl', () => {
       lineEnd: 5,
       sessionId: 'codex-session',
       project: null,
-      cwd: null,
-      gitBranch: null,
+      cwd: '/repo',
+      gitBranch: 'main',
       model: 'gpt-5.1',
       provider: 'codex',
       metadataJson: JSON.stringify({ source: 'codex' }),
@@ -73,5 +73,15 @@ describe('parseCodexJsonl', () => {
     expect(spans).toHaveLength(2);
     expect(spans[0]).toMatchObject({ model: 'model-a', observedAt: Date.parse('2026-05-26T00:00:00.000Z'), text: 'User: First\nAssistant: First done.' });
     expect(spans[1]).toMatchObject({ model: 'model-b', observedAt: Date.parse('2026-05-26T00:00:02.000Z'), text: 'User: Second\nAssistant: Second done.' });
+  });
+
+  test('codex span carries cwd from session_meta payload', () => {
+    const jsonl = [
+      JSON.stringify({ type: 'session_meta', payload: { id: 's1', cwd: '/Users/me/dev/acme/gadget' } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'yo' }] } }),
+    ].join('\n');
+    const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/s1.jsonl', sourceKind: 'codex-sessions' });
+    expect(spans[0]?.cwd).toBe('/Users/me/dev/acme/gadget');
   });
 });
