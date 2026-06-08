@@ -269,6 +269,7 @@ export async function reindexArchiveFile(
             lineEnd: span.lineEnd,
             observedAt: span.observedAt,
             project: span.project,
+            projectName: null,
             confidence: record.confidence,
             dedupeKey: record.dedupeKey ?? makeDedupeKey(record.kind, record.text),
             extractionVersion: CURRENT_EXTRACTION_VERSION,

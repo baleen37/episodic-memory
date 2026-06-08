@@ -68,6 +68,7 @@ describe('memory record database schema', () => {
       lineEnd: 3,
       observedAt: 1780272000000,
       project: 'memmem',
+      projectName: null,
       confidence: 0.9,
       dedupeKey: 'fact:memmem-memory-records',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
@@ -104,6 +105,7 @@ describe('memory record database schema', () => {
       lineEnd: 3,
       observedAt: 1780272000000,
       project: 'memmem',
+      projectName: null,
       dedupeKey: 'fact:memmem-memory-records',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });
@@ -121,6 +123,7 @@ describe('memory record database schema', () => {
       lineEnd: 3,
       observedAt: 1780272000000,
       project: 'memmem',
+      projectName: null,
       dedupeKey: 'fact:memmem-memory-records',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });
@@ -174,6 +177,7 @@ describe('memory record database schema', () => {
       lineEnd: 12,
       observedAt: 1780272000000,
       project: null,
+      projectName: null,
       dedupeKey: 'event:approval',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });

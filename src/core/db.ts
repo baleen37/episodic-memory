@@ -4,6 +4,7 @@ import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from './paths.js';
 import { EMBEDDING_DIM } from './constants.js';
+import { runMigrations } from './migrations/index.js';
 
 // @ts-ignore - import.meta.test is set by bun test
 const isTestEnvironment = typeof import.meta !== 'undefined' && import.meta.test;
@@ -30,6 +31,7 @@ export interface MemoryRecordInsert {
   lineEnd: number;
   observedAt: number | null;
   project: string | null;
+  projectName: string | null;
   confidence?: number;
   status?: MemoryRecordStatus;
   supersedesId?: number | null;
@@ -133,6 +135,7 @@ function createSchema(db: Database): void {
       line_end INTEGER NOT NULL,
       observed_at INTEGER,
       project TEXT,
+      project_name TEXT,
       confidence REAL NOT NULL DEFAULT 1.0,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
       supersedes_id INTEGER,
@@ -178,6 +181,7 @@ function createSchema(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)');
   migrateExtractionState(db);
+  runMigrations(db);
 }
 
 function migrateExtractionState(db: Database): void {
@@ -202,15 +206,16 @@ export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): nu
   db.query(`
     INSERT INTO memory_records (
       kind, text, source_kind, archive_path, line_start, line_end,
-      observed_at, project, confidence, status, supersedes_id,
+      observed_at, project, project_name, confidence, status, supersedes_id,
       dedupe_key, extraction_version, embedding_version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(dedupe_key, archive_path, line_start, line_end) DO UPDATE SET
       kind = excluded.kind,
       text = excluded.text,
       source_kind = excluded.source_kind,
       observed_at = excluded.observed_at,
       project = excluded.project,
+      project_name = excluded.project_name,
       confidence = excluded.confidence,
       status = excluded.status,
       supersedes_id = excluded.supersedes_id,
@@ -226,6 +231,7 @@ export function insertMemoryRecord(db: Database, record: MemoryRecordInsert): nu
     record.lineEnd,
     record.observedAt,
     record.project,
+    record.projectName,
     record.confidence ?? 1.0,
     record.status ?? 'active',
     record.supersedesId ?? null,

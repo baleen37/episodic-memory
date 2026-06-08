@@ -34,6 +34,7 @@ describe('verifyMemoryIndex', () => {
       lineEnd: 99,
       observedAt: null,
       project: null,
+      projectName: null,
       dedupeKey: 'fact:invalid-provenance',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });

@@ -309,6 +309,7 @@ function seedMemoryRecord(database: ReturnType<typeof initDatabase>, archivePath
     lineEnd: 2,
     observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
     project: 'proj',
+    projectName: null,
     dedupeKey: `seed:${archivePath}`,
     extractionVersion: CURRENT_EXTRACTION_VERSION,
     embeddingVersion: CURRENT_EMBEDDING_VERSION,
