@@ -1,4 +1,4 @@
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { openDatabase } from '../core/db.js';
 import { runDiagnostics, type DiagnosticStatus } from '../core/doctor.js';
@@ -13,7 +13,7 @@ const STATUS_ICON: Record<DiagnosticStatus, string> = {
 function resolveRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // src/cli/doctor.ts -> ../..  ;  dist/cli-internal.mjs -> ..
-  return here.endsWith('cli') ? join(here, '..', '..') : join(here, '..');
+  return basename(here) === 'cli' ? join(here, '..', '..') : join(here, '..');
 }
 
 export function runDoctorCli(): void {
@@ -26,16 +26,20 @@ export function runDoctorCli(): void {
     });
 
     let hasFail = false;
+    let hasWarn = false;
     for (const r of results) {
       console.log(`${STATUS_ICON[r.status]} ${r.name}: ${r.detail}`);
       if (r.suggestion) {
         console.log(`    → run: ${r.suggestion}`);
       }
       if (r.status === 'fail') hasFail = true;
+      if (r.status === 'warn') hasWarn = true;
     }
 
     if (hasFail) {
       process.exitCode = 1;
+    } else if (hasWarn) {
+      console.log('\nmemmem is usable, but some checks need attention.');
     } else {
       console.log('\nmemmem is healthy.');
     }
