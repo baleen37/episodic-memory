@@ -80,6 +80,7 @@ describe('runDiagnostics', () => {
       lineEnd: 2,
       observedAt: null,
       project: null,
+      projectName: null,
       dedupeKey: 'fact:clean',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });
@@ -155,6 +156,7 @@ describe('runDiagnostics', () => {
       lineEnd: 2,
       observedAt: null,
       project: null,
+      projectName: null,
       dedupeKey: 'fact:novector',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
     });

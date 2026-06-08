@@ -120,6 +120,7 @@ describe('CLI search output', () => {
       lineEnd: 8,
       observedAt: Date.UTC(2026, 5, 1),
       project: 'memmem',
+      projectName: null,
       dedupeKey: 'cli-search-memory',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
       embeddingVersion: CURRENT_EMBEDDING_VERSION,

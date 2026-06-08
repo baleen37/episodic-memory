@@ -25,6 +25,7 @@ describe('getMemoryStats', () => {
       lineEnd: 3,
       observedAt: 1780272000000,
       project: null,
+      projectName: null,
       dedupeKey: 'fact:stats-memory-record',
       extractionVersion: CURRENT_EXTRACTION_VERSION,
       embeddingVersion: CURRENT_EMBEDDING_VERSION,

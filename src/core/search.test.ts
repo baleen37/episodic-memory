@@ -24,6 +24,7 @@ function memory(overrides: Partial<Parameters<typeof insertMemoryRecord>[1]> = {
     lineEnd: 8,
     observedAt: Date.UTC(2026, 5, 1),
     project: 'memmem',
+    projectName: null,
     dedupeKey: `${archivePath}:${overrides.lineStart ?? 4}:${text}`,
     extractionVersion: CURRENT_EXTRACTION_VERSION,
     embeddingVersion: CURRENT_EMBEDDING_VERSION,
