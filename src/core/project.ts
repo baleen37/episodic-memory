@@ -25,6 +25,24 @@ function leaf(repoRoot: string): string {
   return parts.length ? parts[parts.length - 1] : 'unknown';
 }
 
+export function parseOrgRepo(remoteUrl: string): string | null {
+  let s = remoteUrl.trim();
+  if (!s) return null;
+  const scp = s.match(/^[^@]+@[^:]+:(.+)$/);
+  if (scp) {
+    s = scp[1];
+  } else {
+    const proto = s.match(/^[a-z]+:\/\/[^/]+\/(.+)$/i);
+    if (proto) s = proto[1];
+    else if (s.includes('://') || s.includes('@')) return null;
+    else if (!s.includes('/')) return null;
+  }
+  s = s.replace(/\.git$/, '').replace(/\/+$/, '');
+  const parts = s.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+}
+
 export function resolveProject(
   cwd: string | null,
   opts: ResolveProjectOptions = {},
