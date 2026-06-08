@@ -1,3 +1,4 @@
+import { runDoctorCli } from './doctor.js';
 import { runReadCli } from './read.js';
 import { runSearchCli } from './search.js';
 import { runStatsCli } from './stats.js';
@@ -111,6 +112,7 @@ COMMANDS:
   read      Read archived transcript lines
   stats     Print memory index statistics
   verify    Verify memory index integrity
+  doctor    Diagnose build, index, and data health
 
 SEARCH OPTIONS:
   --limit <number>        Maximum number of results
@@ -160,6 +162,9 @@ async function main(): Promise<void> {
       break;
     case 'verify':
       runVerifyCli();
+      break;
+    case 'doctor':
+      runDoctorCli();
       break;
     default:
       console.error(`Unknown command: ${command}`);
