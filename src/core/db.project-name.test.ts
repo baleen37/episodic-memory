@@ -1,5 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { initDatabase, insertMemoryRecord } from './db.js';
+
+beforeAll(() => {
+  // Isolate from the real config DB — initDatabase() wipes whatever path it resolves.
+  process.env.TEST_DB_PATH = ':memory:';
+});
 
 describe('insertMemoryRecord persists project_name', () => {
   test('stores and returns project + project_name', () => {
