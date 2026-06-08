@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, utimesSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector } from './db.js';
@@ -42,7 +42,7 @@ describe('newestMtime', () => {
     writeFileSync(join(dir, 'top.ts'), '');
     setMtime(join(dir, 'top.ts'), 1000);
     const nested = join(dir, 'nested');
-    require('fs').mkdirSync(nested);
+    mkdirSync(nested);
     writeFileSync(join(nested, 'deep.ts'), '');
     setMtime(join(nested, 'deep.ts'), 3000);
 
@@ -54,8 +54,8 @@ describe('runDiagnostics', () => {
   function freshBuildDirs(): { distDir: string; srcDir: string } {
     const distDir = join(dir!, 'dist');
     const srcDir = join(dir!, 'src');
-    require('fs').mkdirSync(distDir, { recursive: true });
-    require('fs').mkdirSync(srcDir, { recursive: true });
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(srcDir, { recursive: true });
     writeFileSync(join(srcDir, 'main.ts'), '');
     setMtime(join(srcDir, 'main.ts'), 1000);
     writeFileSync(join(distDir, 'cli-internal.mjs'), '');
@@ -99,8 +99,8 @@ describe('runDiagnostics', () => {
     db = initDatabase();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
-    require('fs').mkdirSync(distDir, { recursive: true });
-    require('fs').mkdirSync(srcDir, { recursive: true });
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(srcDir, { recursive: true });
     writeFileSync(join(srcDir, 'main.ts'), '');
     writeFileSync(join(distDir, 'cli-internal.mjs'), '');
 
@@ -116,8 +116,8 @@ describe('runDiagnostics', () => {
     db = initDatabase();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
-    require('fs').mkdirSync(distDir, { recursive: true });
-    require('fs').mkdirSync(srcDir, { recursive: true });
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(srcDir, { recursive: true });
     writeFileSync(join(distDir, 'cli-internal.mjs'), '');
     writeFileSync(join(distDir, 'mcp-server.mjs'), '');
     setMtime(join(distDir, 'cli-internal.mjs'), 1000);

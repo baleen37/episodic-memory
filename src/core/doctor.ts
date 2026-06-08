@@ -18,6 +18,8 @@ export interface DiagnosticPaths {
   srcDir: string;
 }
 
+// The two TS-derived bundles checked for staleness; copied wrappers
+// (mcp-wrapper.mjs, cli.mjs) are intentionally excluded since they are not rebuilt from src.
 const REQUIRED_DIST_ARTIFACTS = ['cli-internal.mjs', 'mcp-server.mjs'];
 
 /** Newest mtime (ms epoch) across files with `ext` under `dir`, recursive. 0 if none. */
