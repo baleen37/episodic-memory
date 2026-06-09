@@ -6,10 +6,11 @@
 
 
 Goal: verify that a Go embedding pipeline can reproduce the exact vectors that
-the current TS pipeline (transformers.js, `src/core/embeddings-model.ts`)
-produces with `Xenova/multilingual-e5-small` fp16 ONNX. This is the gate for the
-TS→Go port: if Go can't reproduce the vectors, the existing on-disk
-`conversations.db` index can't stay compatible.
+the original TS pipeline (transformers.js, `src/core/embeddings-model.ts`)
+produced with `Xenova/multilingual-e5-small` fp16 ONNX. This was the gate for the
+TS→Go port: if Go couldn't reproduce the vectors, the existing on-disk
+`conversations.db` index couldn't stay compatible. (The port is complete; this
+document is kept as the Phase 0 record.)
 
 ## Result
 
@@ -73,9 +74,10 @@ gh release download v1.27.0 --repo daulet/tokenizers \
   --pattern 'libtokenizers.darwin-arm64.tar.gz' --dir lib --clobber
 tar -xzf lib/libtokenizers.darwin-arm64.tar.gz -C lib   # -> lib/libtokenizers.a
 
-# 3. baseline.json is committed; regenerate it from the real TS pipeline with
-#    poc/gen-baseline.ts (run from repo root, with bun — NOT node):
-#    bun run poc/gen-baseline.ts   (writes poc/baseline.json)
+# 3. poc/baseline.json is committed (the reference embedding vector). It was
+#    originally generated from the now-removed TS pipeline; the Go embeddings
+#    package (internal/core/embeddings) is the live implementation and its tests
+#    assert against this same baseline.
 
 # 4. build, then run with CWD = repo root (all paths are repo-relative:
 #    ./.cache/... and poc/baseline.json)

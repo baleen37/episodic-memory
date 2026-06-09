@@ -12,6 +12,7 @@ cd "$ROOT"
 bash scripts/fetch-dev-assets.sh
 bash scripts/stage-runtime-assets.sh
 
+mkdir -p bin
 export CGO_ENABLED=1
 export CGO_LDFLAGS="-L$ROOT/poc/lib"
 go build -o bin/memmem ./cmd/memmem
