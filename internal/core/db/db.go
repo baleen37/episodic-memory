@@ -291,6 +291,14 @@ func serializeVector(embedding []float32) []byte {
 	return b
 }
 
+// SerializeVector encodes embedding as little-endian float32 raw bytes for
+// binding to a vec0 MATCH parameter. It is the exported form of the same
+// encoding used to store vectors (serializeVector), so query vectors bind
+// identically to how stored vectors were written. Used by the search package.
+func SerializeVector(embedding []float32) []byte {
+	return serializeVector(embedding)
+}
+
 // nowMillis returns the current time as a millisecond epoch (matches Date.now()).
 func nowMillis() int64 {
 	return time.Now().UnixMilli()
