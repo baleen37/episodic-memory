@@ -1,0 +1,109 @@
+# goreleaser config for the Go port of memmem.
+#
+# CGO is REQUIRED (yalue/onnxruntime_go + daulet/tokenizers) and CANNOT
+# cross-compile: daulet/tokenizers links a per-platform prebuilt libtokenizers.a
+# and the toolchain is native per OS/arch. goreleaser's default single-host
+# cross-build does not apply.
+#
+# NOTE: goreleaser's native cross-platform-CGO answer is `release --split` +
+# `continue --merge`, but those are goreleaser PRO features (verified absent in
+# the OSS build v2.16.0: no --split/--merge, no `continue`). Env-templating
+# goos/goarch to a single per-runner target is also unsupported (goos/goarch are
+# literal lists, not rendered). So this uses a MATRIX-BUILD-THEN-UPLOAD pipeline:
+#
+#   - .github/workflows/release.yml runs `goreleaser build --single-target
+#     --clean` on each of the 4 native runners (darwin-arm64/amd64,
+#     linux-amd64/arm64). --single-target builds ONLY the runner's native
+#     GOOS/GOARCH from the multi-target lists below (CGO can't cross-compile);
+#     native libs are provisioned and the go:embed assets are staged for THAT
+#     platform (via the `before` hook). goreleaser owns the CGO build + staging.
+#   - The workflow then tars each binary, computes a per-platform sha256, and a
+#     final job creates the GitHub Release and uploads every archive + a merged
+#     checksums.txt via `gh release`.
+#
+# The `archives:`, `checksum:`, and `release:` blocks below are NOT exercised by
+# `goreleaser build` (build only emits raw binaries). They are kept as the
+# canonical spec / future migration target if this moves to `goreleaser release`
+# (e.g. on goreleaser Pro with split/merge), and to keep `goreleaser check`
+# validating the whole config.
+#
+# Linking model (verified against internal/core/embeddings + go-ci.yml):
+#   - daulet/tokenizers is STATIC-linked (libtokenizers.a) -> needs
+#     CGO_LDFLAGS=-L<dir-with-libtokenizers.a>. The release workflow exports this
+#     via the CGO_LDFLAGS env before invoking goreleaser.
+#   - onnxruntime is NOT a link dependency: it is dlopen'd at runtime via
+#     ort.SetSharedLibraryPath(rp.DylibPath) (see internal/core/embeddings/
+#     model.go). The self-contained MS ORT lib is go:embed'd and extracted on
+#     first run, so it is NOT in CGO_LDFLAGS.
+#
+# The model (multilingual-e5-small ONNX, 235MB) is NOT embedded/packaged here —
+# it is downloaded + sha256-verified on first run (internal/core/runtime), which
+# keeps each binary ~88MB.
+version: 2
+
+project_name: memmem
+
+before:
+  hooks:
+    - go mod tidy
+    # Stage the per-platform go:embed runtime assets (ORT shared lib +
+    # tokenizer) before any build. The release workflow sets GOOS and
+    # MEMMEM_ORT_LIB_SRC so this stages the correct .dylib/.so for the runner.
+    - bash scripts/stage-runtime-assets.sh
+
+builds:
+  - id: memmem
+    main: ./cmd/memmem
+    binary: memmem
+    env:
+      - CGO_ENABLED=1
+      # CGO_LDFLAGS is exported by the release workflow and points at the
+      # directory holding the per-platform libtokenizers.a (daulet static link).
+      # ORT is dlopen'd at runtime, so it is intentionally absent here.
+    # CGO cannot cross-compile. The release workflow runs `build --single-target`
+    # so only the runner's native GOOS/GOARCH (from these lists) is built; the
+    # other combinations are skipped.
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      # cmd/memmem{,-mcp} have no version vars to inject; just strip symbols to
+      # trim binary size. Wire -X main.version=... here if a version var is added.
+      - -s -w
+
+  - id: memmem-mcp
+    main: ./cmd/memmem-mcp
+    binary: memmem-mcp
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      # cmd/memmem{,-mcp} have no version vars to inject; just strip symbols to
+      # trim binary size. Wire -X main.version=... here if a version var is added.
+      - -s -w
+
+archives:
+  - id: default
+    ids: [memmem, memmem-mcp]
+    formats: [tar.gz]
+    # Self-contained binaries: the ORT lib + tokenizer are go:embed'd and the
+    # model is downloaded on first run, so no extra files[] are packaged.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+# Releasing is handled by the workflow (gh release), not goreleaser: per-runner
+# invocations use `goreleaser build`, which never publishes. The release is
+# created as a draft by the workflow's `gh release create --draft` so the
+# maintainer publishes manually after smoke-testing the per-platform binaries.
+release:
+  draft: true
+
+# The TS plugin has its own release path (.github/workflows/on-release.yml ->
+# marketplace dispatch); this config only governs the Go binaries.
