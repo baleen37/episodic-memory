@@ -73,8 +73,9 @@ gh release download v1.27.0 --repo daulet/tokenizers \
   --pattern 'libtokenizers.darwin-arm64.tar.gz' --dir lib --clobber
 tar -xzf lib/libtokenizers.darwin-arm64.tar.gz -C lib   # -> lib/libtokenizers.a
 
-# 3. baseline (committed as baseline.json) regenerated from the TS pipeline via:
-#    bun run /tmp/poc_baseline_full.ts   (writes /tmp/poc_baseline_full.json)
+# 3. baseline.json is committed; regenerate it from the real TS pipeline with
+#    poc/gen-baseline.ts (run from repo root, with bun — NOT node):
+#    bun run poc/gen-baseline.ts   (writes poc/baseline.json)
 
 # 4. build, then run with CWD = repo root (all paths are repo-relative:
 #    ./.cache/... and poc/baseline.json)
