@@ -24,55 +24,54 @@ Memmem syncs local transcripts into an archive, extracts source-linked event/fac
 ## Commands
 
 ```bash
-bun test                        # Run all tests
-bun test path/to/file.test.ts   # Run single test file
-bun test --watch                # Watch mode
-bun run build                   # Bundle with Bun.build (scripts/build.mjs)
-bun run typecheck               # tsc --noEmit
-bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli.mjs)
+go test ./...                          # Run all tests
+go test ./internal/core/search         # Run a single package
+go vet ./...                           # Static analysis (type check is part of build)
+bash scripts/build-binaries.sh         # Build bin/memmem and bin/memmem-mcp
+./bin/memmem <sync|search|read|stats|verify|doctor>   # Run built CLI
 ```
 
-**CRITICAL**: Always use `bun` — this project uses `bun:sqlite` (built-in) and `bun test`.
+**CRITICAL**: Builds require CGO and staged native runtime assets. `bash scripts/build-binaries.sh` fetches, stages, and builds in one step: it runs `scripts/fetch-dev-assets.sh` (gh/curl, only when assets are missing), then `scripts/stage-runtime-assets.sh` (copies the ORT lib + tokenizer into the `go:embed` directory), then `go build` with `CGO_ENABLED=1` and `CGO_LDFLAGS="-L$(pwd)/poc/lib"` to statically link `libtokenizers.a`. The ONNX runtime dylib and `tokenizer.json` are embedded via `go:embed`; the embedding model (`model_fp16.onnx`, ~235MB) is downloaded on first run, not embedded.
 
 ## Key Files
 
 | File | Description |
 | ---- | ----------- |
-| `src/core/db.ts` | Memory database schema — use `openDatabase()` in production, `initDatabase()` only in tests |
-| `src/core/sources/types.ts` | Source adapter and transcript span types |
-| `src/core/sources/claude.ts` | Claude Code transcript adapters and JSONL parser |
-| `src/core/sources/codex.ts` | Codex transcript adapter and rollout parser |
-| `src/core/sources/index.ts` | Built-in source adapter exports |
-| `src/core/indexer.ts` | Archive indexing into memory records and vectors |
-| `src/core/search.ts` | Hybrid vector-first + text fallback memory search |
-| `src/core/read.ts` | Archived transcript line reading/rendering |
-| `src/core/embeddings.ts` | Xenova/multilingual-e5-small embeddings (384-dim) with passage/query prefix routing |
-| `src/core/ratelimiter.ts` | Token bucket rate limiter (singleton, configurable) |
-| `src/core/llm/config.ts` | LLM config loading + `createProvider()` factory; supports single-provider and `providers[]` round-robin modes |
-| `src/core/llm/extractor.ts` | Bounded, schema-validated fact/event extraction from transcript spans |
-| `src/core/llm/{gemini,zai}-provider.ts` | Provider implementations behind the `LLMProvider` interface (`src/core/llm/types.ts`) |
-| `src/core/llm/round-robin-provider.ts` | Rotates across multiple `(apiKey, model)` entries to spread rate limits |
-| `src/cli/sync.ts` | CLI sync command: copy transcripts to archive and index changed files |
-| `src/cli/search.ts` | CLI search command |
-| `src/cli/read.ts` | CLI read command |
-| `src/cli/stats.ts` | CLI stats command |
-| `src/cli/verify.ts` | CLI verify command |
-| `src/cli/main.ts` | CLI router exposing `sync`, `search`, `read`, `stats`, and `verify` |
-| `src/cli-graceful.mjs` | Bun CLI wrapper copied to `dist/cli.mjs` |
-| `src/mcp/server.ts` | MCP server exposing search and read tools |
-| `src/mcp/handlers.ts` | MCP handlers for memory search/read |
-| `src/mcp/schemas.ts` | MCP input schemas for search/read |
-| `src/mcp/tools.ts` | MCP tool definitions for search/read |
-| `hooks/hooks.json` | SessionStart hook configuration for `memmem sync` |
-| `scripts/mcp-server-wrapper.mjs` | Bun MCP wrapper that ensures dependencies/build before launching server |
-| `scripts/build.mjs` | Bun.build bundling script |
+| `internal/core/db/db.go` | Memory database schema — use `OpenDatabase()` in production, `InitDatabase()` only in tests (`migrations.go`, `records.go` alongside) |
+| `internal/core/sources/types.go` | Source adapter and transcript span types |
+| `internal/core/sources/claude.go` | Claude Code transcript adapters and JSONL parser |
+| `internal/core/sources/codex.go` | Codex transcript adapter and rollout parser |
+| `internal/core/sources/sources.go` | Built-in source adapter registry (`BuiltInSourceAdapters()`) |
+| `internal/core/indexer/indexer.go` | Archive indexing into memory records and vectors (with `backoff.go`, `dedupe.go`, `prune.go`, `txstore.go`) |
+| `internal/core/search/search.go` | Hybrid vector-first + text fallback memory search |
+| `internal/core/read/read.go` | Archived transcript line reading/rendering |
+| `internal/core/embeddings/embeddings.go` | Xenova/multilingual-e5-small embeddings (384-dim) with passage/query prefix routing (`model.go`, `truncate.go` alongside) |
+| `internal/core/ratelimiter/ratelimiter.go` | Token bucket rate limiter (singleton in `singletons.go`, configurable) |
+| `internal/llm/config.go` | LLM config loading + `CreateProvider()` factory; supports single-provider and `providers[]` round-robin modes |
+| `internal/llm/extractor.go` | Bounded, schema-validated fact/event extraction from transcript spans |
+| `internal/llm/{gemini,zai}.go` | Provider implementations behind the `Provider` interface (`internal/llm/types.go`) |
+| `internal/llm/roundrobin.go` | Rotates across multiple `(apiKey, model)` entries to spread rate limits |
+| `internal/cli/sync.go` | CLI sync command: copy transcripts to archive and index changed files |
+| `internal/cli/commands.go` | Search, read, and stats command handlers |
+| `internal/cli/verify.go` | CLI verify command |
+| `internal/cli/doctor.go` | CLI doctor health-diagnostic command |
+| `internal/cli/parse.go` | CLI argument parsing |
+| `cmd/memmem/main.go` | CLI router exposing `sync`, `search`, `read`, `stats`, `verify`, and `doctor` |
+| `internal/mcp/server.go` | MCP server exposing search and read tools |
+| `internal/mcp/handlers.go` | MCP handlers for memory search/read |
+| `internal/mcp/schemas.go` | MCP input schemas for search/read |
+| `internal/mcp/tools.go` | MCP tool definitions for search/read |
+| `cmd/memmem-mcp/main.go` | MCP server entrypoint |
+| `internal/core/runtime/runtime.go` | Extracts `go:embed`'d native runtime assets (ORT lib + tokenizer) on first run |
+| `hooks/hooks.json` | SessionStart and Stop hook configuration invoking `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync` |
+| `scripts/build-binaries.sh` | Fetches + stages native assets, then builds `bin/memmem` and `bin/memmem-mcp` |
 
 ## Architecture Overview
 
 ### Data Flow
 
 ```text
-SessionStart hook → hooks/run.sh sync → src/cli/sync.ts
+SessionStart/Stop hook → bin/memmem sync (internal/cli/sync.go)
 sync              → source adapters discover Claude/Codex JSONL transcripts
 sync              → copy changed transcripts into conversation-archive/<source_kind>/<relative path>
 indexer           → parse changed archive files into transcript spans
@@ -91,7 +90,7 @@ Primary tables in `~/.config/memmem/conversation-index/conversations.db`:
 - **`vec_memory_records`**: 384-dimensional float embeddings for memory search (`sqlite-vec` virtual table).
 - **`extraction_state`**: Per-span extraction status used to avoid repeated LLM calls and control retry/backoff.
 
-`openDatabase()` opens/creates and preserves data. `initDatabase()` wipes and recreates — tests only.
+`OpenDatabase()` opens/creates and preserves data. `InitDatabase()` wipes and recreates — tests only.
 
 ### Search and Read
 
@@ -119,15 +118,15 @@ Adapters discover roots, detect JSONL files, parse transcript spans for extracti
 
 ### LLM Provider Layer
 
-`src/core/llm/` is the only LLM-dependent subsystem; it is used by the indexer's extractor to turn transcript spans into memory records. Everything behind the `LLMProvider` interface (`types.ts`).
+`internal/llm/` is the only LLM-dependent subsystem; it is used by the indexer's extractor to turn transcript spans into memory records. Everything behind the `Provider` interface (`types.go`).
 
-- `loadConfig()` reads the `llm` section of `~/.config/memmem/config.json`; returns `null` when unconfigured, which is why sync/read work without any provider.
-- `createProvider(config)` is the single factory. Two configuration shapes:
+- `LoadConfig()` reads the `llm` section of `~/.config/memmem/config.json`; returns `nil` when unconfigured, which is why sync/read work without any provider.
+- `CreateProvider(config)` is the single factory. Two configuration shapes:
   - **Single provider**: `{ provider: 'gemini' | 'zai', apiKey, model }`.
-  - **Round-robin**: `{ providers: [{ provider, apiKey, model }, ...] }` → `RoundRobinProvider` rotates across entries to spread per-key rate limits.
-- `extractor.ts` enforces the bounded/idempotent/schema-validated/failure-tolerant contract from Memory Architecture Principles; spans that fail extraction are skipped, not retried unbounded (tracked via `extraction_state`).
+  - **Round-robin**: `{ providers: [{ provider, apiKey, model }, ...] }` → the round-robin provider (`roundrobin.go`) rotates across entries to spread per-key rate limits.
+- `extractor.go` enforces the bounded/idempotent/schema-validated/failure-tolerant contract from Memory Architecture Principles; spans that fail extraction are skipped, not retried unbounded (tracked via `extraction_state`).
 
-When adding a provider: implement `LLMProvider`, export it from `index.ts`, and wire it into `createProvider()` and the `LLMProviderType` union in `config.ts`.
+When adding a provider: implement `Provider`, and wire it into `CreateProvider()` and the provider-type set in `config.go`.
 
 ### MCP Surface
 
@@ -140,15 +139,14 @@ There is no summary detail or graph layer in the target architecture.
 
 ### Build Output
 
-Bun.build outputs/copies to `dist/`:
+`go build` produces two self-contained binaries in `bin/`:
 
-- `src/cli/main.ts` → `dist/cli-internal.mjs`
-- `src/cli-graceful.mjs` → `dist/cli.mjs` (Bun wrapper)
-- `src/mcp/server.ts` → `dist/mcp-server.mjs`
-- `scripts/mcp-server-wrapper.mjs` → `dist/mcp-wrapper.mjs`
-- `scripts/lib/check-dependencies.mjs` → `dist/lib/check-dependencies.mjs`
+- `cmd/memmem/main.go` → `bin/memmem` (CLI used by hooks)
+- `cmd/memmem-mcp/main.go` → `bin/memmem-mcp` (MCP server)
 
-External (not bundled): `@huggingface/transformers`, `bun:sqlite`, `sqlite-vec`, `onnxruntime-node`, `sharp`.
+`bash scripts/build-binaries.sh` builds both locally. Release builds use the goreleaser matrix (`.goreleaser.yaml`) to cross-compile per-platform binaries.
+
+Go links sqlite-vec (via the `ncruces` WASM SQLite driver in tests / sqlite-vec at runtime) and the ONNX runtime via CGO; the ORT lib and `tokenizer.json` are `go:embed`'d and extracted to `~/.config/memmem/runtime/` on first run, and `libtokenizers.a` is statically linked at build time from `poc/lib/`.
 
 ## Configuration
 
@@ -172,15 +170,15 @@ Storage locations:
 
 ## Testing
 
-- Test files are co-located with source (`**/*.test.ts`) and use `bun test`.
+- Test files are co-located with source (`*_test.go`) and run with `go test`.
 - Integration tests use in-memory SQLite (`:memory:`) where possible.
-- Mock embeddings with `__setModelForTests()` to avoid network/model downloads in targeted tests.
+- Search tests inject a mock `Embedder` (e.g. `constEmbedder`) and insert vectors directly via the `db` package to stay CGO-free and avoid network/model downloads.
 
 ## Common Pitfalls
 
-- **Never** call `initDatabase()` in production code — wipes the database.
-- **Never** run runtime entrypoints with Node — CLI and MCP bundles import `bun:sqlite` and must run with Bun.
+- **Never** call `InitDatabase()` in production code — wipes the database.
+- Builds require CGO and staged native assets — a bare `go build` without staged runtime assets and `CGO_LDFLAGS` will fail; use `bash scripts/build-binaries.sh`.
 - Modify DB schema requires a migration or rebuild strategy.
-- After modifying TypeScript or runtime wrappers: rebuild with `bun run build`.
+- After modifying Go: rebuild with `bash scripts/build-binaries.sh`.
 
 <!-- MANUAL: Project-specific notes below this line are preserved -->

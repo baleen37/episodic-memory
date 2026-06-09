@@ -94,13 +94,11 @@ Reads archived transcript lines.
 ## Installation
 
 ```bash
-# Install dependencies
-cd plugins/memmem
-bun install
-
-# Build the plugin
-bun run build
+# Build the binaries (fetches + stages native assets, then go build)
+bash scripts/build-binaries.sh
 ```
+
+This produces `bin/memmem` (CLI used by hooks) and `bin/memmem-mcp` (MCP server).
 
 The plugin automatically:
 
@@ -122,7 +120,7 @@ This:
 
 1. Copies Claude Code and Codex transcripts into `~/.config/memmem/conversation-archive/`
 2. Extracts source-linked event/fact memory records from changed archive files
-3. Generates embeddings using Transformers.js
+3. Generates embeddings using the ONNX runtime (via CGO)
 4. Stores memory record metadata and vectors in SQLite
 5. Runs in background
 
@@ -178,20 +176,21 @@ Archive sync and `read` do not require an LLM provider configuration. Memory ext
 ### Build
 
 ```bash
-bun run build
+bash scripts/build-binaries.sh
 ```
 
-Bundles:
+Builds two self-contained binaries:
 
-- `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI implementation)
-- `src/cli-graceful.mjs` → `dist/cli.mjs` (Bun CLI wrapper)
-- `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server)
-- `scripts/mcp-server-wrapper.mjs` → `dist/mcp-wrapper.mjs` (Bun MCP wrapper)
+- `cmd/memmem/main.go` → `bin/memmem` (CLI used by hooks)
+- `cmd/memmem-mcp/main.go` → `bin/memmem-mcp` (MCP server)
 
-### Type Check
+The script fetches gitignored native assets when missing (ONNX runtime lib, `libtokenizers.a`, `tokenizer.json`), stages the `go:embed` runtime assets, then builds with `CGO_ENABLED=1` and `CGO_LDFLAGS="-L$(pwd)/poc/lib"` to statically link `libtokenizers.a`.
+
+### Test
 
 ```bash
-bun run typecheck
+go test ./...        # all packages
+go vet ./...         # static analysis
 ```
 
 ### CLI Usage
@@ -239,48 +238,44 @@ plugins/memmem/
 │   └── plugin.json              # Codex plugin metadata and MCP registration
 ├── .mcp.json                     # MCP server registration
 ├── hooks/
-│   └── hooks.json               # Auto-sync on session start (startup|resume)
-├── src/
+│   └── hooks.json               # Auto-sync on session start/stop
+├── cmd/
+│   ├── memmem/main.go           # CLI router (sync/search/read/stats/verify/doctor)
+│   └── memmem-mcp/main.go       # MCP server entrypoint
+├── internal/
 │   ├── core/                    # Core library
-│   │   ├── indexer.ts           # Archive file indexing
-│   │   ├── search.ts            # Semantic + text search
-│   │   ├── db.ts                # SQLite + vector schema
+│   │   ├── indexer/             # Archive file indexing
+│   │   ├── search/              # Semantic + text search
+│   │   ├── db/                  # SQLite + vector schema
+│   │   ├── embeddings/          # ONNX embedding model
+│   │   ├── runtime/             # go:embed native asset extraction
 │   │   └── sources/             # Claude Code and Codex adapters
-│   ├── cli/                     # CLI commands
-│   │   ├── sync.ts              # Sync command
-│   │   ├── search.ts            # Search command
-│   │   ├── read.ts              # Read command
-│   │   ├── stats.ts             # Stats command
-│   │   └── verify.ts            # Verify command
-│   └── mcp/
-│       └── server.ts            # MCP server (search, read tools)
-├── dist/
-│   ├── mcp-server.mjs           # Bundled MCP server
-│   ├── mcp-wrapper.mjs          # Cross-platform wrapper
-│   └── cli.mjs                  # Bundled CLI (for hooks)
+│   ├── cli/                     # CLI command handlers
+│   ├── llm/                     # LLM provider layer (extraction)
+│   └── mcp/                     # MCP server (search, read tools)
+├── bin/
+│   ├── memmem                   # Built CLI (for hooks)
+│   └── memmem-mcp               # Built MCP server
 ├── scripts/
-│   ├── build.mjs                # Bun.build config
-│   └── mcp-server-wrapper.mjs   # Wrapper script
-├── package.json
-├── tsconfig.json
+│   ├── build-binaries.sh        # Fetch + stage assets, then go build
+│   ├── fetch-dev-assets.sh      # Download gitignored native assets
+│   └── stage-runtime-assets.sh  # Copy assets into the go:embed directory
+├── go.mod
+├── go.sum
 └── README.md
 ```
 
 ## Dependencies
 
-### Runtime
+Self-contained Go binaries. Key modules (see `go.mod`):
 
-- Bun runtime with `bun:sqlite` for SQLite access
-- `@modelcontextprotocol/sdk`: MCP protocol implementation
-- `@huggingface/transformers`: Xenova/multilingual-e5-small embeddings
-- `sqlite-vec`: Vector similarity search extension
-- `zod`: Schema validation
-- `marked`: Markdown rendering
+- `github.com/modelcontextprotocol/go-sdk`: MCP protocol implementation
+- `github.com/yalue/onnxruntime_go`: ONNX runtime for Xenova/multilingual-e5-small embeddings
+- `github.com/daulet/tokenizers`: tokenizer (statically linked `libtokenizers.a`)
+- `github.com/asg017/sqlite-vec-go-bindings`: vector similarity search extension
+- `github.com/ncruces/go-sqlite3`: SQLite driver
 
-### Development Dependencies
-
-- `typescript`: Type checking
-- `bun-types`: Bun runtime and test types
+Build requirements: Go toolchain with CGO enabled, plus the native assets staged by `scripts/build-binaries.sh`.
 
 ## Upgrading to the memory record index
 
@@ -297,14 +292,10 @@ cp ~/.config/memmem/conversation-index/conversations.db \
 # 2. Remove old database
 rm ~/.config/memmem/conversation-index/conversations.db
 
-# 3. Reinstall plugin dependencies
-cd plugins/memmem
-bun install
+# 3. Rebuild the binaries
+bash scripts/build-binaries.sh
 
-# 4. Rebuild plugin
-bun run build
-
-# 5. Rebuild the local transcript index
+# 4. Rebuild the local transcript index
 memmem sync
 ```
 
@@ -316,62 +307,51 @@ memmem sync
 
 ## Troubleshooting
 
-### Installation Errors
+### Build Errors
 
-The plugin automatically installs dependencies on first run using Bun. If you encounter errors:
+The binaries are built with `bash scripts/build-binaries.sh`, which fetches native assets, stages the `go:embed` runtime assets, and builds with CGO. If you encounter errors:
 
-#### Permission Denied (EACCES)
+#### Missing Native Assets
 
-**Symptoms:** Error messages containing "EACCES" or "permission denied"
+**Symptoms:** Build fails with missing `libtokenizers.a`, `tokenizer.json`, or the ONNX runtime lib, or linker errors referencing `poc/lib`.
 
-**Fix:** Check permissions for the project directory and Bun cache, then retry:
+**Fix:** Re-run the build script so it fetches and stages assets, then rebuild:
 
 ```bash
-cd plugins/memmem
-bun install
+bash scripts/build-binaries.sh
 ```
 
-Then restart Claude Code.
+`scripts/fetch-dev-assets.sh` downloads assets via `gh`/`curl` only when they are missing; ensure `gh` is authenticated and the network is reachable.
 
-#### Network Errors (ETIMEDOUT, ECONNRESET, ENOTFOUND)
+#### Network Errors (fetching assets)
 
-**Symptoms:** Timeout or connection errors during dependency installation
+**Symptoms:** Timeout or connection errors while fetching native assets.
 
 **Fix:**
 
 1. Check your internet connection.
-2. If behind a corporate firewall, configure registry or proxy access in your environment.
-3. Try installing manually:
-
-   ```bash
-   cd plugins/memmem
-   bun install
-   ```
+2. If behind a corporate firewall, configure proxy access in your environment.
+3. Ensure `gh` is authenticated (`gh auth status`), then re-run `bash scripts/build-binaries.sh`.
 
 #### Disk Space Full (ENOSPC)
 
-**Symptoms:** Error messages containing "ENOSPC"
+**Symptoms:** Error messages containing "ENOSPC" during build or first-run model download.
 
 **Fix:**
 
 1. Check available disk space: `df -h`.
-2. Free up disk space or clear Bun's cache if needed.
-3. Reinstall dependencies:
+2. Free up space (the embedding model `model_fp16.onnx` is ~235MB and is downloaded to `~/.config/memmem/` on first run).
+3. Re-run `bash scripts/build-binaries.sh`.
 
-   ```bash
-   cd plugins/memmem
-   rm -rf node_modules
-   bun install
-   ```
+### Manual Build
 
-### Manual Installation
-
-If automatic installation fails repeatedly, install dependencies manually:
+If the build script fails, run the steps manually:
 
 ```bash
-cd plugins/memmem
-bun install
-bun run build
+bash scripts/fetch-dev-assets.sh
+bash scripts/stage-runtime-assets.sh
+CGO_ENABLED=1 CGO_LDFLAGS="-L$(pwd)/poc/lib" go build -o bin/memmem ./cmd/memmem
+CGO_ENABLED=1 CGO_LDFLAGS="-L$(pwd)/poc/lib" go build -o bin/memmem-mcp ./cmd/memmem-mcp
 ```
 
 ## Architecture Notes
@@ -382,7 +362,7 @@ bun run build
 - **Naming**: All public interfaces use `memmem` for clarity
 - **Embedding Model**: `Xenova/multilingual-e5-small`
   - 384 dimensions
-  - Loaded through `@huggingface/transformers`
+  - Run through the ONNX runtime (`yalue/onnxruntime_go`, via CGO)
   - Uses query/passage prefix routing for search and indexed memory records
   - Stored in `sqlite-vec` virtual tables
 
