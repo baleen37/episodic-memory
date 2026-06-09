@@ -83,7 +83,11 @@ func main() {
 	fmt.Printf("runtime dir: %s\n", rt)
 	fmt.Printf("model embedded in binary: %v\n", modelEmbedded)
 
-	// Clean prior extraction so we measure a true cold first-run.
+	// MEASUREMENT-ONLY — MUST NOT SHIP. Wipes the runtime dir so every run
+	// measures a true COLD first-run extraction. In the real port this line must
+	// be deleted: it would delete the user's ~/.config/memmem/runtime/ (including
+	// a 235MB downloaded model) on every launch. extractOne's size-match skip
+	// already provides idempotency without any wipe. See README "Graduation notes".
 	_ = os.RemoveAll(rt)
 
 	dylibDst := filepath.Join(rt, "libonnxruntime.dylib")

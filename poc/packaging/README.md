@@ -16,12 +16,24 @@ gitignored (large binaries); reproduce them with the steps at the end.
 
 ## TL;DR recommendation
 
-**Use Method 1 (go:embed self-extraction). Embed the dylib + tokenizer; DOWNLOAD
-the model on first run (do NOT embed it).**
+**On macOS: use Method 1 (go:embed self-extraction). Embed the dylib +
+tokenizer; DOWNLOAD the model on first run (do NOT embed it).**
+
+**Method 1-vs-2 is a PER-PLATFORM decision and is still OPEN for linux (Phase 5).
+Do NOT read this as "Method 1 everywhere."** The evidence below rejects Method 2
+*on macOS only* — that rejection is Apple-forced (no static libSystem/`crt0.o`),
+not a cross-platform truth. On **linux with musl, full static linking IS
+possible** and is a legitimate (arguably better) Go+CGO single-binary strategy:
+no runtime dir, no first-run extraction, no dylib on disk. See "Method 2" below.
 
 - Method 2 is **impossible on macOS** — proven below with the real linker error.
-  macOS has no static libc/`crt0.o` and Apple's `ld` rejects `-static`. And ORT
-  is not even available as a static `.a` from brew or the official release.
+  macOS has no static libc/`crt0.o` and Apple's `ld` rejects `-static`. This is
+  a macOS-only dead end.
+- A *separate* cost applies to Method 2 on **all** platforms: ORT does not ship
+  as a static `.a` from brew or the official release, so static-linking ORT
+  anywhere (incl. linux+musl) needs an ORT-from-source static build. That is an
+  ORT-availability cost — distinct from the macOS libSystem wall; don't conflate
+  the two when weighing linux.
 - Method 1 works end-to-end: extracted artifacts reproduce the Track A vector
   bit-for-bit (cosine = 1.0000000000).
 - Embedding the model pushes the binary to **316 MB**, over the plan's ~300MB
@@ -100,6 +112,24 @@ The **official Microsoft release** `onnxruntime-osx-arm64-1.26.0.tgz` ships a
 (self-contained). That is the artifact the port must embed. The measured 78.85 /
 316.1 MB numbers above use it.
 
+### Graduation notes: `extractOne` PoC → port
+
+`main.go`'s extraction is measurement code. Before it becomes runtime code in
+the real port:
+
+- **Drop the unconditional `os.RemoveAll(rt)`** at the top of `main` — it exists
+  ONLY to force a cold first-run for timing. Shipping it would delete the user's
+  `~/.config/memmem/runtime/` (incl. a 235MB downloaded model) on every launch.
+  Keep `extractOne`'s size-match skip, which already gives idempotency without
+  any wipe.
+- **Set the right modes**: the dylib must be executable/loadable (`0o755`); data
+  files (tokenizer, model) stay `0o644`. The PoC writes everything `0o644`.
+- **Keep the `tmp` + atomic `os.Rename` pattern** so a crash mid-write never
+  leaves a torn artifact at the real path.
+- **Verify the downloaded model** with the existing `sha256` helper (`sha8` /
+  full `sha256.Sum256`) against a known digest before trusting it, since the
+  model is fetched over the network (download-on-first-run), not embedded.
+
 ---
 
 ## Method 2 — static linking (INFEASIBLE on macOS)
@@ -143,6 +173,22 @@ abseil/onnx/protobuf/re2/etc.). **Not attempted** per the task; noted as a cost.
 
 Even if a static ORT `.a` existed, Method 2 would still fail on macOS at the
 libSystem/`crt0.o` step above. Method 2 is a dead end on darwin.
+
+### linux is different — Method 2 stays OPEN there (Phase 5)
+
+The `crt0.o`/libSystem wall is **Apple-specific**. On **linux with musl**
+(`CGO_ENABLED=1`, musl toolchain, `-extldflags "-static"`) full static linking
+of a Go+CGO binary IS supported and is a normal way to ship a standalone
+executable. For memmem on linux that would be attractive: no `~/.config/memmem/
+runtime/` dir, no first-run extraction, no dylib written to disk — a genuinely
+single self-contained file.
+
+The one real obstacle on linux is the **ORT-availability** cost noted above: no
+static `libonnxruntime.a` ships, so you'd need to build ORT statically from
+source (large/slow/fragile). That cost is independent of the macOS issue. So the
+linux call is "static-link viability vs. ORT-from-source cost" — a real tradeoff
+to evaluate in Phase 5, NOT the foregone macOS dead-end. **Method 1-vs-2 on
+linux is left open.**
 
 ---
 
