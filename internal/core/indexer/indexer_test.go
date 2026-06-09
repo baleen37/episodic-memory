@@ -163,6 +163,30 @@ func TestMakeDedupeKeyNormalize(t *testing.T) {
 	}
 }
 
+// TestMakeDedupeKeyJSParity pins the dedupe_key to values computed by JS/bun
+// (createHash('sha256').update(`${kind}:${text.toLowerCase().replace(/\s+/g,' ').trim()}`)).
+// This proves U+0085 (NEL) is kept and U+FEFF (BOM) is collapsed, byte-identical
+// to the TS index, so the same conversations.db works across TS↔Go.
+func TestMakeDedupeKeyJSParity(t *testing.T) {
+	nel := string(rune(0x0085))
+	bom := string(rune(0xFEFF))
+	cases := []struct {
+		kind, text, want string
+	}{
+		// NEL kept (not collapsed) → distinct normalized text.
+		{"fact", "a" + nel + "b", "f20b9851a522c2afcba613e558994cc6226997ba3868de0462d4eda8a2379ba6"},
+		// BOM collapsed to a single space.
+		{"fact", "a" + bom + "b", "36ba52033b8129a536095c5bfbcf1f8632bc04640544a9580923bc31899ae3b1"},
+		// Mixed ascii/tab/newline + U+3000, lowercased + trimmed.
+		{"fact", "  Hello\t\n World" + string(rune(0x3000)) + "! ", "02e62d51fc56bd24861c136f927d92d971175cfddf3c6cadadfd47819f340461"},
+	}
+	for _, c := range cases {
+		if got := makeDedupeKey(c.kind, c.text); got != c.want {
+			t.Errorf("makeDedupeKey(%q, %q) = %s, want %s (JS parity)", c.kind, c.text, got, c.want)
+		}
+	}
+}
+
 func TestGivenUpSpanIsSkipped(t *testing.T) {
 	database := newTestDB(t)
 	if err := db.UpsertExtractionState(database, db.ExtractionStateInsert{

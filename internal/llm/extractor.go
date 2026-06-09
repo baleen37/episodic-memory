@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
+
+	"github.com/baleen37/memmem/internal/core/textnorm"
 )
 
 // TranscriptSpanForExtraction is one transcript span fed to the extractor.
@@ -62,11 +63,6 @@ Response format:
   {"kind":"event","text":"The user asked to replace legacy transcript indexing with a memory-record extractor.","confidence":0.8}
 ]`
 
-// whitespaceRe matches runs of whitespace. JS \s also covers Unicode spaces, so
-// \p{Zs} and the common control whitespace are included for parity with the TS
-// normalizeWhitespace (text.trim().replace(/\s+/g, ' ')).
-var whitespaceRe = regexp.MustCompile(`[\t\n\v\f\r \x85\xA0\p{Zs}\p{Zl}\p{Zp}]+`)
-
 func stripMarkdownFences(response string) string {
 	jsonText := strings.TrimSpace(response)
 	if !strings.HasPrefix(jsonText, "```") {
@@ -94,8 +90,11 @@ func stripMarkdownFences(response string) string {
 	return strings.TrimSpace(strings.Join(lines[startIndex:endIndex], "\n"))
 }
 
+// normalizeWhitespace mirrors the TS text.trim().replace(/\s+/g, ' '). It
+// delegates to textnorm so the JS-`\s` semantics (U+FEFF collapsed, U+0085 kept)
+// stay byte-identical and shared with the indexer's dedupe_key normalization.
 func normalizeWhitespace(text string) string {
-	return whitespaceRe.ReplaceAllString(strings.TrimSpace(text), " ")
+	return textnorm.Normalize(text)
 }
 
 // clampConfidence mirrors the TS: non-number/NaN → 1, else clamp to [0, 1].
