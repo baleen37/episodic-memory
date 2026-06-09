@@ -1,5 +1,10 @@
 # Phase 0 Track A — Embedding accuracy PoC
 
+> **Track B (single-binary packaging measurement)** lives in
+> [`packaging/README.md`](packaging/README.md) — go:embed vs static linking,
+> with measured binary sizes and the recommendation.
+
+
 Goal: verify that a Go embedding pipeline can reproduce the exact vectors that
 the current TS pipeline (transformers.js, `src/core/embeddings-model.ts`)
 produces with `Xenova/multilingual-e5-small` fp16 ONNX. This is the gate for the
