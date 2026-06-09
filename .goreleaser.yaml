@@ -1,0 +1,66 @@
+# goreleaser draft for the Go port of memmem (Phase 1 skeleton).
+#
+# This is a SKELETON. The hard parts are deferred:
+#   - CGO is required (onnxruntime_go + daulet/tokenizers) and cannot
+#     cross-compile, so release builds must run on per-platform native runners
+#     (see .github/workflows/go-ci.yml matrix). goreleaser's default single-host
+#     cross-build model does not apply; this likely needs `builds[].buildmode`
+#     plus split/merge across runners, or a partial-build + merge workflow.
+#   - The model (multilingual-e5-small ONNX) packaging decision is Phase 5:
+#     go:embed self-extraction (Method 1, proven in poc/packaging) with
+#     first-run download. Not wired here.
+#
+# TODO(phase5): finalize per-platform CGO build provisioning + model packaging.
+#
+# Note: goreleaser's default output dir is dist/, which is gitignored on
+# purpose — release artifacts should not be committed.
+version: 2
+
+project_name: memmem
+
+before:
+  hooks:
+    # TODO(phase2): go mod tidy / native-lib provisioning per platform.
+    - go mod tidy
+
+builds:
+  - id: memmem
+    main: ./cmd/memmem
+    binary: memmem
+    env:
+      - CGO_ENABLED=1
+    # TODO: CGO cannot cross-compile. Restrict each runner to its native
+    # goos/goarch and merge artifacts, or use a split/merge release pipeline.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # TODO(phase2): CGO_LDFLAGS for libtokenizers + onnxruntime per platform.
+
+  - id: memmem-mcp
+    main: ./cmd/memmem-mcp
+    binary: memmem-mcp
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    # TODO(phase5): decide whether the model is embedded (go:embed) or
+    # downloaded on first run; adjust files[] accordingly.
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: true # skeleton — keep releases as drafts until Phase 5.

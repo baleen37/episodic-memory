@@ -1,0 +1,65 @@
+name: Go CI
+
+# Skeleton CI for the Go port (Phase 1). Coexists with the TS workflow (ci.yml).
+# CGO is required (onnxruntime_go + daulet/tokenizers) and CANNOT cross-compile,
+# so every target platform is built natively in the matrix.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/go-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/go-ci.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-14 # Apple Silicon
+          - target: darwin-amd64
+            runs-on: macos-13 # Intel
+          - target: linux-amd64
+            runs-on: ubuntu-latest
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+
+      # TODO(phase2): provision the per-platform native libs the embedding
+      # pipeline needs before build/test once those imports land:
+      #   - onnxruntime 1.26.0 shared lib (brew on macOS; release tarball on Linux)
+      #   - daulet/tokenizers prebuilt static lib (libtokenizers.<os>-<arch>)
+      #     downloaded from the daulet/tokenizers v1.27.0 GitHub release,
+      #     wired via CGO_LDFLAGS="-L<dir>".
+      # The Phase 1 skeleton has no CGO imports yet, so build/vet/test are clean
+      # without them.
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
