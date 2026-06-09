@@ -168,19 +168,32 @@ Expected: id=3 응답에 검색 결과(content)가 반환(0건이어도 에러 �
 
 ### Task 6: bin/ gitignore + 빌드 스크립트
 
+> **검증으로 확정된 사실(Phase A):** 로컬 빌드는 (1) gitignored 대용량 자산 3개(ORT
+> dylib, libtokenizers.a, tokenizer.json)가 있어야 하고, (2) `CGO_LDFLAGS="-L<repo>/poc/lib"`
+> 로 libtokenizers.a 정적 링크 경로를 줘야 한다. 자산 자동 fetch는 이미 만든
+> `scripts/fetch-dev-assets.sh`가 담당(없을 때만 gh/curl로 받음, darwin/arm64).
+
 **Files:**
 - Modify: `.gitignore`
 - Create: `scripts/build-binaries.sh`
+- (이미 생성됨) `scripts/fetch-dev-assets.sh`
 
-- [ ] **Step 1: `.gitignore`에 bin 바이너리 제외 추가**
+- [ ] **Step 1: `.gitignore`에 bin 바이너리 + 자산 캐시 경로 제외 추가**
 
-`.gitignore` 끝에 다음을 추가(이미 있으면 생략):
+`.gitignore` 끝에 다음을 추가:
 
 ```
-# Go binaries (built on install via scripts/build-binaries.sh)
+# Go binaries (built locally via scripts/build-binaries.sh)
 /bin/memmem
 /bin/memmem-mcp
+
+# Local dev build assets (fetched by scripts/fetch-dev-assets.sh)
+/poc/lib/
+/.cache/
 ```
+
+> `poc/packaging/embedded/`·`internal/core/runtime/embedded/` 산출물은 이미
+> 기존 .gitignore/poc/packaging/.gitignore로 제외돼 있다.
 
 - [ ] **Step 2: 빌드 스크립트 작성**
 
@@ -188,14 +201,21 @@ Create `scripts/build-binaries.sh`:
 
 ```bash
 #!/usr/bin/env bash
-# Build the Go binaries into bin/. Stages per-platform go:embed runtime assets
-# first (ORT lib + tokenizer), then builds the CLI and MCP server.
+# Build the Go binaries into bin/. On a local dev host this "just works":
+#   1. fetch gitignored native assets if missing (ORT dylib, libtokenizers.a, tokenizer.json)
+#   2. stage the go:embed runtime assets (ORT lib + tokenizer)
+#   3. build the CLI and MCP server with the CGO static-link path for libtokenizers.a
+# CI/goreleaser provisions assets per-platform and does not use fetch-dev-assets.sh.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+bash scripts/fetch-dev-assets.sh
 bash scripts/stage-runtime-assets.sh
+
+export CGO_ENABLED=1
+export CGO_LDFLAGS="-L$ROOT/poc/lib"
 go build -o bin/memmem ./cmd/memmem
 go build -o bin/memmem-mcp ./cmd/memmem-mcp
 
@@ -205,7 +225,8 @@ echo "Built bin/memmem and bin/memmem-mcp"
 - [ ] **Step 3: 실행 권한 + 동작 확인**
 
 Run: `chmod +x scripts/build-binaries.sh && bash scripts/build-binaries.sh`
-Expected: `Built bin/memmem and bin/memmem-mcp` 출력, exit 0.
+Expected: `Built bin/memmem and bin/memmem-mcp` 출력, exit 0. (`ld: warning ...
+newer macOS version` 경고는 무해 — 에러 아님.)
 
 - [ ] **Step 4: 커밋**
 
