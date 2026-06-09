@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -135,6 +136,79 @@ func TestSessionReused(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestConcurrentEmbed fires N concurrent Embed calls against one shared Model
+// and checks every call returns the same vector as a serial baseline. It backs
+// the thread-safety claim for the reused session (the mutex in Model.run). Run
+// under `go test -race` to detect data races on the shared session/tokenizer.
+func TestConcurrentEmbed(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := NewModel(cfg)
+	if err != nil {
+		t.Fatalf("NewModel: %v", err)
+	}
+	defer m.Close()
+
+	const goroutines = 8
+	const perGoroutine = 4
+
+	inputs := []struct {
+		kind Kind
+		text string
+	}{
+		{Query, "concurrent query one 한국어"},
+		{Passage, "concurrent passage two with provenance"},
+	}
+
+	// Serial baselines to compare every concurrent result against.
+	want := make([][]float32, len(inputs))
+	for i, in := range inputs {
+		v, err := m.Embed(in.kind, in.text)
+		if err != nil {
+			t.Fatalf("baseline Embed: %v", err)
+		}
+		want[i] = v
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines*perGoroutine)
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for j := 0; j < perGoroutine; j++ {
+				idx := (g + j) % len(inputs)
+				in := inputs[idx]
+				v, err := m.Embed(in.kind, in.text)
+				if err != nil {
+					errs <- err
+					return
+				}
+				for d := range v {
+					if v[d] != want[idx][d] {
+						errs <- &mismatchError{idx: idx, dim: d, got: v[d], want: want[idx][d]}
+						return
+					}
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent Embed: %v", err)
+	}
+}
+
+type mismatchError struct {
+	idx, dim int
+	got      float32
+	want     float32
+}
+
+func (e *mismatchError) Error() string {
+	return "result mismatch under concurrency"
 }
 
 // TestOver512Tokens confirms the >512-token truncation path runs and produces a

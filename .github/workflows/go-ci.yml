@@ -1,8 +1,9 @@
 name: Go CI
 
-# Skeleton CI for the Go port (Phase 1). Coexists with the TS workflow (ci.yml).
+# CI for the Go port. Coexists with the TS workflow (ci.yml).
 # CGO is required (onnxruntime_go + daulet/tokenizers) and CANNOT cross-compile,
-# so every target platform is built natively in the matrix.
+# so every target platform is built natively in the matrix, with per-platform
+# native libs (onnxruntime + libtokenizers) provisioned before build/test.
 on:
   push:
     branches: [main]
@@ -29,15 +30,25 @@ jobs:
         include:
           - target: darwin-arm64
             runs-on: macos-14 # Apple Silicon
+            tokenizers_asset: darwin-arm64
           - target: darwin-amd64
             runs-on: macos-13 # Intel
+            tokenizers_asset: darwin-x86_64
           - target: linux-amd64
             runs-on: ubuntu-latest
+            tokenizers_asset: linux-amd64
+            ort_linux_arch: x64
           - target: linux-arm64
             runs-on: ubuntu-24.04-arm
+            tokenizers_asset: linux-arm64
+            ort_linux_arch: aarch64
     runs-on: ${{ matrix.runs-on }}
     env:
       CGO_ENABLED: 1
+      # daulet/tokenizers release asset name for this target (libtokenizers.<asset>.tar.gz).
+      TOKENIZERS_ASSET: ${{ matrix.tokenizers_asset }}
+      # onnxruntime 1.26.0 Linux release tarball arch (unused on macOS).
+      ORT_LINUX_ARCH: ${{ matrix.ort_linux_arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,14 +57,60 @@ jobs:
         with:
           go-version: "1.26.3"
 
-      # TODO(phase2): provision the per-platform native libs the embedding
-      # pipeline needs before build/test once those imports land:
-      #   - onnxruntime 1.26.0 shared lib (brew on macOS; release tarball on Linux)
-      #   - daulet/tokenizers prebuilt static lib (libtokenizers.<os>-<arch>)
-      #     downloaded from the daulet/tokenizers v1.27.0 GitHub release,
-      #     wired via CGO_LDFLAGS="-L<dir>".
-      # The Phase 1 skeleton has no CGO imports yet, so build/vet/test are clean
-      # without them.
+      # --- Native libs for the CGO embedding pipeline (Phase 2) -------------
+      # The embeddings package links onnxruntime_go (against libonnxruntime) and
+      # daulet/tokenizers (against a prebuilt libtokenizers.a). Both must be
+      # provisioned before build/vet/test or the link fails. We stage them under
+      # $RUNNER_TEMP/native and point CGO_LDFLAGS at the tokenizer static lib.
+
+      - name: Provision daulet/tokenizers static lib
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native"
+          gh release download v1.27.0 --repo daulet/tokenizers \
+            --pattern "libtokenizers.${TOKENIZERS_ASSET}.tar.gz" \
+            --dir "$RUNNER_TEMP/native" --clobber
+          tar -xzf "$RUNNER_TEMP/native/libtokenizers.${TOKENIZERS_ASSET}.tar.gz" \
+            -C "$RUNNER_TEMP/native"   # -> $RUNNER_TEMP/native/libtokenizers.a
+          test -f "$RUNNER_TEMP/native/libtokenizers.a"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Provision onnxruntime 1.26.0 (macOS)
+        if: startsWith(matrix.runs-on, 'macos')
+        run: |
+          set -euo pipefail
+          brew install onnxruntime
+          ORT_LIB="$(brew --prefix onnxruntime)/lib/libonnxruntime.dylib"
+          test -f "$ORT_LIB"
+          # Make the dylib discoverable at link and run time.
+          echo "ORT_LIB_DIR=$(brew --prefix onnxruntime)/lib" >> "$GITHUB_ENV"
+
+      - name: Provision onnxruntime 1.26.0 (Linux)
+        if: startsWith(matrix.runs-on, 'ubuntu')
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/native"
+          curl -fsSL -o ort.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-${ORT_LINUX_ARCH}-1.26.0.tgz"
+          tar -xzf ort.tgz
+          ORT_DIR="$RUNNER_TEMP/native/onnxruntime-linux-${ORT_LINUX_ARCH}-1.26.0"
+          test -f "$ORT_DIR/lib/libonnxruntime.so"
+          echo "ORT_LIB_DIR=$ORT_DIR/lib" >> "$GITHUB_ENV"
+
+      - name: Configure native linker paths
+        run: |
+          set -euo pipefail
+          # Static-link the tokenizer lib; also expose the ORT dir so its dynamic
+          # lib resolves when the (skipped-in-CI) model tests build/link.
+          echo "CGO_LDFLAGS=-L$RUNNER_TEMP/native -L$ORT_LIB_DIR" >> "$GITHUB_ENV"
+          # Runtime loader path for the ORT shared lib.
+          echo "DYLD_LIBRARY_PATH=$ORT_LIB_DIR" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ORT_LIB_DIR" >> "$GITHUB_ENV"
+
+      # NOTE: the ~235MB embedding model is NOT downloaded in CI. Model-dependent
+      # tests t.Skip when .cache is absent; build/vet/link must still succeed
+      # (they only need the native libs above, not the model file).
 
       - name: Build
         run: go build ./...
