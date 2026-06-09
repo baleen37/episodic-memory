@@ -27,4 +27,5 @@ logs/
 # or scripts/stage-runtime-assets.sh). Gitignored like the PoC's embedded/ dir;
 # only a .gitkeep is committed so //go:embed has a directory to point at.
 internal/core/runtime/embedded/libonnxruntime.dylib
+internal/core/runtime/embedded/libonnxruntime.so
 internal/core/runtime/embedded/tokenizer.json

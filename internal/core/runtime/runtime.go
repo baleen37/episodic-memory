@@ -34,7 +34,9 @@ import (
 )
 
 const (
-	dylibName     = "libonnxruntime.dylib"
+	// The ORT shared library filename is platform-specific (.dylib on macOS,
+	// .so on linux) and is defined as embeddedLibName in the build-tagged
+	// embed_{darwin,linux}.go files.
 	tokenizerName = "tokenizer.json"
 	modelName     = "model_fp16.onnx"
 
@@ -95,7 +97,7 @@ func EnsureRuntime() (RuntimePaths, error) {
 	}
 
 	out := RuntimePaths{
-		DylibPath:     filepath.Join(dir, dylibName),
+		DylibPath:     filepath.Join(dir, embeddedLibName),
 		TokenizerPath: filepath.Join(dir, tokenizerName),
 		ModelPath:     filepath.Join(dir, modelName),
 	}
@@ -103,7 +105,7 @@ func EnsureRuntime() (RuntimePaths, error) {
 	// dylib: env override or extract the embedded MS dylib (0o755).
 	if v := os.Getenv(envORTLibPath); v != "" {
 		out.DylibPath = v
-	} else if err := extractEmbedded(out.DylibPath, embeddedDylib, dylibMode); err != nil {
+	} else if err := extractEmbedded(out.DylibPath, embeddedLib, dylibMode); err != nil {
 		return RuntimePaths{}, fmt.Errorf("provision dylib: %w", err)
 	}
 
