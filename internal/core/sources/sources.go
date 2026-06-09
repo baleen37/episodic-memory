@@ -1,8 +1,12 @@
-// Package sources holds the transcript source adapters.
-//
-// Ports src/core/sources/ (types.ts, claude.ts, codex.ts, jsonl.ts, index.ts):
-// claude-projects, claude-transcripts, and codex-sessions adapters that
-// discover roots, detect JSONL transcripts, and parse transcript spans.
-//
-// TODO(phase2): port the source adapter interface and built-in adapters.
 package sources
+
+// BuiltInSourceAdapters returns the built-in source adapters in stable order:
+// claude-projects, claude-transcripts, codex-sessions. Ports
+// getBuiltInSourceAdapters in src/core/sources/index.ts.
+func BuiltInSourceAdapters() []SourceAdapter {
+	return []SourceAdapter{
+		NewClaudeProjectsAdapter(),
+		NewClaudeTranscriptsAdapter(),
+		NewCodexSessionsAdapter(),
+	}
+}
