@@ -9,6 +9,8 @@ require (
 )
 
 require (
+	github.com/daulet/tokenizers v1.27.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
+	github.com/yalue/onnxruntime_go v1.31.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )
