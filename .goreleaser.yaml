@@ -105,5 +105,5 @@ checksum:
 release:
   draft: true
 
-# The TS plugin has its own release path (.github/workflows/on-release.yml ->
+# Marketplace versioning has its own path (.github/workflows/on-release.yml ->
 # marketplace dispatch); this config only governs the Go binaries.

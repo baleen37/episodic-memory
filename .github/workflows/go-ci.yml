@@ -1,6 +1,6 @@
 name: Go CI
 
-# CI for the Go port. Coexists with the TS workflow (ci.yml).
+# CI for the Go implementation.
 # CGO is required (onnxruntime_go + daulet/tokenizers) and CANNOT cross-compile,
 # so every target platform is built natively in the matrix, with per-platform
 # native libs (onnxruntime + libtokenizers) provisioned before build/test.
