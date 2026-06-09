@@ -40,6 +40,17 @@ func SuperpowersDir() (string, error) {
 	return ensureDir(filepath.Join(home, ".config", "memmem"))
 }
 
+// RuntimeDir returns the runtime asset directory (<SuperpowersDir>/runtime),
+// created if missing. Phase 5 extracts the embedded onnxruntime dylib and
+// tokenizer here on first run and downloads the embedding model into it.
+func RuntimeDir() (string, error) {
+	base, err := SuperpowersDir()
+	if err != nil {
+		return "", err
+	}
+	return ensureDir(filepath.Join(base, "runtime"))
+}
+
 // ArchiveDir returns the conversation archive directory, honoring the
 // TEST_ARCHIVE_DIR override. The directory is created if missing.
 func ArchiveDir() (string, error) {

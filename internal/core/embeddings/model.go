@@ -9,6 +9,8 @@ import (
 
 	"github.com/daulet/tokenizers"
 	ort "github.com/yalue/onnxruntime_go"
+
+	"github.com/baleen37/memmem/internal/core/runtime"
 )
 
 // Config locates the native onnxruntime library and the model/tokenizer files.
@@ -27,8 +29,12 @@ type Config struct {
 
 // DefaultConfig points at the repo-relative .cache location populated by the TS
 // pipeline (env.cacheDir = './.cache' in embeddings-model.ts) and the Homebrew
-// onnxruntime 1.26 install validated by the Phase 0 PoC. Phase 5 will replace
-// this with a proper runtime dir + download.
+// onnxruntime 1.26 install validated by the Phase 0 PoC.
+//
+// This is the DEVELOPMENT/TEST default: tests resolve these repo-relative paths
+// against the module root and skip when the assets are absent. Production code
+// uses ProductionConfig() / defaultModel(), which provisions assets via the
+// runtime package instead of assuming a repo checkout.
 func DefaultConfig() Config {
 	const cacheDir = ".cache/Xenova/multilingual-e5-small"
 	return Config{
@@ -36,6 +42,26 @@ func DefaultConfig() Config {
 		TokenizerPath:        filepath.Join(cacheDir, "tokenizer.json"),
 		ORTSharedLibraryPath: "/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib",
 	}
+}
+
+// ProductionConfig resolves the asset paths via the runtime provisioning package
+// (go:embed extract for the onnxruntime dylib + tokenizer, download-on-first-run
+// for the model). This is what a shipped, self-contained binary uses instead of
+// the repo-relative .cache assumed by DefaultConfig.
+//
+// The runtime package honors MEMMEM_MODEL_PATH / MEMMEM_TOKENIZER_PATH /
+// MEMMEM_ORT_LIB_PATH env overrides, so callers (and tests) can supply a local
+// model and avoid the 235MB download.
+func ProductionConfig() (Config, error) {
+	rp, err := runtime.EnsureRuntime()
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{
+		ModelPath:            rp.ModelPath,
+		TokenizerPath:        rp.TokenizerPath,
+		ORTSharedLibraryPath: rp.DylibPath,
+	}, nil
 }
 
 // Model holds the lazily-initialized, reused ONNX session and tokenizer. It is
@@ -91,7 +117,12 @@ func defaultModel() (*Model, error) {
 		return defaultInst, defaultErr
 	}
 	defaultBuilt = true
-	defaultInst, defaultErr = NewModel(DefaultConfig())
+	cfg, err := ProductionConfig()
+	if err != nil {
+		defaultErr = err
+		return defaultInst, defaultErr
+	}
+	defaultInst, defaultErr = NewModel(cfg)
 	return defaultInst, defaultErr
 }
 

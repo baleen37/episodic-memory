@@ -32,15 +32,12 @@ func TestSearchEndToEndWithModel(t *testing.T) {
 		}
 	}
 
-	// Make ./.cache resolve to the repo's .cache for the default embedder.
-	prevWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	// Point the default embedder's runtime provisioning at the local .cache model
+	// + tokenizer and the homebrew dylib so it uses the local assets and never
+	// triggers the 235MB first-run download (MEMMEM_MODEL_PATH is the bypass).
+	t.Setenv("MEMMEM_MODEL_PATH", filepath.Join(root, cfg.ModelPath))
+	t.Setenv("MEMMEM_TOKENIZER_PATH", filepath.Join(root, cfg.TokenizerPath))
+	t.Setenv("MEMMEM_ORT_LIB_PATH", cfg.ORTSharedLibraryPath)
 
 	d := newTestDB(t)
 	// Store a passage vector produced by the real model.

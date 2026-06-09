@@ -17,8 +17,13 @@
 //
 // (poc/lib/libtokenizers.a is the prebuilt daulet v1.27.0 lib the Phase 0 PoC
 // validated; it is gitignored and re-downloadable per poc/README.md. Tests skip
-// when the .cache model/tokenizer or the onnxruntime dylib are absent.) Phase 5
-// will wire the real runtime-dir + download-on-first-run for these assets.
+// when the .cache model/tokenizer or the onnxruntime dylib are absent.)
+//
+// In production the default model (defaultModel -> ProductionConfig) resolves
+// these assets via internal/core/runtime: the onnxruntime dylib + tokenizer are
+// extracted from the binary (go:embed) and the model is downloaded on first run.
+// Tests use NewModel with an explicit Config (or the MEMMEM_MODEL_PATH env
+// override) so they never trigger the download.
 //
 // Not ported here: the rate limiter and disable-flag wrapper from
 // src/core/embeddings.ts. Those live in embeddings.ts only as a thin wrapper
