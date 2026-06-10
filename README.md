@@ -184,9 +184,8 @@ bun run build
 Bundles:
 
 - `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI implementation)
-- `src/cli-graceful.mjs` → `dist/cli.mjs` (Bun CLI wrapper)
 - `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server)
-- `scripts/mcp-server-wrapper.mjs` → `dist/mcp-wrapper.mjs` (Bun MCP wrapper)
+- `src/cli-graceful.mjs` → `bin/memmem` (graceful wrapper executable; routes `mcp`/`sync`/etc. into the CLI bundle)
 
 ### Type Check
 
@@ -251,16 +250,20 @@ plugins/memmem/
 │   │   ├── search.ts            # Search command
 │   │   ├── read.ts              # Read command
 │   │   ├── stats.ts             # Stats command
-│   │   └── verify.ts            # Verify command
+│   │   ├── verify.ts            # Verify command
+│   │   ├── doctor.ts            # Doctor command
+│   │   └── mcp.ts               # MCP subcommand (spawns MCP server)
 │   └── mcp/
 │       └── server.ts            # MCP server (search, read tools)
+├── bin/
+│   └── memmem                   # Graceful wrapper executable (entrypoint)
 ├── dist/
-│   ├── mcp-server.mjs           # Bundled MCP server
-│   ├── mcp-wrapper.mjs          # Cross-platform wrapper
-│   └── cli.mjs                  # Bundled CLI (for hooks)
+│   ├── cli-internal.mjs         # Bundled CLI implementation
+│   └── mcp-server.mjs           # Bundled MCP server
 ├── scripts/
 │   ├── build.mjs                # Bun.build config
-│   └── mcp-server-wrapper.mjs   # Wrapper script
+│   └── lib/
+│       └── check-dependencies.mjs  # Shared dependency-check logic
 ├── package.json
 ├── tsconfig.json
 └── README.md
