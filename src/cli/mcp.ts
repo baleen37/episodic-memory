@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
-import { resolve, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import {
   checkDependencies,
@@ -11,7 +11,18 @@ import {
 } from '../../scripts/lib/check-dependencies.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || resolve(__dirname, '..', '..');
+
+/** Walk up from `start` until a directory containing package.json is found. */
+function findRoot(start: string): string {
+  let dir = start;
+  while (dir !== dirname(dir)) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    dir = dirname(dir);
+  }
+  return start;
+}
+
+const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
 async function ensureDependenciesAndBuild(): Promise<void> {
   const { installed } = checkDependencies();
