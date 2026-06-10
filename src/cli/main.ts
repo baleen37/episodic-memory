@@ -1,4 +1,5 @@
 import { runDoctorCli } from './doctor.js';
+import { runMcpCli } from './mcp.js';
 import { runReadCli } from './read.js';
 import { runSearchCli } from './search.js';
 import { runStatsCli } from './stats.js';
@@ -113,6 +114,7 @@ COMMANDS:
   stats     Print memory index statistics
   verify    Verify memory index integrity
   doctor    Diagnose build, index, and data health
+  mcp       Start the MCP server (used by .mcp.json)
 
 SEARCH OPTIONS:
   --limit <number>        Maximum number of results
@@ -165,6 +167,9 @@ async function main(): Promise<void> {
       break;
     case 'doctor':
       runDoctorCli();
+      break;
+    case 'mcp':
+      await runMcpCli();
       break;
     default:
       console.error(`Unknown command: ${command}`);
