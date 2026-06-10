@@ -1,5 +1,0 @@
-# Embedded artifacts — large binaries, reproduced via the steps in README.md.
-# go:embed needs real files present at build time; they are NOT committed.
-embedded/libonnxruntime.dylib
-embedded/tokenizer.json
-embedded/model_fp16.onnx
