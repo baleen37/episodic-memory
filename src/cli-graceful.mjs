@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = resolve(__dirname, 'cli-internal.mjs');
+const CLI_PATH = resolve(__dirname, '..', 'dist', 'cli-internal.mjs');
 
 async function main() {
   const { installed, missing } = checkDependencies();
