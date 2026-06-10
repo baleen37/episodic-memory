@@ -5,8 +5,14 @@ coverage/
 node_modules/
 
 # Build output
-dist/
-bin/
+# NOTE: dist/ and bin/ are committed so the marketplace can distribute the plugin
+# without relying on a postinstall build. They are rebuilt on every release via
+# the semantic-release prepareCmd. Do not re-ignore them.
+# The negations below override a global ~/.gitignore that ignores dist/.
+!dist/
+!dist/**
+!bin/
+!bin/**
 
 # Logs
 *.log
