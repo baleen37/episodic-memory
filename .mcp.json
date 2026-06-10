@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "memmem": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem",
+      "command": "${CLAUDE_PLUGIN_ROOT:-${PWD}}/bin/memmem",
       "args": ["mcp"]
     }
   }
