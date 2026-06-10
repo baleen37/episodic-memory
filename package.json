@@ -13,7 +13,7 @@
     "cli": "bun dist/cli.mjs"
   },
   "bin": {
-    "memmem": "dist/cli.mjs"
+    "memmem": "bin/memmem"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
