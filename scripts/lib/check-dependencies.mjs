@@ -6,11 +6,22 @@
 
 import { existsSync, statSync, readdirSync } from 'fs';
 import { spawn } from 'child_process';
-import { resolve, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || resolve(__dirname, '../..');
+
+/** Walk up from `start` until a directory containing package.json is found. */
+function findRoot(start) {
+  let dir = start;
+  while (dir !== dirname(dir)) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    dir = dirname(dir);
+  }
+  return start;
+}
+
+const ROOT = process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
 /**
  * Check if dependencies are installed

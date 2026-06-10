@@ -4,7 +4,7 @@
  * Bundles the MCP server and CLI into standalone files using Bun.build
  */
 
-import { mkdir, copyFile, writeFile } from "fs/promises";
+import { mkdir, writeFile, chmod } from "fs/promises";
 import { join } from "path";
 
 const commonConfig = {
@@ -45,25 +45,17 @@ async function buildEntry(entrypoint, outfile) {
 
 async function buildCli() {
   await mkdir("dist", { recursive: true });
+  await mkdir("bin", { recursive: true });
 
   try {
     await buildEntry("src/cli/main.ts", "dist/cli-internal.mjs");
     await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
-    await copyFile(join("src", "cli-graceful.mjs"), join("dist", "cli.mjs"));
-    console.log("✓ Copied dist/cli.mjs (graceful wrapper)");
 
-    await mkdir("dist/lib", { recursive: true });
-    await copyFile(
-      join("scripts", "mcp-server-wrapper.mjs"),
-      join("dist", "mcp-wrapper.mjs")
-    );
-    console.log("✓ Copied dist/mcp-wrapper.mjs");
-
-    await copyFile(
-      join("scripts", "lib", "check-dependencies.mjs"),
-      join("dist", "lib", "check-dependencies.mjs")
-    );
-    console.log("✓ Copied dist/lib/check-dependencies.mjs");
+    // bin/memmem = graceful wrapper executable (bun shebang).
+    const graceful = await Bun.file(join("src", "cli-graceful.mjs")).text();
+    await writeFile(join("bin", "memmem"), graceful);
+    await chmod(join("bin", "memmem"), 0o755);
+    console.log("✓ Built bin/memmem (graceful executable)");
 
     console.log("\n✅ Build complete!");
   } catch (error) {

@@ -54,6 +54,13 @@ interface APIErrorResponse {
 const DEFAULT_MODEL = 'glm-4.5-air';
 
 /**
+ * Per-request timeout in milliseconds. Without it a single completion can hang
+ * indefinitely, which keeps the sync lock held and lets concurrent syncs pile
+ * up. Normal extractions finish well under 60s.
+ */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+/**
  * Base URL for Z.AI Coding API.
  */
 const DEFAULT_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
@@ -140,7 +147,8 @@ export class ZAIProvider implements LLMProvider {
           'Content-Type': 'application/json',
           'Accept-Language': 'en-US,en'
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
       });
 
       if (!response.ok) {

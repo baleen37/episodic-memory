@@ -23,6 +23,13 @@ import { getLLMRateLimiter } from '../ratelimiter.js';
 const DEFAULT_MODEL = 'gemini-2.0-flash';
 
 /**
+ * Per-request timeout in milliseconds. Without it a single completion can hang
+ * for many minutes (observed >12min), which keeps the sync lock held and lets
+ * concurrent syncs pile up. Normal extractions finish well under 60s.
+ */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+/**
  * LLM provider implementation using Google's Gemini API.
  *
  * @example
@@ -92,7 +99,9 @@ export class GeminiProvider implements LLMProvider {
         hasSystemPrompt: !!options?.systemPrompt
       });
 
-      const generativeModel = this.client.getGenerativeModel(modelParams);
+      const generativeModel = this.client.getGenerativeModel(modelParams, {
+        timeout: REQUEST_TIMEOUT_MS,
+      });
 
       const result = await generativeModel.generateContent(prompt);
       const duration = Date.now() - startTime;

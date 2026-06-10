@@ -45,7 +45,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      command: '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync',
     });
   });
 
@@ -63,7 +63,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: 'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      command: '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync',
     });
   });
 
@@ -86,8 +86,8 @@ describe('hooks.json sync-only hook configuration', () => {
 
     // Both SessionStart and Stop run the same sync command.
     expect(commands).toEqual([
-      'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
-      'sh ${CLAUDE_PLUGIN_ROOT}/hooks/run.sh sync',
+      '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync',
+      '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync',
     ]);
     for (const command of commands) {
       expect(command).not.toContain('recall');
@@ -97,24 +97,18 @@ describe('hooks.json sync-only hook configuration', () => {
     }
   });
 
-  it('runs Bun-only CLI entrypoints with bun', () => {
-    const runner = readRepoFile('hooks/run.sh');
-    const cliWrapper = readRepoFile('src/cli-graceful.mjs');
+  it('builds bin/memmem as a bun shebang executable', () => {
+    const graceful = readRepoFile('src/cli-graceful.mjs');
 
-    expect(runner).toContain('bun "$PLUGIN_ROOT/dist/cli.mjs" "$@"');
-    expect(runner).not.toContain('node "$PLUGIN_ROOT/dist/cli.mjs"');
-    expect(cliWrapper.startsWith('#!/usr/bin/env bun')).toBe(true);
-    expect(cliWrapper).toContain("error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND'");
+    expect(graceful.startsWith('#!/usr/bin/env bun')).toBe(true);
+    expect(graceful).toContain("error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND'");
   });
 
-  it('runs the MCP server bundle with bun', () => {
+  it('routes MCP through bin/memmem mcp subcommand', () => {
     const mcpConfig = JSON.parse(readRepoFile('.mcp.json'));
-    const wrapper = readRepoFile('scripts/mcp-server-wrapper.mjs');
 
-    expect(mcpConfig.mcpServers.memmem.command).toBe('bun');
-    expect(mcpConfig.mcpServers.memmem.args).toEqual(['scripts/mcp-server-wrapper.mjs']);
-    expect(wrapper).toContain("spawn('bun', [mcpServerPath]");
-    expect(wrapper).not.toContain('spawn(process.execPath, [mcpServerPath]');
+    expect(mcpConfig.mcpServers.memmem.command).toBe('${CLAUDE_PLUGIN_ROOT}/bin/memmem');
+    expect(mcpConfig.mcpServers.memmem.args).toEqual(['mcp']);
   });
 
   it('uses bun for wrapper dependency installation and builds', () => {

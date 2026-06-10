@@ -29,7 +29,7 @@ bun test path/to/file.test.ts   # Run single test file
 bun test --watch                # Watch mode
 bun run build                   # Bundle with Bun.build (scripts/build.mjs)
 bun run typecheck               # tsc --noEmit
-bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli.mjs)
+bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli-internal.mjs)
 ```
 
 **CRITICAL**: Always use `bun` — this project uses `bun:sqlite` (built-in) and `bun test`.
@@ -57,14 +57,14 @@ bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli.mjs)
 | `src/cli/read.ts` | CLI read command |
 | `src/cli/stats.ts` | CLI stats command |
 | `src/cli/verify.ts` | CLI verify command |
-| `src/cli/main.ts` | CLI router exposing `sync`, `search`, `read`, `stats`, and `verify` |
-| `src/cli-graceful.mjs` | Bun CLI wrapper copied to `dist/cli.mjs` |
+| `src/cli/main.ts` | CLI router exposing `sync`, `search`, `read`, `stats`, `verify`, `doctor`, and `mcp` |
+| `src/cli-graceful.mjs` | Bun CLI graceful wrapper built to `bin/memmem` (imports `dist/cli-internal.mjs`) |
 | `src/mcp/server.ts` | MCP server exposing search and read tools |
 | `src/mcp/handlers.ts` | MCP handlers for memory search/read |
 | `src/mcp/schemas.ts` | MCP input schemas for search/read |
 | `src/mcp/tools.ts` | MCP tool definitions for search/read |
 | `hooks/hooks.json` | SessionStart hook configuration for `memmem sync` |
-| `scripts/mcp-server-wrapper.mjs` | Bun MCP wrapper that ensures dependencies/build before launching server |
+| `src/cli/mcp.ts` | `memmem mcp` subcommand: ensures deps/build, then spawns the MCP server bundle |
 | `scripts/build.mjs` | Bun.build bundling script |
 
 ## Architecture Overview
@@ -72,7 +72,7 @@ bun run cli <sync|search|read|stats|verify>   # Run built CLI (dist/cli.mjs)
 ### Data Flow
 
 ```text
-SessionStart hook → hooks/run.sh sync → src/cli/sync.ts
+SessionStart hook → bin/memmem sync → src/cli/sync.ts
 sync              → source adapters discover Claude/Codex JSONL transcripts
 sync              → copy changed transcripts into conversation-archive/<source_kind>/<relative path>
 indexer           → parse changed archive files into transcript spans
@@ -140,13 +140,11 @@ There is no summary detail or graph layer in the target architecture.
 
 ### Build Output
 
-Bun.build outputs/copies to `dist/`:
+Bun.build outputs bundles to `dist/` and the entrypoint executable to `bin/`:
 
-- `src/cli/main.ts` → `dist/cli-internal.mjs`
-- `src/cli-graceful.mjs` → `dist/cli.mjs` (Bun wrapper)
-- `src/mcp/server.ts` → `dist/mcp-server.mjs`
-- `scripts/mcp-server-wrapper.mjs` → `dist/mcp-wrapper.mjs`
-- `scripts/lib/check-dependencies.mjs` → `dist/lib/check-dependencies.mjs`
+- `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI bundle)
+- `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server bundle)
+- `src/cli-graceful.mjs` → `bin/memmem` (graceful wrapper executable, bun shebang, chmod 0755)
 
 External (not bundled): `@huggingface/transformers`, `bun:sqlite`, `sqlite-vec`, `onnxruntime-node`, `sharp`.
 

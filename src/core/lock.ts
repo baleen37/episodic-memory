@@ -1,13 +1,13 @@
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 import { getIndexDir } from './paths.js';
 import { log } from './logger.js';
 
 /**
- * A lock older than this is treated as abandoned by a crashed holder.
- * Note: the holder does NOT refresh mtime, so a sync running longer than
- * this could have its lock reclaimed by a concurrent run. Acceptable for
- * this minimal lock — real syncs finish well under 30 minutes.
+ * Fallback ceiling for when the holder's liveness cannot be determined
+ * (no/garbled pid file). A lock older than this is treated as abandoned.
+ * The primary signal is PID liveness (see isAbandoned); this only catches
+ * locks whose pid file is missing or unreadable.
  */
 const STALE_MS = 30 * 60 * 1000;
 
@@ -18,7 +18,6 @@ function lockPath(): string {
 function tryCreate(lockDir: string): boolean {
   try {
     mkdirSync(lockDir); // atomic; throws EEXIST if held
-    // PID is written for diagnostics only — never used for liveness checks.
     writeFileSync(path.join(lockDir, 'pid'), String(process.pid));
     return true;
   } catch (error) {
@@ -29,7 +28,39 @@ function tryCreate(lockDir: string): boolean {
   }
 }
 
-function isStale(lockDir: string): boolean {
+/** Read the holder PID from the lock dir, or null if missing/garbled. */
+function readHolderPid(lockDir: string): number | null {
+  try {
+    const pid = Number(readFileSync(path.join(lockDir, 'pid'), 'utf8').trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True if no process with this PID is currently running. */
+function isProcessDead(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // signal 0 = liveness probe, does not kill
+    return false;
+  } catch (error) {
+    // EPERM means the process exists but we can't signal it — still alive.
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/**
+ * Decide whether a held lock can be reclaimed.
+ * Primary signal: the holder PID is dead → abandoned, reclaim immediately
+ * regardless of age. This prevents a slow-but-live sync from having its lock
+ * stolen (which previously caused concurrent syncs to pile up). When the PID
+ * is unknown, fall back to the mtime-age ceiling.
+ */
+function isAbandoned(lockDir: string): boolean {
+  const pid = readHolderPid(lockDir);
+  if (pid !== null) {
+    return isProcessDead(pid);
+  }
   try {
     return Date.now() - statSync(lockDir).mtimeMs > STALE_MS;
   } catch {
@@ -48,9 +79,10 @@ export function acquireSyncLock(): (() => void) | null {
     return makeRelease(lockDir);
   }
 
-  // Held. Reclaim only if the holder looks crashed (stale by mtime age).
-  if (isStale(lockDir)) {
-    log.warn('Reclaiming stale sync lock', { lockDir });
+  // Held. Reclaim only if the holder looks abandoned (dead PID, or stale by
+  // age when the PID is unknown).
+  if (isAbandoned(lockDir)) {
+    log.warn('Reclaiming abandoned sync lock', { lockDir });
     rmSync(lockDir, { recursive: true, force: true });
     if (tryCreate(lockDir)) {
       return makeRelease(lockDir);

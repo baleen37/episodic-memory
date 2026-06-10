@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "cli": "bun dist/cli.mjs"
+    "cli": "bun dist/cli-internal.mjs"
   },
   "bin": {
-    "memmem": "dist/cli.mjs"
+    "memmem": "bin/memmem"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
