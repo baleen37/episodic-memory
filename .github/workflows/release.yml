@@ -32,4 +32,5 @@ jobs:
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MARKETPLACE_DISPATCH_TOKEN: ${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}
         run: bunx semantic-release
