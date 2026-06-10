@@ -26,6 +26,7 @@ payload="$(jq -n \
   '{event_type: $event_type, client_payload: {plugin: $plugin, version: $version}}')"
 
 curl -sSf -X POST \
+  --retry 3 --retry-connrefused --max-time 30 \
   -H "Accept: application/vnd.github+json" \
   -H "Authorization: Bearer ${token}" \
   "https://api.github.com/repos/${repository}/dispatches" \
