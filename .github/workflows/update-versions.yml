@@ -29,10 +29,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # marketplace.json is the version source of truth (updated by the
-          # update-versions action above); propagate it to the standalone
-          # plugin manifests.
-          version="$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)"
+          version="$(jq -r '.version' package.json)"
 
           tmp="$(mktemp)"
           jq --arg version "$version" '.version = $version' \

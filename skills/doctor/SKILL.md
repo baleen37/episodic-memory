@@ -25,7 +25,7 @@ Checks:
 
 | Check | Meaning | Typical fix |
 |-------|---------|-------------|
-| `build` | The binary is built and running | `bash scripts/build-binaries.sh` |
+| `build` | `dist/` is rebuilt after the latest `src` change | `bun run build` |
 | `index` | Memory index passes integrity verification | `memmem sync` |
 | `data`  | Records exist and are vectorized | `memmem sync` |
 

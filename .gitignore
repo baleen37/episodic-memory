@@ -29,11 +29,3 @@ logs/
 internal/core/runtime/embedded/libonnxruntime.dylib
 internal/core/runtime/embedded/libonnxruntime.so
 internal/core/runtime/embedded/tokenizer.json
-
-# Go binaries (built locally via scripts/build-binaries.sh)
-/bin/memmem
-/bin/memmem-mcp
-
-# Local dev build assets (fetched by scripts/fetch-dev-assets.sh)
-/poc/lib/
-/.cache/

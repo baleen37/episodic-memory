@@ -1,8 +1,8 @@
 name: Go Release
 
-# Release pipeline for the Go binaries. Separate from the marketplace version
-# dispatch (.github/workflows/on-release.yml, which fires on a published release
-# to update the marketplace) so the two never interfere.
+# Release pipeline for the Go port. Separate from the TS plugin release
+# (.github/workflows/on-release.yml, which dispatches a marketplace update) so
+# the two never interfere.
 #
 # CGO is required and CANNOT cross-compile (yalue/onnxruntime_go +
 # daulet/tokenizers need a per-platform C toolchain + native libs). goreleaser's

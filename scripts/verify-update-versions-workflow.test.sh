@@ -8,6 +8,7 @@ ON_RELEASE_WORKFLOW_FILE="$REPO_ROOT/.github/workflows/on-release.yml"
 MARKETPLACE_FILE="$REPO_ROOT/.claude-plugin/marketplace.json"
 CLAUDE_PLUGIN_FILE="$REPO_ROOT/.claude-plugin/plugin.json"
 CODEX_PLUGIN_FILE="$REPO_ROOT/.codex-plugin/plugin.json"
+PACKAGE_FILE="$REPO_ROOT/package.json"
 DISPATCH_ACTION_SHA="12f7f29617c0083c78affd8c1e286e0a093fb0f9"
 
 fail() {
@@ -55,18 +56,21 @@ jq empty "$MARKETPLACE_FILE" || fail "invalid JSON: $MARKETPLACE_FILE"
 jq empty "$CLAUDE_PLUGIN_FILE" || fail "invalid JSON: $CLAUDE_PLUGIN_FILE"
 jq empty "$CODEX_PLUGIN_FILE" || fail "invalid JSON: $CODEX_PLUGIN_FILE"
 
-# marketplace.json is the version source of truth; the standalone manifests
-# must match it.
-marketplace_version="$(jq -r '.plugins[0].version' "$MARKETPLACE_FILE")"
+package_version="$(jq -r '.version' "$PACKAGE_FILE")"
 claude_version="$(jq -r '.version' "$CLAUDE_PLUGIN_FILE")"
 codex_version="$(jq -r '.version' "$CODEX_PLUGIN_FILE")"
+marketplace_version="$(jq -r '.plugins[0].version' "$MARKETPLACE_FILE")"
 
-if [[ "$marketplace_version" != "$claude_version" ]]; then
-  fail "marketplace.json version ($marketplace_version) does not match .claude-plugin/plugin.json ($claude_version)"
+if [[ "$package_version" != "$claude_version" ]]; then
+  fail "package.json version ($package_version) does not match .claude-plugin/plugin.json ($claude_version)"
 fi
 
-if [[ "$marketplace_version" != "$codex_version" ]]; then
-  fail "marketplace.json version ($marketplace_version) does not match .codex-plugin/plugin.json ($codex_version)"
+if [[ "$package_version" != "$codex_version" ]]; then
+  fail "package.json version ($package_version) does not match .codex-plugin/plugin.json ($codex_version)"
+fi
+
+if [[ "$package_version" != "$marketplace_version" ]]; then
+  fail "package.json version ($package_version) does not match .claude-plugin/marketplace.json ($marketplace_version)"
 fi
 
 if [[ "$(jq -r '.interface | type' "$CODEX_PLUGIN_FILE")" != "object" ]]; then
