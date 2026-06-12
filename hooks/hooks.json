@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background"
           }
         ]
       }

@@ -216,7 +216,7 @@ class RoundRobinProvider {
   }
 }
 
-// node_modules/@google/generative-ai/dist/index.mjs
+// ../../node_modules/@google/generative-ai/dist/index.mjs
 class RequestUrl {
   constructor(model, task, apiKey, stream, requestOptions) {
     this.model = model;
@@ -1212,7 +1212,7 @@ class GeminiProvider {
     };
   }
 }
-var DEFAULT_MODEL = "gemini-2.0-flash", REQUEST_TIMEOUT_MS = 120000;
+var DEFAULT_MODEL = "gemini-2.0-flash", REQUEST_TIMEOUT_MS = 60000;
 var init_gemini_provider = __esm(() => {
   init_dist();
   init_logger();
@@ -3911,6 +3911,13 @@ ENVIRONMENT VARIABLES:
 function printHelp() {
   console.log(getHelpText());
 }
+function spawnBackgroundSync() {
+  Bun.spawn([process.execPath, process.argv[1], "sync"], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore"
+  }).unref();
+}
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -3920,6 +3927,10 @@ async function main() {
   }
   switch (command) {
     case "sync":
+      if (args.includes("--background")) {
+        spawnBackgroundSync();
+        break;
+      }
       await runSyncCli();
       break;
     case "search":

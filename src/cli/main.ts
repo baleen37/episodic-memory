@@ -140,6 +140,19 @@ function printHelp(): void {
   console.log(getHelpText());
 }
 
+/**
+ * Re-spawn `sync` detached and exit immediately so hook runners (Claude Code,
+ * Codex) are not blocked while transcripts are indexed. Hook hosts wait for
+ * the command's stdio to close, so the child must not inherit any of it.
+ */
+function spawnBackgroundSync(): void {
+  Bun.spawn([process.execPath, process.argv[1], 'sync'], {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  }).unref();
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -151,6 +164,10 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'sync':
+      if (args.includes('--background')) {
+        spawnBackgroundSync();
+        break;
+      }
       await runSyncCli();
       break;
     case 'search':
