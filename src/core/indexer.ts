@@ -26,6 +26,19 @@ export interface ReindexArchiveResult {
   spansEmpty: number;
   spansErrored: number;
   memoryRecordsIndexed: number;
+  /** How many LLM extractions this call actually performed (success or error). */
+  extractionsPerformed: number;
+  /** Spans left unprocessed because the extraction budget ran out. */
+  spansDeferred: number;
+}
+
+export interface ReindexArchiveOptions {
+  /**
+   * Maximum number of LLM extractions this call may perform. Once reached, the
+   * remaining unprocessed spans are left untouched (no extraction_state written)
+   * so a later sync picks them up. Omit for no limit.
+   */
+  extractionBudget?: number;
 }
 
 export const EXCLUSION_MARKERS = [
@@ -62,6 +75,8 @@ function emptyResult(): ReindexArchiveResult {
     spansEmpty: 0,
     spansErrored: 0,
     memoryRecordsIndexed: 0,
+    extractionsPerformed: 0,
+    spansDeferred: 0,
   };
 }
 
@@ -173,6 +188,7 @@ export async function reindexArchiveFile(
   sourceKind: string,
   parser: ArchiveParser,
   provider: LLMProvider | null,
+  options: ReindexArchiveOptions = {},
 ): Promise<ReindexArchiveResult> {
   const content = readFileSync(archivePath, 'utf-8');
   if (hasExclusionMarker(content)) {
@@ -187,6 +203,8 @@ export async function reindexArchiveFile(
     spansEmpty: 0,
     spansErrored: 0,
     memoryRecordsIndexed: 0,
+    extractionsPerformed: 0,
+    spansDeferred: 0,
   };
 
   pruneStaleMemoryIndexForArchivePath(db, archivePath, spans);
@@ -195,6 +213,8 @@ export async function reindexArchiveFile(
     result.spansSkipped = spans.length;
     return result;
   }
+
+  const budget = options.extractionBudget;
 
   for (const span of spans) {
     const sourceHash = hashText(span.text);
@@ -222,6 +242,14 @@ export async function reindexArchiveFile(
       result.spansSkipped++;
       continue;
     }
+
+    // Budget exhausted: leave this and all later spans untouched for a future
+    // sync. We do not write extraction_state, so they stay eligible.
+    if (budget !== undefined && result.extractionsPerformed >= budget) {
+      result.spansDeferred++;
+      continue;
+    }
+    result.extractionsPerformed++;
 
     try {
       const records = await extractMemoryRecordsFromSpan(provider, {

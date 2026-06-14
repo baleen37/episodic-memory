@@ -180,6 +180,15 @@ function createSchema(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archive_index_state (
+      archive_path TEXT PRIMARY KEY,
+      content_mtime_ms REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
   migrateExtractionState(db);
   runMigrations(db);
 }
@@ -267,6 +276,7 @@ export function deleteMemoryIndexForArchivePath(db: Database, archivePath: strin
 
   db.query('DELETE FROM memory_records WHERE archive_path = ?').run(archivePath);
   db.query('DELETE FROM extraction_state WHERE archive_path = ?').run(archivePath);
+  db.query('DELETE FROM archive_index_state WHERE archive_path = ?').run(archivePath);
 }
 
 export function deleteMemoryIndexForArchivePathPrefix(db: Database, archivePathPrefix: string): void {
@@ -282,6 +292,31 @@ export function deleteMemoryIndexForArchivePathPrefix(db: Database, archivePathP
 
   db.query('DELETE FROM memory_records WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
   db.query('DELETE FROM extraction_state WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
+  db.query('DELETE FROM archive_index_state WHERE archive_path = ? OR archive_path LIKE ?').run(archivePathPrefix, childPrefix);
+}
+
+/** Returns the content mtime recorded the last time this archive was fully indexed, or null. */
+export function getArchiveIndexMtime(db: Database, archivePath: string): number | null {
+  const row = db.query('SELECT content_mtime_ms AS mtime FROM archive_index_state WHERE archive_path = ?')
+    .get(archivePath) as { mtime: number } | null;
+  return row ? row.mtime : null;
+}
+
+/** Records that this archive is fully indexed at the given content mtime. */
+export function setArchiveIndexMtime(db: Database, archivePath: string, contentMtimeMs: number): void {
+  const now = Date.now();
+  db.query(`
+    INSERT INTO archive_index_state (archive_path, content_mtime_ms, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(archive_path) DO UPDATE SET
+      content_mtime_ms = excluded.content_mtime_ms,
+      updated_at = excluded.updated_at
+  `).run(archivePath, contentMtimeMs, now);
+}
+
+/** Clears the fully-indexed marker so the archive is reconsidered on the next sync. */
+export function clearArchiveIndexMtime(db: Database, archivePath: string): void {
+  db.query('DELETE FROM archive_index_state WHERE archive_path = ?').run(archivePath);
 }
 
 export function upsertExtractionState(db: Database, state: ExtractionStateInsert): void {
