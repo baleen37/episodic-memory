@@ -16871,6 +16871,9 @@ if (process.platform === "darwin" && !isTestEnvironment && true) {
     Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
   } catch {}
 }
+function isWipeAllowed(isTestEnv, nodeEnv) {
+  return isTestEnv || nodeEnv === "test";
+}
 function openDatabase() {
   return createDatabase(false);
 }
@@ -16881,6 +16884,9 @@ function createDatabase(wipe) {
     fs2.mkdirSync(dbDir, { recursive: true });
   }
   if (wipe && dbPath !== ":memory:") {
+    if (!isWipeAllowed(isTestEnvironment, "development")) {
+      throw new Error("initDatabase() wipes the database and is for tests only. Use openDatabase() in production.");
+    }
     for (const suffix of ["", "-wal", "-shm"]) {
       const filePath = `${dbPath}${suffix}`;
       if (fs2.existsSync(filePath)) {

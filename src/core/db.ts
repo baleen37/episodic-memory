@@ -87,6 +87,10 @@ interface SearchOptions {
   limit?: number;
 }
 
+export function isWipeAllowed(isTestEnv: boolean, nodeEnv: string | undefined): boolean {
+  return isTestEnv || nodeEnv === 'test';
+}
+
 export function initDatabase(): Database {
   return createDatabase(true);
 }
@@ -104,6 +108,11 @@ function createDatabase(wipe: boolean): Database {
   }
 
   if (wipe && dbPath !== ':memory:') {
+    if (!isWipeAllowed(isTestEnvironment, process.env.NODE_ENV)) {
+      throw new Error(
+        'initDatabase() wipes the database and is for tests only. Use openDatabase() in production.'
+      );
+    }
     for (const suffix of ['', '-wal', '-shm']) {
       const filePath = `${dbPath}${suffix}`;
       if (fs.existsSync(filePath)) {
