@@ -5,7 +5,9 @@ import { tmpdir } from 'os';
 import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector, upsertExtractionState } from '../core/db.js';
 import { __setModelForTests } from '../core/embeddings.js';
 import { acquireSyncLock } from '../core/lock.js';
-import { syncTranscripts } from './sync.js';
+import { __setLoadConfigForTests, resetRateLimiters } from '../core/ratelimiter.js';
+import { EXTRACTION_BUDGET_PER_SYNC, syncTranscripts } from './sync.js';
+import type { LLMProvider } from '../core/llm/types.js';
 
 let dir: string | null = null;
 let db: ReturnType<typeof initDatabase> | null = null;
@@ -32,7 +34,20 @@ afterEach(() => {
   restoreEnv('MEMMEM_DB_PATH');
   restoreEnv('HOME');
   __setModelForTests(null, null);
+  __setLoadConfigForTests(null);
+  resetRateLimiters();
 });
+
+/** Make embedding/LLM rate limiters effectively unbounded for fast tests. */
+function setFastRateLimits(): void {
+  __setLoadConfigForTests((() => ({
+    ratelimit: {
+      embedding: { requestsPerSecond: 1000, burstSize: 1000 },
+      llm: { requestsPerSecond: 1000, burstSize: 1000 },
+    },
+  })) as Parameters<typeof __setLoadConfigForTests>[0]);
+  resetRateLimiters();
+}
 
 describe('syncTranscripts', () => {
   test('copies Claude and Codex transcripts under source kind prefixes and indexes them', async () => {
@@ -213,6 +228,58 @@ describe('syncTranscripts', () => {
     expect(existsSync(join(archiveDir, 'claude-projects', 'ignored', 'session.jsonl'))).toBe(false);
   });
 
+  test('skips reparsing an unchanged, fully-indexed archive on the next sync', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
+    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
+    writeClaudeTranscript(sourcePath, 'Question', 'Answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+    const provider = makeProvider();
+
+    // First sync archives + fully indexes the file (provider present → extraction completes).
+    const first = await syncTranscripts(db, { provider });
+    expect(first.archived).toBe(1);
+
+    // Second sync with nothing changed: the file is unchanged and fully indexed,
+    // so it must not be reconsidered at all.
+    const second = await syncTranscripts(db, { provider });
+
+    expect(second.copied).toBe(0);
+    expect(second.archived).toBe(0);
+    expect(second.spansConsidered).toBe(0);
+  });
+
+  test('caps extractions per sync and defers the rest to the next sync', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    // EXTRACTION_BUDGET_PER_SYNC + a few extra spans across files.
+    const fileCount = EXTRACTION_BUDGET_PER_SYNC + 3;
+    for (let i = 0; i < fileCount; i++) {
+      writeClaudeTranscript(join(projDir, `session-${i}.jsonl`), `Q${i}`, `A${i}`);
+    }
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = initDatabase();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeProvider();
+
+    const first = await syncTranscripts(db, { provider });
+    // Budget caps how many files are fully processed in one run.
+    expect(first.archived).toBeLessThanOrEqual(EXTRACTION_BUDGET_PER_SYNC);
+
+    // The next sync picks up the deferred files without redoing finished ones.
+    const second = await syncTranscripts(db, { provider });
+    expect(second.archived).toBeGreaterThan(0);
+
+    // Eventually everything is indexed and a final sync is a no-op.
+    for (let i = 0; i < 5; i++) await syncTranscripts(db, { provider });
+    const idle = await syncTranscripts(db, { provider });
+    expect(idle.archived).toBe(0);
+  });
+
   test('purges archived indexes when a synced source directory becomes excluded', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourceDir = join(claudeDir, 'projects', 'proj');
@@ -290,6 +357,17 @@ function setupEnv(claudeDir: string, codexDir: string, archiveDir: string): void
 
 function setGoodEmbeddingModel(): void {
   __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+}
+
+function makeProvider(): LLMProvider {
+  return {
+    async complete() {
+      return {
+        text: JSON.stringify([{ kind: 'fact', text: 'Durable fact.', confidence: 1 }]),
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+  };
 }
 
 function writeClaudeTranscript(filePath: string, userText: string, assistantText: string): void {

@@ -543,8 +543,103 @@ describe('reindexArchiveFile', () => {
       spansEmpty: 0,
       spansErrored: 0,
       memoryRecordsIndexed: 0,
+      extractionsPerformed: 0,
+      spansDeferred: 0,
     });
     expect(memoryCount.count).toBe(0);
     expect(vectorCount.count).toBe(0);
+  });
+
+  test('stops extracting once the extraction budget is exhausted, leaving remaining spans for a later sync', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    const makeSpan = (line: number) => ({
+      archivePath,
+      lineStart: line,
+      lineEnd: line,
+      sourceKind: 'claude-projects',
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: `Durable fact ${line}.`,
+    });
+    const parser: ArchiveParser = () => [makeSpan(1), makeSpan(2), makeSpan(3)];
+
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        return {
+          text: JSON.stringify([{ kind: 'fact', text: `Durable fact ${completeCalls}.`, confidence: 1 }]),
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      },
+    };
+
+    // Budget of 2 → only first two spans are extracted; the third is left untouched.
+    const first = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 2 });
+    expect(first.extractionsPerformed).toBe(2);
+    expect(completeCalls).toBe(2);
+
+    const stateCount = db.query("SELECT COUNT(*) AS count FROM extraction_state WHERE status IN ('done','empty')").get() as { count: number };
+    expect(stateCount.count).toBe(2);
+
+    // A later sync with budget picks up exactly the remaining span.
+    const second = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 10 });
+    expect(second.extractionsPerformed).toBe(1);
+    expect(second.spansSkipped).toBe(2);
+    expect(completeCalls).toBe(3);
+  });
+
+  test('a zero budget performs no extraction', async () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+    __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+
+    dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
+    const archiveDir = join(dir, 'claude-projects');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, 'session.jsonl');
+    writeFileSync(archivePath, 'transcript content');
+
+    const parser: ArchiveParser = (_content, context) => [{
+      archivePath: context.archivePath,
+      lineStart: 1,
+      lineEnd: 1,
+      sourceKind: context.sourceKind,
+      sessionId: 's1',
+      project: 'memmem',
+      cwd: null,
+      gitBranch: null,
+      model: null,
+      provider: null,
+      metadataJson: null,
+      observedAt: null,
+      text: 'Durable fact.',
+    }];
+    let completeCalls = 0;
+    const provider: LLMProvider = {
+      async complete() {
+        completeCalls++;
+        return { text: JSON.stringify([{ kind: 'fact', text: 'f', confidence: 1 }]), usage: { input_tokens: 1, output_tokens: 1 } };
+      },
+    };
+
+    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 0 });
+    expect(result.extractionsPerformed).toBe(0);
+    expect(completeCalls).toBe(0);
   });
 });

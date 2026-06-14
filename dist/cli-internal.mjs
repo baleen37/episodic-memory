@@ -216,7 +216,7 @@ class RoundRobinProvider {
   }
 }
 
-// node_modules/@google/generative-ai/dist/index.mjs
+// ../../node_modules/@google/generative-ai/dist/index.mjs
 class RequestUrl {
   constructor(model, task, apiKey, stream, requestOptions) {
     this.model = model;
@@ -1707,6 +1707,13 @@ function createSchema(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archive_index_state (
+      archive_path TEXT PRIMARY KEY,
+      content_mtime_ms REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
   migrateExtractionState(db);
   runMigrations(db);
 }
@@ -1760,6 +1767,7 @@ function deleteMemoryIndexForArchivePath(db, archivePath) {
   }
   db.query("DELETE FROM memory_records WHERE archive_path = ?").run(archivePath);
   db.query("DELETE FROM extraction_state WHERE archive_path = ?").run(archivePath);
+  db.query("DELETE FROM archive_index_state WHERE archive_path = ?").run(archivePath);
 }
 function deleteMemoryIndexForArchivePathPrefix(db, archivePathPrefix) {
   const childPrefix = `${archivePathPrefix}${path2.sep}%`;
@@ -1771,6 +1779,24 @@ function deleteMemoryIndexForArchivePathPrefix(db, archivePathPrefix) {
   }
   db.query("DELETE FROM memory_records WHERE archive_path = ? OR archive_path LIKE ?").run(archivePathPrefix, childPrefix);
   db.query("DELETE FROM extraction_state WHERE archive_path = ? OR archive_path LIKE ?").run(archivePathPrefix, childPrefix);
+  db.query("DELETE FROM archive_index_state WHERE archive_path = ? OR archive_path LIKE ?").run(archivePathPrefix, childPrefix);
+}
+function getArchiveIndexMtime(db, archivePath) {
+  const row = db.query("SELECT content_mtime_ms AS mtime FROM archive_index_state WHERE archive_path = ?").get(archivePath);
+  return row ? row.mtime : null;
+}
+function setArchiveIndexMtime(db, archivePath, contentMtimeMs) {
+  const now = Date.now();
+  db.query(`
+    INSERT INTO archive_index_state (archive_path, content_mtime_ms, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(archive_path) DO UPDATE SET
+      content_mtime_ms = excluded.content_mtime_ms,
+      updated_at = excluded.updated_at
+  `).run(archivePath, contentMtimeMs, now);
+}
+function clearArchiveIndexMtime(db, archivePath) {
+  db.query("DELETE FROM archive_index_state WHERE archive_path = ?").run(archivePath);
 }
 function upsertExtractionState(db, state) {
   const now = Date.now();
@@ -3076,7 +3102,9 @@ function emptyResult() {
     spansSkipped: 0,
     spansEmpty: 0,
     spansErrored: 0,
-    memoryRecordsIndexed: 0
+    memoryRecordsIndexed: 0,
+    extractionsPerformed: 0,
+    spansDeferred: 0
   };
 }
 function hashText(text) {
@@ -3139,7 +3167,7 @@ function hasPendingRetryExtractionState(db, archivePath, lineStart, lineEnd, sou
   `).get(archivePath, lineStart, lineEnd, sourceHash, extractionVersion, Date.now(), ATTEMPT_CAP);
   return row !== null;
 }
-async function reindexArchiveFile(db, archivePath, sourceKind, parser, provider) {
+async function reindexArchiveFile(db, archivePath, sourceKind, parser, provider, options = {}) {
   const content = readFileSync5(archivePath, "utf-8");
   if (hasExclusionMarker(content)) {
     deleteMemoryIndexForArchivePath(db, archivePath);
@@ -3151,13 +3179,16 @@ async function reindexArchiveFile(db, archivePath, sourceKind, parser, provider)
     spansSkipped: 0,
     spansEmpty: 0,
     spansErrored: 0,
-    memoryRecordsIndexed: 0
+    memoryRecordsIndexed: 0,
+    extractionsPerformed: 0,
+    spansDeferred: 0
   };
   pruneStaleMemoryIndexForArchivePath(db, archivePath, spans);
   if (!provider) {
     result.spansSkipped = spans.length;
     return result;
   }
+  const budget = options.extractionBudget;
   for (const span of spans) {
     const sourceHash = hashText(span.text);
     if (hasCompletedExtractionState(db, span.archivePath, span.lineStart, span.lineEnd, sourceHash, CURRENT_EXTRACTION_VERSION)) {
@@ -3168,6 +3199,11 @@ async function reindexArchiveFile(db, archivePath, sourceKind, parser, provider)
       result.spansSkipped++;
       continue;
     }
+    if (budget !== undefined && result.extractionsPerformed >= budget) {
+      result.spansDeferred++;
+      continue;
+    }
+    result.extractionsPerformed++;
     try {
       const records = await extractMemoryRecordsFromSpan(provider, {
         sourceKind: span.sourceKind,
@@ -3639,10 +3675,11 @@ function getBuiltInSourceAdapters() {
 }
 
 // src/cli/sync.ts
-async function syncTranscripts(db) {
+var EXTRACTION_BUDGET_PER_SYNC = 20;
+async function syncTranscripts(db, options = {}) {
   const archiveDir = getArchiveDir();
   const archiveFiles = new Map;
-  const provider = await loadExtractionProvider();
+  const provider = options.provider !== undefined ? options.provider : await loadExtractionProvider();
   const result = {
     copied: 0,
     archived: 0,
@@ -3684,22 +3721,44 @@ async function syncTranscripts(db) {
       }
     }
   }
-  const total = archiveFiles.size;
+  const pendingFiles = [];
+  for (const file of archiveFiles.values()) {
+    const mtimeMs = statSync4(file.archivePath).mtimeMs;
+    if (getArchiveIndexMtime(db, file.archivePath) === mtimeMs) {
+      continue;
+    }
+    pendingFiles.push({ ...file, mtimeMs });
+  }
+  const total = pendingFiles.length;
   if (total > 0) {
     log.info(`Indexing ${total} archive file${total === 1 ? "" : "s"}...`);
   }
+  let extractionBudget = EXTRACTION_BUDGET_PER_SYNC;
   let archived = 0;
   const progressInterval = Math.max(1, Math.floor(total / 20));
-  for (const file of archiveFiles.values()) {
-    const reindexResult = await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse, provider);
+  for (const file of pendingFiles) {
+    const reindexResult = await reindexArchiveFile(db, file.archivePath, file.adapter.kind, file.adapter.parse, provider, { extractionBudget });
     result.spansConsidered += reindexResult.spansConsidered;
     result.spansSkipped += reindexResult.spansSkipped;
     result.spansEmpty += reindexResult.spansEmpty;
     result.spansErrored += reindexResult.spansErrored;
     result.memoryRecordsIndexed += reindexResult.memoryRecordsIndexed;
+    extractionBudget -= reindexResult.extractionsPerformed;
+    if (provider && reindexResult.spansDeferred === 0 && reindexResult.spansErrored === 0) {
+      setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
+    } else {
+      clearArchiveIndexMtime(db, file.archivePath);
+    }
     archived++;
     if (archived % progressInterval === 0 || archived === total) {
       log.info(`  ${archived}/${total} indexed`);
+    }
+    if (extractionBudget <= 0) {
+      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
+        processed: archived,
+        remaining: total - archived
+      });
+      break;
     }
   }
   result.archived = archived;
