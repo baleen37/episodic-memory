@@ -1,6 +1,6 @@
 {
   "name": "@baleen/memmem",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "private": false,
   "type": "module",
   "description": "Memmem - Conversation memory with semantic search across Claude Code sessions",
