@@ -2290,6 +2290,7 @@ async function runMcpCli() {
   const child = spawn2("bun", [mcpServerPath], { stdio: "inherit", shell: false });
   process.on("SIGTERM", () => child.kill("SIGTERM"));
   process.on("SIGINT", () => child.kill("SIGINT"));
+  process.stdin.on("close", () => child.kill("SIGTERM"));
   child.on("exit", (code, signal) => {
     if (signal)
       process.kill(process.pid, signal);

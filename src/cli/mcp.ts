@@ -60,6 +60,8 @@ export async function runMcpCli(): Promise<void> {
   const child = spawn('bun', [mcpServerPath], { stdio: 'inherit', shell: false });
   process.on('SIGTERM', () => child.kill('SIGTERM'));
   process.on('SIGINT', () => child.kill('SIGINT'));
+  // 부모(claude)가 stdin을 닫으면 자식 서버를 정리하고 함께 종료한다.
+  process.stdin.on('close', () => child.kill('SIGTERM'));
   child.on('exit', (code, signal) => {
     if (signal) process.kill(process.pid, signal);
     else process.exit(code ?? 0);
