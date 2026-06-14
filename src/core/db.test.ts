@@ -11,6 +11,7 @@ import {
   getObservationsByIds,
   getRecentObservations,
   initDatabase,
+  isWipeAllowed,
   insertMemoryRecord,
   insertMemoryRecordVector,
   insertObservation,
@@ -294,6 +295,24 @@ describe('memory record database schema', () => {
     expect(() => getObservationById(db, 1)).toThrow('Observation schema has been removed');
     expect(() => getObservation(db, 1)).toThrow('Observation schema has been removed');
     expect(() => getObservationsByIds(db, [1])).toThrow('Observation schema has been removed');
+  });
+});
+
+describe('isWipeAllowed wipe guard', () => {
+  test('allows wipe in bun test env', () => {
+    expect(isWipeAllowed(true, undefined)).toBe(true);
+  });
+
+  test('allows wipe when NODE_ENV is test', () => {
+    expect(isWipeAllowed(false, 'test')).toBe(true);
+  });
+
+  test('blocks wipe in production env', () => {
+    expect(isWipeAllowed(false, 'production')).toBe(false);
+  });
+
+  test('blocks wipe when NODE_ENV is undefined and not test env', () => {
+    expect(isWipeAllowed(false, undefined)).toBe(false);
   });
 });
 
