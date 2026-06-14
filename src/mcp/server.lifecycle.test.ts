@@ -29,6 +29,11 @@ describe('MCP server process lifecycle', () => {
     // Give the server a moment to connect its transport, then close stdin (EOF).
     await new Promise((r) => setTimeout(r, 500));
     child.stdin!.end();
+    // Note: this characterizes observable behavior (exit on stdin EOF), not the
+    // explicit process.stdin.on('close') handler. Deleting that handler would NOT
+    // make this test red — Bun exits naturally on stdin EOF when no keep-alive
+    // handle remains. The handler is defensive: it guards against a future
+    // keep-alive handle silently breaking that natural exit.
     const code = await waitForExit(child, 5000);
     expect(code).toBe(0);
   }, 10000);
