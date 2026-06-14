@@ -95,6 +95,10 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // 클라이언트(부모 claude)가 stdin을 닫으면 더 받을 요청이 없으므로 종료한다.
+  // claude 크래시/강제 종료 시 서버가 고아로 남는 것을 방지.
+  process.stdin.on('close', () => process.exit(0));
 }
 
 export function shouldRunAsEntrypoint(): boolean {

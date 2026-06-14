@@ -216,7 +216,7 @@ class RoundRobinProvider {
   }
 }
 
-// node_modules/@google/generative-ai/dist/index.mjs
+// ../../node_modules/@google/generative-ai/dist/index.mjs
 class RequestUrl {
   constructor(model, task, apiKey, stream, requestOptions) {
     this.model = model;
