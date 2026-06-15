@@ -1,20 +1,37 @@
 ---
 name: remembering-conversations
-description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using indexed event/fact memory records.
-version: 1.0.0
+description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, when work is stuck, when a workflow is unfamiliar, or when user references past work.
 ---
 
 # Remembering Conversations
 
 **Core principle:** Search before reinventing. Searching costs little; repeating past mistakes is expensive.
 
-## Mandatory: Use the Search Agent
+## Decision Rule
 
-**YOU MUST dispatch the search-conversation agent for historical conversation search.**
+Use this skill after you understand the current task well enough to search for the right thing. Do not use memory as a substitute for reading the current repo state.
 
-Announce: "Dispatching search agent to find [topic]."
+Search memory when:
 
-Then use the Task tool with `subagent_type: "search-conversation"`:
+- User asks "how should I..." or "what's the best approach..."
+- You've explored the current codebase and need architectural context
+- You're stuck after investigating a problem
+- You need to follow an unfamiliar workflow or process
+- User references past work: "last time", "before", "we discussed", "do you remember"
+
+Skip memory when:
+
+- Current files, tests, or runtime state can answer the question directly
+- The answer is already present in the current conversation
+- You cannot yet name a concrete topic, decision, error, file, or workflow to search for
+
+## Preferred Workflow
+
+Use the `search-conversation` agent when your environment supports it.
+
+Announce: "Searching past conversations for [topic]."
+
+In Claude Code, dispatch the Task tool with `subagent_type: "search-conversation"`:
 
 ```text
 Task tool:
@@ -23,32 +40,18 @@ Task tool:
   subagent_type: "search-conversation"
 ```
 
-The agent will:
+Ask the agent to:
 
 1. Search indexed event/fact memory records with `search`. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 2. Read archived transcript lines with `read` only when memory records are not enough.
 3. Synthesize concise findings.
 4. Return actionable insights with `archive_path:line_start-line_end` sources.
 
-## When to Use
+## Direct MCP Fallback
 
-Search memory after you understand the task in these situations:
+If the `search-conversation` agent is unavailable, delegation is not allowed, or you need exact control over filters, call the memmem MCP tools directly. This is a fallback, not a failure.
 
-- User asks "how should I..." or "what's the best approach..."
-- You've explored the current codebase and need architectural context
-- You're stuck after investigating a problem
-- You need to follow an unfamiliar workflow or process
-- User references past work: "last time", "before", "we discussed", "do you remember"
-
-## Don't Search First
-
-- For current codebase structure; use file search/read tools first.
-- For information already present in the current conversation.
-- Before understanding what the user is asking.
-
-## Direct Tool Access (Discouraged)
-
-Prefer the search-conversation agent. If direct MCP access is necessary:
+Use the tool names exposed in the current environment; the API shape is:
 
 ### Search
 
@@ -84,9 +87,11 @@ Use `archive_path`, `line_start`, and `line_end` from search results:
 
 ## Important Notes
 
-- Always cite conversation paths and line ranges.
-- Past decisions may not apply directly; explain context before recommending reuse.
-- Search results are usually enough; use `read` for missing rationale or surrounding context.
+- Cite conversation paths and line ranges for every memory-derived claim.
+- Treat memory as historical evidence, not current truth. Verify drift-prone facts against the repo, runtime, or live system when cheap.
+- If you answer from memory without current verification, say that briefly and note when it may be stale.
+- Search results are usually enough. Use `read` for missing rationale, exact wording, or surrounding context.
+- If search returns nothing, broaden terms once before concluding there is no useful memory.
 
 ## Further Reading
 

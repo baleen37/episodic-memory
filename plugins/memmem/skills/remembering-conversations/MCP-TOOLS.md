@@ -2,7 +2,9 @@
 
 This document provides the memmem MCP tool reference for indexed event/fact memory record search.
 
-**Warning:** Direct MCP tool usage can waste context. Prefer the `search-conversation` agent unless you need manual control.
+**Default:** Prefer the `search-conversation` agent when available.
+
+**Fallback:** Use these MCP tools directly when the agent is unavailable, delegation is not allowed, or you need precise filters.
 
 ## Overview
 
@@ -139,7 +141,7 @@ Expand the line range if the matching memory record needs surrounding context or
 // Source: `${result.archive_path}:${result.line_start}-${result.line_end}`
 ```
 
-## Why Use the Agent Instead?
+## Agent vs Direct Tools
 
 | Aspect | Direct Tools | search-conversation Agent |
 |--------|--------------|---------------------------|
@@ -147,6 +149,8 @@ Expand the line range if the matching memory record needs surrounding context or
 | Workflow | Manual search then read | Automatic search/read/synthesis |
 | Sources | Must track manually | Included in response |
 | Output | Raw memory records/transcript lines | Curated insights |
+
+Direct use is acceptable when the agent path is unavailable. Keep reads narrow and cite every memory-derived claim.
 
 ## See Also
 

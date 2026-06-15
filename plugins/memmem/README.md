@@ -32,7 +32,7 @@ Saves context by searching first and reading archive lines only when needed.
 3. Synthesizes findings into a concise summary
 4. Returns actionable insights with sources
 
-**Always use the agent instead of MCP tools directly** to avoid wasting context.
+**Prefer the agent instead of MCP tools directly** to avoid wasting context. Use direct MCP tools only when the agent path is unavailable or precise filters are needed.
 
 See `agents/search-conversation.md` for implementation details.
 
@@ -42,7 +42,7 @@ See `agents/search-conversation.md` for implementation details.
 
 A skill that guides Claude to search conversation history before reinventing solutions or repeating mistakes.
 
-**Core principle:** Always dispatch the search-conversation agent. Never use MCP tools directly.
+**Core principle:** Search before reinventing. Prefer the search-conversation agent, and fall back to direct MCP tools only when needed.
 
 **When to use:**
 
@@ -53,8 +53,8 @@ A skill that guides Claude to search conversation history before reinventing sol
 
 **What it does:**
 
-- Forces agent delegation (YOU MUST dispatch search-conversation agent)
-- Prevents direct MCP tool usage (wastes context)
+- Guides agent-first search when delegation is available
+- Defines direct MCP fallback for unsupported environments or precise filtering
 - Saves 50-100x context vs. loading raw conversations
 
 See `skills/remembering-conversations/SKILL.md` for complete usage guide.
