@@ -262,6 +262,44 @@ function textSearch(queries: string[], options: SearchOptions): MemorySearchResu
   return rows.map(mapRow);
 }
 
+/**
+ * 쿼리 없이 필터(날짜/소스/프로젝트 등)에 맞는 최신 메모리 기록을 observed_at 내림차순으로 나열한다.
+ * "오늘 한 일" 같은 시간 기반 회고 질문에 사용한다. 검색어가 없으므로 벡터/텍스트 매칭 대신
+ * 시간순 정렬만 수행하며, score는 부여하지 않는다.
+ */
+export function listRecent(options: SearchOptions): MemorySearchResult[] {
+  const { db, limit = 10, after, before } = options;
+
+  if (after) validateISODate(after, '--after');
+  if (before) validateISODate(before, '--before');
+
+  const filterParts = buildFilterParts(options);
+  const stmt = db.query(`
+    SELECT
+      m.id,
+      m.kind,
+      m.text,
+      m.archive_path AS archivePath,
+      m.line_start AS lineStart,
+      m.line_end AS lineEnd,
+      m.source_kind AS sourceKind,
+      m.project,
+      m.observed_at AS observedAt
+    FROM memory_records m
+    WHERE m.status = 'active'
+      ${filterParts.clause}
+    ORDER BY m.observed_at DESC
+    LIMIT ?
+  `);
+
+  const rows = stmt.all(
+    ...filterParts.params,
+    limit,
+  ) as Array<Parameters<typeof mapRow>[0]>;
+
+  return rows.map(mapRow);
+}
+
 export interface MemoryRecordLocation {
   archivePath: string;
   lineStart: number;

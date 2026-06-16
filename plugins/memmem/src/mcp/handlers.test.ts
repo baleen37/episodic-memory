@@ -55,6 +55,41 @@ describe('handlers', () => {
     ]);
   });
 
+  test('no query → lists recent records in reverse chronological order', async () => {
+    insertMemoryRecord(db, {
+      kind: 'event',
+      text: 'older work',
+      archivePath: '/archive/claude-projects/old.jsonl',
+      lineStart: 1,
+      lineEnd: 2,
+      sourceKind: 'claude-projects',
+      project: 'memmem',
+      projectName: null,
+      observedAt: Date.UTC(2026, 5, 15),
+      dedupeKey: 'recent-handler-old',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+    insertMemoryRecord(db, {
+      kind: 'event',
+      text: 'newer work',
+      archivePath: '/archive/claude-projects/new.jsonl',
+      lineStart: 1,
+      lineEnd: 2,
+      sourceKind: 'claude-projects',
+      project: 'memmem',
+      projectName: null,
+      observedAt: Date.UTC(2026, 5, 16),
+      dedupeKey: 'recent-handler-new',
+      extractionVersion: CURRENT_EXTRACTION_VERSION,
+      embeddingVersion: CURRENT_EMBEDDING_VERSION,
+    });
+
+    const results = await handleSearch({ limit: 10 }, db);
+
+    expect(results.map(c => c.text)).toEqual(['newer work', 'older work']);
+  });
+
   test('fetch returns the source transcript for a record id', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-mcp-fetch-'));
     const archivePath = join(dir, 'session.jsonl');

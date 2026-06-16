@@ -16980,7 +16980,7 @@ var SearchInputSchema = exports_external.object({
   query: exports_external.union([
     exports_external.string().min(2),
     exports_external.array(exports_external.string().min(2)).min(2).max(5)
-  ]),
+  ]).optional(),
   limit: exports_external.number().int().min(1).max(50).default(10),
   after: exports_external.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   before: exports_external.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
@@ -17219,6 +17219,33 @@ function textSearch(queries, options) {
     LIMIT ?
   `);
   const rows = stmt.all(...queryParams, ...filterParts.params, limit);
+  return rows.map(mapRow);
+}
+function listRecent(options) {
+  const { db, limit = 10, after, before } = options;
+  if (after)
+    validateISODate(after, "--after");
+  if (before)
+    validateISODate(before, "--before");
+  const filterParts = buildFilterParts(options);
+  const stmt = db.query(`
+    SELECT
+      m.id,
+      m.kind,
+      m.text,
+      m.archive_path AS archivePath,
+      m.line_start AS lineStart,
+      m.line_end AS lineEnd,
+      m.source_kind AS sourceKind,
+      m.project,
+      m.observed_at AS observedAt
+    FROM memory_records m
+    WHERE m.status = 'active'
+      ${filterParts.clause}
+    ORDER BY m.observed_at DESC
+    LIMIT ?
+  `);
+  const rows = stmt.all(...filterParts.params, limit);
   return rows.map(mapRow);
 }
 function getMemoryRecordLocation(db, id) {
@@ -17615,7 +17642,7 @@ async function handleSearch(params, db) {
     after: params.after,
     before: params.before
   };
-  const results = Array.isArray(params.query) ? await searchMulti(params.query, options) : await search(params.query, options);
+  const results = params.query === undefined ? listRecent(options) : Array.isArray(params.query) ? await searchMulti(params.query, options) : await search(params.query, options);
   return results.map((result) => {
     const card = {
       id: String(result.id),
@@ -17646,7 +17673,7 @@ function handleFetch(params, db) {
 // src/mcp/tools.ts
 var searchTool = {
   name: "search",
-  description: "Search indexed event/fact memory records. Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.",
+  description: 'Search indexed event/fact memory records. Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Omit query entirely to list the most recent records in reverse chronological order — combine with after/before for time-based recall like "what did I do today" (e.g. after the current date). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.',
   inputSchema: {
     type: "object",
     properties: {
@@ -17655,7 +17682,7 @@ var searchTool = {
           { type: "string", minLength: 2 },
           { type: "array", items: { type: "string", minLength: 2 }, minItems: 2, maxItems: 5 }
         ],
-        description: "Search query. A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity)."
+        description: "Search query. A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity). Optional — omit to list recent records by time (use with after/before)."
       },
       limit: {
         type: "integer",
@@ -17680,7 +17707,6 @@ var searchTool = {
         description: "Filter results to a transcript source kind"
       }
     },
-    required: ["query"],
     additionalProperties: false
   },
   annotations: {

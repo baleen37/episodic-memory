@@ -9,6 +9,13 @@ describe('MCP schemas', () => {
     });
   });
 
+  test('accepts input with no query for time-based recall', () => {
+    expect(SearchInputSchema.parse({ after: '2026-06-16' })).toEqual({
+      after: '2026-06-16',
+      limit: 10,
+    });
+  });
+
   test('rejects unknown search filter keys', () => {
     expect(() => SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-projects' })).toThrow();
   });

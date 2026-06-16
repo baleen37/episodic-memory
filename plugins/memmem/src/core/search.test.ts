@@ -8,7 +8,7 @@ import {
 } from './db.js';
 import { __setModelForTests } from './embeddings.js';
 import { resetRateLimiters } from './ratelimiter.js';
-import { search, searchMulti } from './search.js';
+import { search, searchMulti, listRecent } from './search.js';
 
 let db: ReturnType<typeof initDatabase> | null = null;
 
@@ -330,6 +330,80 @@ describe('memory search', () => {
     expect(results.map(result => result.id)).toEqual([activeId]);
     expect(results[0].text).toHaveLength(400);
     expect(results[0].text.endsWith('...')).toBe(true);
+  });
+});
+
+describe('listRecent', () => {
+  test('returns active records in reverse chronological order without query or embeddings', () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+
+    const oldId = insertMemoryRecord(db, memory({
+      text: 'Oldest event.',
+      observedAt: Date.UTC(2026, 5, 14),
+      dedupeKey: 'recent-old',
+    }));
+    const midId = insertMemoryRecord(db, memory({
+      text: 'Middle event.',
+      observedAt: Date.UTC(2026, 5, 15),
+      dedupeKey: 'recent-mid',
+    }));
+    const newId = insertMemoryRecord(db, memory({
+      text: 'Newest event.',
+      observedAt: Date.UTC(2026, 5, 16),
+      dedupeKey: 'recent-new',
+    }));
+
+    const results = listRecent({ db, limit: 10 });
+
+    expect(results.map(r => r.id)).toEqual([newId, midId, oldId]);
+    expect(results[0]).not.toHaveProperty('score');
+  });
+
+  test('filters to a single day with after/before for "what did I do today"', () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+
+    insertMemoryRecord(db, memory({
+      text: 'Yesterday.',
+      observedAt: Date.UTC(2026, 5, 15),
+      dedupeKey: 'recent-yesterday',
+    }));
+    const todayId = insertMemoryRecord(db, memory({
+      text: 'Today.',
+      observedAt: Date.UTC(2026, 5, 16, 9, 0, 0),
+      dedupeKey: 'recent-today',
+    }));
+
+    const results = listRecent({ db, limit: 10, after: '2026-06-16', before: '2026-06-16' });
+
+    expect(results.map(r => r.id)).toEqual([todayId]);
+  });
+
+  test('respects limit and excludes superseded records', () => {
+    process.env.TEST_DB_PATH = ':memory:';
+    db = initDatabase();
+
+    insertMemoryRecord(db, memory({
+      text: 'Superseded.',
+      status: 'superseded',
+      observedAt: Date.UTC(2026, 5, 16),
+      dedupeKey: 'recent-superseded',
+    }));
+    const a = insertMemoryRecord(db, memory({
+      text: 'Active A.',
+      observedAt: Date.UTC(2026, 5, 15),
+      dedupeKey: 'recent-active-a',
+    }));
+    insertMemoryRecord(db, memory({
+      text: 'Active B.',
+      observedAt: Date.UTC(2026, 5, 14),
+      dedupeKey: 'recent-active-b',
+    }));
+
+    const results = listRecent({ db, limit: 1 });
+
+    expect(results.map(r => r.id)).toEqual([a]);
   });
 });
 
