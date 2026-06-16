@@ -39,6 +39,26 @@ Search memory after you understand the task in these situations:
 - You're stuck after investigating a problem
 - You need to follow an unfamiliar workflow or process
 - User references past work: "last time", "before", "we discussed", "do you remember"
+- User asks a time-based recall question with no specific topic: "오늘 한 일이 뭐야", "what did I do today", "어제 뭐 했지", "this week's work" — see below.
+
+## Time-Based Recall (No Query)
+
+For "what did I do today / yesterday / this week" questions there is no search term —
+the answer is "the most recent records in a date range", not a semantic match.
+
+Call `search` with **no `query`** and a date filter. The tool then lists active
+memory records in reverse chronological order (newest first).
+
+- "오늘 한 일" → `{ after: "<today>", before: "<today>" }`
+- "어제" → `{ after: "<yesterday>", before: "<yesterday>" }`
+- "이번 주" → `{ after: "<monday>" }`
+- "최근에 뭐 했지" (no date) → `{}` — just the newest records.
+
+Use the current date from context for `<today>`. Then group the returned records by
+project/time and summarize what was worked on; cite sources as usual.
+
+When dispatching the search agent for these, say so explicitly:
+"Search recent records since <date> with no query and summarize the day's work."
 
 ## Don't Search First
 
@@ -58,6 +78,16 @@ Prefer the search-conversation agent. If direct MCP access is necessary:
   limit: 10,
   after: "2026-05-01",
   source_kind: "claude-projects"
+}
+```
+
+Omit `query` for time-based recall ("오늘 한 일") — returns newest records first:
+
+```typescript
+{
+  after: "2026-06-16",
+  before: "2026-06-16",
+  limit: 20
 }
 ```
 
