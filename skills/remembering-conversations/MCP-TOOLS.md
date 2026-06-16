@@ -18,11 +18,13 @@ The current flow is:
 
 Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
 
+Omit `query` entirely to list the most recent records in reverse chronological order. Combine with `after`/`before` for time-based recall such as "what did I do today" (no semantic search runs in this mode).
+
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | `string` | Yes | - | Search query |
+| `query` | `string` | No | - | Search query. Omit to list recent records by time. |
 | `limit` | `number` | No | `10` | Max results (1-50) |
 | `after` | `string` | No | - | Filter results after this date (YYYY-MM-DD) |
 | `before` | `string` | No | - | Filter results before this date (YYYY-MM-DD) |
@@ -48,6 +50,20 @@ Search indexed event/fact memory records. Use `read` with the returned archive p
   "limit": 10
 }
 ```
+
+### Time-Based Recall (No Query)
+
+Omit `query` to get the newest records in a date range — used for "오늘 한 일 / what did I do today":
+
+```json
+{
+  "after": "2026-06-16",
+  "before": "2026-06-16",
+  "limit": 20
+}
+```
+
+Results come back sorted by `timestamp` descending and carry no `score`.
 
 ### Result Shape
 
