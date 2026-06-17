@@ -5,7 +5,7 @@ Memmem - Persistent conversation memory across Claude Code and Codex sessions.
 ## Purpose
 
 memmem syncs local Claude Code and Codex transcripts into an archive, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through CLI and MCP. Based on [@obra/episodic-memory](https://github.com/obra/episodic-memory)
-with integration into the Claude Code plugin ecosystem.
+with integration into the Claude Code and Codex plugin ecosystems.
 
 ## Features
 
