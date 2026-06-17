@@ -8,6 +8,7 @@ mkdir -p "$target"
 
 cp -pR \
   .codex-plugin \
+  .claude-plugin \
   .mcp.json \
   skills \
   bin \

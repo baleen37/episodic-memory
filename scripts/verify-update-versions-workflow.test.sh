@@ -8,6 +8,8 @@ ON_RELEASE_WORKFLOW_FILE="$REPO_ROOT/.github/workflows/on-release.yml"
 MARKETPLACE_FILE="$REPO_ROOT/.claude-plugin/marketplace.json"
 CLAUDE_PLUGIN_FILE="$REPO_ROOT/.claude-plugin/plugin.json"
 CODEX_PLUGIN_FILE="$REPO_ROOT/.codex-plugin/plugin.json"
+CODEX_MARKETPLACE_FILE="$REPO_ROOT/.agents/plugins/marketplace.json"
+COPIED_PLUGIN_DIR="$REPO_ROOT/plugins/memmem"
 PACKAGE_FILE="$REPO_ROOT/package.json"
 DISPATCH_ACTION_SHA="12f7f29617c0083c78affd8c1e286e0a093fb0f9"
 
@@ -52,9 +54,14 @@ if [[ ! -f "$CODEX_PLUGIN_FILE" ]]; then
   fail "Codex plugin manifest not found: $CODEX_PLUGIN_FILE"
 fi
 
+if [[ ! -f "$CODEX_MARKETPLACE_FILE" ]]; then
+  fail "Codex marketplace file not found: $CODEX_MARKETPLACE_FILE"
+fi
+
 jq empty "$MARKETPLACE_FILE" || fail "invalid JSON: $MARKETPLACE_FILE"
 jq empty "$CLAUDE_PLUGIN_FILE" || fail "invalid JSON: $CLAUDE_PLUGIN_FILE"
 jq empty "$CODEX_PLUGIN_FILE" || fail "invalid JSON: $CODEX_PLUGIN_FILE"
+jq empty "$CODEX_MARKETPLACE_FILE" || fail "invalid JSON: $CODEX_MARKETPLACE_FILE"
 
 package_version="$(jq -r '.version' "$PACKAGE_FILE")"
 claude_version="$(jq -r '.version' "$CLAUDE_PLUGIN_FILE")"
@@ -79,6 +86,22 @@ fi
 
 if [[ "$(jq -r 'has("mcpServers")' "$CODEX_PLUGIN_FILE")" != "true" ]]; then
   fail ".codex-plugin/plugin.json must preserve mcpServers"
+fi
+
+if [[ "$(jq -r '.plugins[0].source.path' "$CODEX_MARKETPLACE_FILE")" != "./plugins/memmem" ]]; then
+  fail ".agents/plugins/marketplace.json must point Codex at ./plugins/memmem"
+fi
+
+if [[ ! -f "$COPIED_PLUGIN_DIR/.codex-plugin/plugin.json" ]]; then
+  fail "copied plugin view must include .codex-plugin/plugin.json"
+fi
+
+if [[ ! -f "$COPIED_PLUGIN_DIR/.claude-plugin/plugin.json" ]]; then
+  fail "copied plugin view must include .claude-plugin/plugin.json"
+fi
+
+if [[ ! -f "$COPIED_PLUGIN_DIR/.mcp.json" ]]; then
+  fail "copied plugin view must include .mcp.json"
 fi
 
 assert_contains "$WORKFLOW_FILE" "schedule:"
