@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { embedQuery } from './embeddings.js';
 import { log } from './logger.js';
+import { distanceToScore } from './score.js';
 
 interface QueryNormalizerProvider {
   complete(prompt: string): Promise<{ text: string }>;
@@ -165,7 +166,7 @@ function mapRow(row: {
   };
 
   if (row.distance !== undefined) {
-    result.score = 1 / (1 + row.distance);
+    result.score = distanceToScore(row.distance);
   }
 
   return result;

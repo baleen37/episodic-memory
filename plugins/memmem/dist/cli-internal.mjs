@@ -216,7 +216,7 @@ class RoundRobinProvider {
   }
 }
 
-// node_modules/@google/generative-ai/dist/index.mjs
+// ../../node_modules/@google/generative-ai/dist/index.mjs
 class RequestUrl {
   constructor(model, task, apiKey, stream, requestOptions) {
     this.model = model;
@@ -2708,6 +2708,17 @@ async function run(kind, text) {
 
 // src/core/search.ts
 init_logger();
+
+// src/core/score.ts
+var COS_FLOOR = 0.6;
+var COS_RANGE = 1 - COS_FLOOR;
+function distanceToScore(distance) {
+  const cos = 1 - distance * distance / 2;
+  const scaled = (cos - COS_FLOOR) / COS_RANGE;
+  return Math.max(0, Math.min(1, scaled));
+}
+
+// src/core/search.ts
 function isValidCalendarDate(dateStr) {
   const [year, month, day] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -2778,6 +2789,9 @@ async function normalizeQuery(query, provider) {
   if (!provider) {
     return query;
   }
+  if (!/[^\x00-\x7F]/.test(query)) {
+    return query;
+  }
   try {
     const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.
 
@@ -2801,7 +2815,7 @@ function mapRow(row) {
     project: row.project
   };
   if (row.distance !== undefined) {
-    result.score = 1 / (1 + row.distance);
+    result.score = distanceToScore(row.distance);
   }
   return result;
 }
@@ -2893,11 +2907,27 @@ async function search(query, options) {
   return Array.from(combined.values()).slice(0, limit);
 }
 
+// src/core/query-normalizer.ts
+init_config();
+init_logger();
+async function resolveQueryNormalizer(deps = { loadConfig, createProvider }) {
+  const config = deps.loadConfig();
+  if (!config)
+    return;
+  try {
+    return await deps.createProvider(config);
+  } catch (err) {
+    log.warn("query normalizer unavailable", { error: err.message });
+    return;
+  }
+}
+
 // src/cli/search.ts
 async function runSearchCli(args) {
   const db = openDatabase();
   try {
-    const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind });
+    const queryNormalizerProvider = await resolveQueryNormalizer();
+    const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind, queryNormalizerProvider });
     for (const result of results) {
       const date = result.observedAt ? new Date(result.observedAt).toISOString().split("T")[0] : "unknown-date";
       console.log(`## [${result.kind}, ${result.sourceKind}, ${date}] ${result.project ?? "unknown-project"}`);
@@ -2953,6 +2983,7 @@ Rules:
 - Do not summarize the whole conversation.
 - Do not include speculative assistant reasoning.
 - Keep each text under 240 characters.
+- Always write each record's text in English, even when the transcript is in another language. Translate non-English content into clear English; preserve code identifiers, file paths, and proper nouns verbatim.
 
 Response format:
 [
