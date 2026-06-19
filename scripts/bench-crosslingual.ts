@@ -12,6 +12,7 @@
  */
 import { openDatabase } from '../plugins/memmem/src/core/db.js';
 import { search } from '../plugins/memmem/src/core/search.js';
+import { resolveQueryNormalizer } from '../plugins/memmem/src/core/query-normalizer.js';
 
 const K = 10;
 
@@ -72,24 +73,54 @@ function findGold(results: Awaited<ReturnType<typeof search>>, answer: string): 
   return { rank: null, score: null };
 }
 
+// Mock normalizer: simulates a perfect KO→EN translation provider by returning
+// the gold case's English query when it sees that case's Korean query. This
+// measures the UPPER BOUND of the "wire up queryNormalizerProvider" fix in
+// isolation, without making real LLM calls.
+function makeMockNormalizer() {
+  const koToEn = new Map(GOLD.map(g => [g.ko, g.en]));
+  return {
+    async complete(prompt: string): Promise<{ text: string }> {
+      for (const [ko, en] of koToEn) {
+        if (prompt.includes(ko)) return { text: en };
+      }
+      // Fallback: echo the query portion unchanged.
+      const m = prompt.match(/Query: (.*)$/s);
+      return { text: m ? m[1].trim() : prompt };
+    },
+  };
+}
+
 async function main() {
   const db = openDatabase();
+  // REAL=1 uses the configured LLM provider (true end-to-end). Default uses the
+  // mock normalizer to measure the upper bound without LLM calls.
+  const normalizer = process.env.REAL
+    ? (await resolveQueryNormalizer()) ?? makeMockNormalizer()
+    : makeMockNormalizer();
+  if (process.env.REAL) console.log('(using REAL configured LLM normalizer)');
   try {
-    const rows: Array<{ id: string; en: Hit; ko: Hit }> = [];
+    const rows: Array<{ id: string; en: Hit; ko: Hit; koNorm: Hit }> = [];
     for (const g of GOLD) {
       const enRes = await search(g.en, { db, limit: K });
       const koRes = await search(g.ko, { db, limit: K });
-      rows.push({ id: g.id, en: findGold(enRes, g.answer), ko: findGold(koRes, g.answer) });
+      const koNormRes = await search(g.ko, { db, limit: K, queryNormalizerProvider: normalizer });
+      rows.push({
+        id: g.id,
+        en: findGold(enRes, g.answer),
+        ko: findGold(koRes, g.answer),
+        koNorm: findGold(koNormRes, g.answer),
+      });
     }
 
     const fmt = (h: Hit) =>
-      h.rank === null ? 'MISS'.padEnd(12) : `#${h.rank} ${(h.score! * 100).toFixed(0)}%`.padEnd(12);
+      h.rank === null ? 'MISS'.padEnd(14) : `#${h.rank} ${(h.score! * 100).toFixed(0)}%`.padEnd(14);
 
     console.log(`\nCross-lingual benchmark (recall@${K}, gold answer rank/score)\n`);
-    console.log('case'.padEnd(20) + 'EN'.padEnd(12) + 'KO'.padEnd(12));
-    console.log('-'.repeat(44));
+    console.log('case'.padEnd(20) + 'EN'.padEnd(14) + 'KO'.padEnd(14) + 'KO+normalize'.padEnd(14));
+    console.log('-'.repeat(62));
     for (const r of rows) {
-      console.log(r.id.padEnd(20) + fmt(r.en) + fmt(r.ko));
+      console.log(r.id.padEnd(20) + fmt(r.en) + fmt(r.ko) + fmt(r.koNorm));
     }
 
     const recall = (sel: (r: typeof rows[number]) => Hit) =>
@@ -99,15 +130,23 @@ async function main() {
       return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
     };
 
-    const enRecall = recall(r => r.en);
-    const koRecall = recall(r => r.ko);
-    const enScore = meanScore(r => r.en);
-    const koScore = meanScore(r => r.ko);
+    const cols: Array<[string, (r: typeof rows[number]) => Hit]> = [
+      ['en', r => r.en],
+      ['ko', r => r.ko],
+      ['koNorm', r => r.koNorm],
+    ];
 
-    console.log('-'.repeat(44));
-    console.log(`recall@${K}`.padEnd(20) + `${(enRecall * 100).toFixed(0)}%`.padEnd(12) + `${(koRecall * 100).toFixed(0)}%`.padEnd(12));
-    console.log('mean gold score'.padEnd(20) + `${(enScore * 100).toFixed(0)}%`.padEnd(12) + `${(koScore * 100).toFixed(0)}%`.padEnd(12));
-    console.log(`\nKO recall gap: ${((enRecall - koRecall) * 100).toFixed(0)}pp | KO score gap: ${((enScore - koScore) * 100).toFixed(1)}pp`);
+    console.log('-'.repeat(62));
+    console.log(
+      `recall@${K}`.padEnd(20) +
+        cols.map(([, sel]) => `${(recall(sel) * 100).toFixed(0)}%`.padEnd(14)).join(''),
+    );
+    console.log(
+      'mean gold score'.padEnd(20) +
+        cols.map(([, sel]) => `${(meanScore(sel) * 100).toFixed(0)}%`.padEnd(14)).join(''),
+    );
+    const enR = recall(r => r.en), koR = recall(r => r.ko), koNR = recall(r => r.koNorm);
+    console.log(`\nKO recall gap (raw): ${((enR - koR) * 100).toFixed(0)}pp | with normalize: ${((enR - koNR) * 100).toFixed(0)}pp | lift: ${((koNR - koR) * 100).toFixed(0)}pp`);
   } finally {
     db.close();
   }
