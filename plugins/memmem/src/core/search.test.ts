@@ -197,28 +197,6 @@ describe('memory search', () => {
     expect(results.map(result => result.id)).toEqual([id]);
   });
 
-  test('skips normalization for ASCII-only queries even when a provider is set', async () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-    let embeddedQuery = '';
-    __setModelForTests(async () => {}, async (_kind, text: string) => {
-      embeddedQuery = text;
-      return Array.from({ length: 384 }, () => 0.1);
-    });
-    let called = false;
-    const queryNormalizerProvider = {
-      complete: async () => {
-        called = true;
-        return { text: 'should not be used', usage: { input_tokens: 1, output_tokens: 1 } };
-      },
-    };
-
-    await search('round robin provider', { db, limit: 10, queryNormalizerProvider });
-
-    expect(called).toBe(false);
-    expect(embeddedQuery).toBe('round robin provider');
-  });
-
   test('treats LIKE wildcards as literal characters', async () => {
     process.env.TEST_DB_PATH = ':memory:';
     db = initDatabase();

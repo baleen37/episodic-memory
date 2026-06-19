@@ -1,7 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { embedQuery } from './embeddings.js';
 import { log } from './logger.js';
-import { distanceToScore } from './score.js';
 
 interface QueryNormalizerProvider {
   complete(prompt: string): Promise<{ text: string }>;
@@ -125,13 +124,6 @@ async function normalizeQuery(query: string, provider?: QueryNormalizerProvider)
     return query;
   }
 
-  // ASCII-only queries are already English; normalization adds latency/cost with
-  // no retrieval benefit (English queries already match the English-heavy index).
-  // The normalizer exists to close the cross-lingual gap for non-ASCII queries.
-  if (!/[^\x00-\x7F]/.test(query)) {
-    return query;
-  }
-
   try {
     const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.\n\nQuery: ${query}`);
     const normalized = result.text.trim();
@@ -166,7 +158,7 @@ function mapRow(row: {
   };
 
   if (row.distance !== undefined) {
-    result.score = distanceToScore(row.distance);
+    result.score = 1 / (1 + row.distance);
   }
 
   return result;

@@ -5,7 +5,6 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { openDatabase } from '../core/db.js';
-import { resolveQueryNormalizer } from '../core/query-normalizer.js';
 import {
   SearchInputSchema,
   FetchInputSchema,
@@ -52,8 +51,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const params = SearchInputSchema.parse(args);
       const db = openDatabase();
       try {
-        const queryNormalizerProvider = await resolveQueryNormalizer();
-        const results = await handleSearch(params, db, queryNormalizerProvider);
+        const results = await handleSearch(params, db);
         return {
           content: [
             {

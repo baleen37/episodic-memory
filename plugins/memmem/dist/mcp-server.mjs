@@ -47,7 +47,7 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../node_modules/ajv/dist/compile/codegen/code.js
+// node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = undefined;
@@ -201,7 +201,7 @@ var require_code = __commonJS((exports) => {
   exports.regexpCode = regexpCode;
 });
 
-// ../../node_modules/ajv/dist/compile/codegen/scope.js
+// node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = undefined;
@@ -347,7 +347,7 @@ var require_scope = __commonJS((exports) => {
   exports.ValueScope = ValueScope;
 });
 
-// ../../node_modules/ajv/dist/compile/codegen/index.js
+// node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = undefined;
@@ -1057,7 +1057,7 @@ var require_codegen = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/compile/util.js
+// node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = undefined;
@@ -1221,7 +1221,7 @@ var require_util = __commonJS((exports) => {
   exports.checkStrictMode = checkStrictMode;
 });
 
-// ../../node_modules/ajv/dist/compile/names.js
+// node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -1246,7 +1246,7 @@ var require_names = __commonJS((exports) => {
   exports.default = names;
 });
 
-// ../../node_modules/ajv/dist/compile/errors.js
+// node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = undefined;
@@ -1364,7 +1364,7 @@ var require_errors = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/compile/validate/boolSchema.js
+// node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = undefined;
@@ -1412,7 +1412,7 @@ var require_boolSchema = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/compile/rules.js
+// node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getRules = exports.isJSONType = undefined;
@@ -1440,7 +1440,7 @@ var require_rules = __commonJS((exports) => {
   exports.getRules = getRules;
 });
 
-// ../../node_modules/ajv/dist/compile/validate/applicability.js
+// node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = undefined;
@@ -1460,7 +1460,7 @@ var require_applicability = __commonJS((exports) => {
   exports.shouldUseRule = shouldUseRule;
 });
 
-// ../../node_modules/ajv/dist/compile/validate/dataType.js
+// node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = undefined;
@@ -1641,7 +1641,7 @@ var require_dataType = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/compile/validate/defaults.js
+// node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assignDefaults = undefined;
@@ -1675,7 +1675,7 @@ var require_defaults = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/vocabularies/code.js
+// node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = undefined;
@@ -1804,7 +1804,7 @@ var require_code2 = __commonJS((exports) => {
   exports.validateUnion = validateUnion;
 });
 
-// ../../node_modules/ajv/dist/compile/validate/keyword.js
+// node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = undefined;
@@ -1919,7 +1919,7 @@ var require_keyword = __commonJS((exports) => {
   exports.validateKeywordUsage = validateKeywordUsage;
 });
 
-// ../../node_modules/ajv/dist/compile/validate/subschema.js
+// node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = undefined;
@@ -1999,7 +1999,7 @@ var require_subschema = __commonJS((exports) => {
   exports.extendSubschemaMode = extendSubschemaMode;
 });
 
-// ../../node_modules/fast-deep-equal/index.js
+// node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS((exports, module) => {
   module.exports = function equal(a, b) {
     if (a === b)
@@ -2041,7 +2041,7 @@ var require_fast_deep_equal = __commonJS((exports, module) => {
   };
 });
 
-// ../../node_modules/json-schema-traverse/index.js
+// node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS((exports, module) => {
   var traverse = module.exports = function(schema, opts, cb) {
     if (typeof opts == "function") {
@@ -2124,7 +2124,7 @@ var require_json_schema_traverse = __commonJS((exports, module) => {
   }
 });
 
-// ../../node_modules/ajv/dist/compile/resolve.js
+// node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = undefined;
@@ -2277,7 +2277,7 @@ var require_resolve = __commonJS((exports) => {
   exports.getSchemaRefs = getSchemaRefs;
 });
 
-// ../../node_modules/ajv/dist/compile/validate/index.js
+// node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getData = exports.KeywordCxt = exports.validateFunctionCode = undefined;
@@ -2782,7 +2782,7 @@ var require_validate = __commonJS((exports) => {
   exports.getData = getData;
 });
 
-// ../../node_modules/ajv/dist/runtime/validation_error.js
+// node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
 
@@ -2796,7 +2796,7 @@ var require_validation_error = __commonJS((exports) => {
   exports.default = ValidationError;
 });
 
-// ../../node_modules/ajv/dist/compile/ref_error.js
+// node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var resolve_1 = require_resolve();
@@ -2811,7 +2811,7 @@ var require_ref_error = __commonJS((exports) => {
   exports.default = MissingRefError;
 });
 
-// ../../node_modules/ajv/dist/compile/index.js
+// node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = undefined;
@@ -3032,7 +3032,7 @@ var require_compile = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/refs/data.json
+// node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS((exports, module) => {
   module.exports = {
     $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
@@ -3049,7 +3049,7 @@ var require_data = __commonJS((exports, module) => {
   };
 });
 
-// ../../node_modules/fast-uri/lib/utils.js
+// node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS((exports, module) => {
   var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
   var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -3304,7 +3304,7 @@ var require_utils = __commonJS((exports, module) => {
   };
 });
 
-// ../../node_modules/fast-uri/lib/schemes.js
+// node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS((exports, module) => {
   var { isUUID } = require_utils();
   var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -3478,7 +3478,7 @@ var require_schemes = __commonJS((exports, module) => {
   };
 });
 
-// ../../node_modules/fast-uri/index.js
+// node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS((exports, module) => {
   var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
   var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -3729,7 +3729,7 @@ var require_fast_uri = __commonJS((exports, module) => {
   module.exports.fastUri = fastUri;
 });
 
-// ../../node_modules/ajv/dist/runtime/uri.js
+// node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var uri = require_fast_uri();
@@ -3737,7 +3737,7 @@ var require_uri = __commonJS((exports) => {
   exports.default = uri;
 });
 
-// ../../node_modules/ajv/dist/core.js
+// node_modules/ajv/dist/core.js
 var require_core = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = undefined;
@@ -4330,7 +4330,7 @@ var require_core = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv/dist/vocabularies/core/id.js
+// node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var def = {
@@ -4342,7 +4342,7 @@ var require_id = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/core/ref.js
+// node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.callRef = exports.getValidate = undefined;
@@ -4461,7 +4461,7 @@ var require_ref = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/core/index.js
+// node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var id_1 = require_id();
@@ -4479,7 +4479,7 @@ var require_core2 = __commonJS((exports) => {
   exports.default = core2;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4508,7 +4508,7 @@ var require_limitNumber = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4533,7 +4533,7 @@ var require_multipleOf = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/runtime/ucs2length.js
+// node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   function ucs2length(str) {
@@ -4556,7 +4556,7 @@ var require_ucs2length = __commonJS((exports) => {
   ucs2length.code = 'require("ajv/dist/runtime/ucs2length").default';
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4585,7 +4585,7 @@ var require_limitLength = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/pattern.js
+// node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -4610,7 +4610,7 @@ var require_pattern = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4636,7 +4636,7 @@ var require_limitProperties = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/required.js
+// node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -4715,7 +4715,7 @@ var require_required = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4741,7 +4741,7 @@ var require_limitItems = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/runtime/equal.js
+// node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var equal = require_fast_deep_equal();
@@ -4749,7 +4749,7 @@ var require_equal = __commonJS((exports) => {
   exports.default = equal;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var dataType_1 = require_dataType();
@@ -4813,7 +4813,7 @@ var require_uniqueItems = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/const.js
+// node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4839,7 +4839,7 @@ var require_const = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/enum.js
+// node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4885,7 +4885,7 @@ var require_enum = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/validation/index.js
+// node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var limitNumber_1 = require_limitNumber();
@@ -4915,7 +4915,7 @@ var require_validation = __commonJS((exports) => {
   exports.default = validation;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateAdditionalItems = undefined;
@@ -4965,7 +4965,7 @@ var require_additionalItems = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/items.js
+// node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateTuple = undefined;
@@ -5019,7 +5019,7 @@ var require_items = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var items_1 = require_items();
@@ -5033,7 +5033,7 @@ var require_prefixItems = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5065,7 +5065,7 @@ var require_items2020 = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/contains.js
+// node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5156,7 +5156,7 @@ var require_contains = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = undefined;
@@ -5241,7 +5241,7 @@ var require_dependencies = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5281,7 +5281,7 @@ var require_propertyNames = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5384,7 +5384,7 @@ var require_additionalProperties = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/properties.js
+// node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var validate_1 = require_validate();
@@ -5439,7 +5439,7 @@ var require_properties = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5510,7 +5510,7 @@ var require_patternProperties = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/not.js
+// node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -5538,7 +5538,7 @@ var require_not = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5552,7 +5552,7 @@ var require_anyOf = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5607,7 +5607,7 @@ var require_oneOf = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -5631,7 +5631,7 @@ var require_allOf = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/if.js
+// node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5697,7 +5697,7 @@ var require_if = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -5712,7 +5712,7 @@ var require_thenElse = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/applicator/index.js
+// node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var additionalItems_1 = require_additionalItems();
@@ -5755,7 +5755,7 @@ var require_applicator = __commonJS((exports) => {
   exports.default = getApplicator;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/format/format.js
+// node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5842,7 +5842,7 @@ var require_format = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/format/index.js
+// node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var format_1 = require_format();
@@ -5850,7 +5850,7 @@ var require_format2 = __commonJS((exports) => {
   exports.default = format;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/metadata.js
+// node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.contentVocabulary = exports.metadataVocabulary = undefined;
@@ -5870,7 +5870,7 @@ var require_metadata = __commonJS((exports) => {
   ];
 });
 
-// ../../node_modules/ajv/dist/vocabularies/draft7.js
+// node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var core_1 = require_core2();
@@ -5889,7 +5889,7 @@ var require_draft7 = __commonJS((exports) => {
   exports.default = draft7Vocabularies;
 });
 
-// ../../node_modules/ajv/dist/vocabularies/discriminator/types.js
+// node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.DiscrError = undefined;
@@ -5900,7 +5900,7 @@ var require_types = __commonJS((exports) => {
   })(DiscrError || (exports.DiscrError = DiscrError = {}));
 });
 
-// ../../node_modules/ajv/dist/vocabularies/discriminator/index.js
+// node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -6002,7 +6002,7 @@ var require_discriminator = __commonJS((exports) => {
   exports.default = def;
 });
 
-// ../../node_modules/ajv/dist/refs/json-schema-draft-07.json
+// node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS((exports, module) => {
   module.exports = {
     $schema: "http://json-schema.org/draft-07/schema#",
@@ -6157,7 +6157,7 @@ var require_json_schema_draft_07 = __commonJS((exports, module) => {
   };
 });
 
-// ../../node_modules/ajv/dist/ajv.js
+// node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS((exports, module) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = undefined;
@@ -6225,7 +6225,7 @@ var require_ajv = __commonJS((exports, module) => {
   } });
 });
 
-// ../../node_modules/ajv-formats/dist/formats.js
+// node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatNames = exports.fastFormats = exports.fullFormats = undefined;
@@ -6402,7 +6402,7 @@ var require_formats = __commonJS((exports) => {
   }
 });
 
-// ../../node_modules/ajv-formats/dist/limit.js
+// node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatLimitDefinition = undefined;
@@ -6471,7 +6471,7 @@ var require_limit = __commonJS((exports) => {
   exports.default = formatLimitPlugin;
 });
 
-// ../../node_modules/ajv-formats/dist/index.js
+// node_modules/ajv-formats/dist/index.js
 var require_dist = __commonJS((exports, module) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var formats_1 = require_formats();
@@ -6551,946 +6551,6 @@ function getLogFilePath() {
   return path.join(getLogDir(), `${date4}.log`);
 }
 var init_paths = () => {};
-
-// src/core/llm/round-robin-provider.ts
-var exports_round_robin_provider = {};
-__export(exports_round_robin_provider, {
-  RoundRobinProvider: () => RoundRobinProvider
-});
-
-class RoundRobinProvider {
-  providers;
-  cursor = 0;
-  constructor(providers) {
-    if (providers.length === 0) {
-      throw new Error("RoundRobinProvider requires at least one provider");
-    }
-    this.providers = providers;
-  }
-  async complete(prompt, options) {
-    let lastError;
-    for (let i = 0;i < this.providers.length; i++) {
-      const provider = this.providers[this.cursor];
-      this.cursor = (this.cursor + 1) % this.providers.length;
-      try {
-        return await provider.complete(prompt, options);
-      } catch (error2) {
-        lastError = error2;
-      }
-    }
-    throw lastError;
-  }
-}
-
-// ../../node_modules/@google/generative-ai/dist/index.mjs
-class RequestUrl {
-  constructor(model, task, apiKey, stream, requestOptions) {
-    this.model = model;
-    this.task = task;
-    this.apiKey = apiKey;
-    this.stream = stream;
-    this.requestOptions = requestOptions;
-  }
-  toString() {
-    var _a, _b;
-    const apiVersion = ((_a = this.requestOptions) === null || _a === undefined ? undefined : _a.apiVersion) || DEFAULT_API_VERSION;
-    const baseUrl = ((_b = this.requestOptions) === null || _b === undefined ? undefined : _b.baseUrl) || DEFAULT_BASE_URL;
-    let url = `${baseUrl}/${apiVersion}/${this.model}:${this.task}`;
-    if (this.stream) {
-      url += "?alt=sse";
-    }
-    return url;
-  }
-}
-function getClientHeaders(requestOptions) {
-  const clientHeaders = [];
-  if (requestOptions === null || requestOptions === undefined ? undefined : requestOptions.apiClient) {
-    clientHeaders.push(requestOptions.apiClient);
-  }
-  clientHeaders.push(`${PACKAGE_LOG_HEADER}/${PACKAGE_VERSION}`);
-  return clientHeaders.join(" ");
-}
-async function getHeaders(url) {
-  var _a;
-  const headers = new Headers;
-  headers.append("Content-Type", "application/json");
-  headers.append("x-goog-api-client", getClientHeaders(url.requestOptions));
-  headers.append("x-goog-api-key", url.apiKey);
-  let customHeaders = (_a = url.requestOptions) === null || _a === undefined ? undefined : _a.customHeaders;
-  if (customHeaders) {
-    if (!(customHeaders instanceof Headers)) {
-      try {
-        customHeaders = new Headers(customHeaders);
-      } catch (e) {
-        throw new GoogleGenerativeAIRequestInputError(`unable to convert customHeaders value ${JSON.stringify(customHeaders)} to Headers: ${e.message}`);
-      }
-    }
-    for (const [headerName, headerValue] of customHeaders.entries()) {
-      if (headerName === "x-goog-api-key") {
-        throw new GoogleGenerativeAIRequestInputError(`Cannot set reserved header name ${headerName}`);
-      } else if (headerName === "x-goog-api-client") {
-        throw new GoogleGenerativeAIRequestInputError(`Header name ${headerName} can only be set using the apiClient field`);
-      }
-      headers.append(headerName, headerValue);
-    }
-  }
-  return headers;
-}
-async function constructModelRequest(model, task, apiKey, stream, body, requestOptions) {
-  const url = new RequestUrl(model, task, apiKey, stream, requestOptions);
-  return {
-    url: url.toString(),
-    fetchOptions: Object.assign(Object.assign({}, buildFetchOptions(requestOptions)), { method: "POST", headers: await getHeaders(url), body })
-  };
-}
-async function makeModelRequest(model, task, apiKey, stream, body, requestOptions = {}, fetchFn = fetch) {
-  const { url, fetchOptions } = await constructModelRequest(model, task, apiKey, stream, body, requestOptions);
-  return makeRequest(url, fetchOptions, fetchFn);
-}
-async function makeRequest(url, fetchOptions, fetchFn = fetch) {
-  let response;
-  try {
-    response = await fetchFn(url, fetchOptions);
-  } catch (e) {
-    handleResponseError(e, url);
-  }
-  if (!response.ok) {
-    await handleResponseNotOk(response, url);
-  }
-  return response;
-}
-function handleResponseError(e, url) {
-  let err = e;
-  if (err.name === "AbortError") {
-    err = new GoogleGenerativeAIAbortError(`Request aborted when fetching ${url.toString()}: ${e.message}`);
-    err.stack = e.stack;
-  } else if (!(e instanceof GoogleGenerativeAIFetchError || e instanceof GoogleGenerativeAIRequestInputError)) {
-    err = new GoogleGenerativeAIError(`Error fetching from ${url.toString()}: ${e.message}`);
-    err.stack = e.stack;
-  }
-  throw err;
-}
-async function handleResponseNotOk(response, url) {
-  let message = "";
-  let errorDetails;
-  try {
-    const json = await response.json();
-    message = json.error.message;
-    if (json.error.details) {
-      message += ` ${JSON.stringify(json.error.details)}`;
-      errorDetails = json.error.details;
-    }
-  } catch (e) {}
-  throw new GoogleGenerativeAIFetchError(`Error fetching from ${url.toString()}: [${response.status} ${response.statusText}] ${message}`, response.status, response.statusText, errorDetails);
-}
-function buildFetchOptions(requestOptions) {
-  const fetchOptions = {};
-  if ((requestOptions === null || requestOptions === undefined ? undefined : requestOptions.signal) !== undefined || (requestOptions === null || requestOptions === undefined ? undefined : requestOptions.timeout) >= 0) {
-    const controller = new AbortController;
-    if ((requestOptions === null || requestOptions === undefined ? undefined : requestOptions.timeout) >= 0) {
-      setTimeout(() => controller.abort(), requestOptions.timeout);
-    }
-    if (requestOptions === null || requestOptions === undefined ? undefined : requestOptions.signal) {
-      requestOptions.signal.addEventListener("abort", () => {
-        controller.abort();
-      });
-    }
-    fetchOptions.signal = controller.signal;
-  }
-  return fetchOptions;
-}
-function addHelpers(response) {
-  response.text = () => {
-    if (response.candidates && response.candidates.length > 0) {
-      if (response.candidates.length > 1) {
-        console.warn(`This response had ${response.candidates.length} ` + `candidates. Returning text from the first candidate only. ` + `Access response.candidates directly to use the other candidates.`);
-      }
-      if (hadBadFinishReason(response.candidates[0])) {
-        throw new GoogleGenerativeAIResponseError(`${formatBlockErrorMessage(response)}`, response);
-      }
-      return getText(response);
-    } else if (response.promptFeedback) {
-      throw new GoogleGenerativeAIResponseError(`Text not available. ${formatBlockErrorMessage(response)}`, response);
-    }
-    return "";
-  };
-  response.functionCall = () => {
-    if (response.candidates && response.candidates.length > 0) {
-      if (response.candidates.length > 1) {
-        console.warn(`This response had ${response.candidates.length} ` + `candidates. Returning function calls from the first candidate only. ` + `Access response.candidates directly to use the other candidates.`);
-      }
-      if (hadBadFinishReason(response.candidates[0])) {
-        throw new GoogleGenerativeAIResponseError(`${formatBlockErrorMessage(response)}`, response);
-      }
-      console.warn(`response.functionCall() is deprecated. ` + `Use response.functionCalls() instead.`);
-      return getFunctionCalls(response)[0];
-    } else if (response.promptFeedback) {
-      throw new GoogleGenerativeAIResponseError(`Function call not available. ${formatBlockErrorMessage(response)}`, response);
-    }
-    return;
-  };
-  response.functionCalls = () => {
-    if (response.candidates && response.candidates.length > 0) {
-      if (response.candidates.length > 1) {
-        console.warn(`This response had ${response.candidates.length} ` + `candidates. Returning function calls from the first candidate only. ` + `Access response.candidates directly to use the other candidates.`);
-      }
-      if (hadBadFinishReason(response.candidates[0])) {
-        throw new GoogleGenerativeAIResponseError(`${formatBlockErrorMessage(response)}`, response);
-      }
-      return getFunctionCalls(response);
-    } else if (response.promptFeedback) {
-      throw new GoogleGenerativeAIResponseError(`Function call not available. ${formatBlockErrorMessage(response)}`, response);
-    }
-    return;
-  };
-  return response;
-}
-function getText(response) {
-  var _a, _b, _c, _d;
-  const textStrings = [];
-  if ((_b = (_a = response.candidates) === null || _a === undefined ? undefined : _a[0].content) === null || _b === undefined ? undefined : _b.parts) {
-    for (const part of (_d = (_c = response.candidates) === null || _c === undefined ? undefined : _c[0].content) === null || _d === undefined ? undefined : _d.parts) {
-      if (part.text) {
-        textStrings.push(part.text);
-      }
-      if (part.executableCode) {
-        textStrings.push("\n```" + part.executableCode.language + `
-` + part.executableCode.code + "\n```\n");
-      }
-      if (part.codeExecutionResult) {
-        textStrings.push("\n```\n" + part.codeExecutionResult.output + "\n```\n");
-      }
-    }
-  }
-  if (textStrings.length > 0) {
-    return textStrings.join("");
-  } else {
-    return "";
-  }
-}
-function getFunctionCalls(response) {
-  var _a, _b, _c, _d;
-  const functionCalls = [];
-  if ((_b = (_a = response.candidates) === null || _a === undefined ? undefined : _a[0].content) === null || _b === undefined ? undefined : _b.parts) {
-    for (const part of (_d = (_c = response.candidates) === null || _c === undefined ? undefined : _c[0].content) === null || _d === undefined ? undefined : _d.parts) {
-      if (part.functionCall) {
-        functionCalls.push(part.functionCall);
-      }
-    }
-  }
-  if (functionCalls.length > 0) {
-    return functionCalls;
-  } else {
-    return;
-  }
-}
-function hadBadFinishReason(candidate) {
-  return !!candidate.finishReason && badFinishReasons.includes(candidate.finishReason);
-}
-function formatBlockErrorMessage(response) {
-  var _a, _b, _c;
-  let message = "";
-  if ((!response.candidates || response.candidates.length === 0) && response.promptFeedback) {
-    message += "Response was blocked";
-    if ((_a = response.promptFeedback) === null || _a === undefined ? undefined : _a.blockReason) {
-      message += ` due to ${response.promptFeedback.blockReason}`;
-    }
-    if ((_b = response.promptFeedback) === null || _b === undefined ? undefined : _b.blockReasonMessage) {
-      message += `: ${response.promptFeedback.blockReasonMessage}`;
-    }
-  } else if ((_c = response.candidates) === null || _c === undefined ? undefined : _c[0]) {
-    const firstCandidate = response.candidates[0];
-    if (hadBadFinishReason(firstCandidate)) {
-      message += `Candidate was blocked due to ${firstCandidate.finishReason}`;
-      if (firstCandidate.finishMessage) {
-        message += `: ${firstCandidate.finishMessage}`;
-      }
-    }
-  }
-  return message;
-}
-function __await(v) {
-  return this instanceof __await ? (this.v = v, this) : new __await(v);
-}
-function __asyncGenerator(thisArg, _arguments, generator) {
-  if (!Symbol.asyncIterator)
-    throw new TypeError("Symbol.asyncIterator is not defined.");
-  var g = generator.apply(thisArg, _arguments || []), i, q = [];
-  return i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function() {
-    return this;
-  }, i;
-  function verb(n) {
-    if (g[n])
-      i[n] = function(v) {
-        return new Promise(function(a, b) {
-          q.push([n, v, a, b]) > 1 || resume(n, v);
-        });
-      };
-  }
-  function resume(n, v) {
-    try {
-      step(g[n](v));
-    } catch (e) {
-      settle(q[0][3], e);
-    }
-  }
-  function step(r) {
-    r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r);
-  }
-  function fulfill(value) {
-    resume("next", value);
-  }
-  function reject(value) {
-    resume("throw", value);
-  }
-  function settle(f, v) {
-    if (f(v), q.shift(), q.length)
-      resume(q[0][0], q[0][1]);
-  }
-}
-function processStream(response) {
-  const inputStream = response.body.pipeThrough(new TextDecoderStream("utf8", { fatal: true }));
-  const responseStream = getResponseStream(inputStream);
-  const [stream1, stream2] = responseStream.tee();
-  return {
-    stream: generateResponseSequence(stream1),
-    response: getResponsePromise(stream2)
-  };
-}
-async function getResponsePromise(stream) {
-  const allResponses = [];
-  const reader = stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      return addHelpers(aggregateResponses(allResponses));
-    }
-    allResponses.push(value);
-  }
-}
-function generateResponseSequence(stream) {
-  return __asyncGenerator(this, arguments, function* generateResponseSequence_1() {
-    const reader = stream.getReader();
-    while (true) {
-      const { value, done } = yield __await(reader.read());
-      if (done) {
-        break;
-      }
-      yield yield __await(addHelpers(value));
-    }
-  });
-}
-function getResponseStream(inputStream) {
-  const reader = inputStream.getReader();
-  const stream = new ReadableStream({
-    start(controller) {
-      let currentText = "";
-      return pump();
-      function pump() {
-        return reader.read().then(({ value, done }) => {
-          if (done) {
-            if (currentText.trim()) {
-              controller.error(new GoogleGenerativeAIError("Failed to parse stream"));
-              return;
-            }
-            controller.close();
-            return;
-          }
-          currentText += value;
-          let match = currentText.match(responseLineRE);
-          let parsedResponse;
-          while (match) {
-            try {
-              parsedResponse = JSON.parse(match[1]);
-            } catch (e) {
-              controller.error(new GoogleGenerativeAIError(`Error parsing JSON response: "${match[1]}"`));
-              return;
-            }
-            controller.enqueue(parsedResponse);
-            currentText = currentText.substring(match[0].length);
-            match = currentText.match(responseLineRE);
-          }
-          return pump();
-        }).catch((e) => {
-          let err = e;
-          err.stack = e.stack;
-          if (err.name === "AbortError") {
-            err = new GoogleGenerativeAIAbortError("Request aborted when reading from the stream");
-          } else {
-            err = new GoogleGenerativeAIError("Error reading from the stream");
-          }
-          throw err;
-        });
-      }
-    }
-  });
-  return stream;
-}
-function aggregateResponses(responses) {
-  const lastResponse = responses[responses.length - 1];
-  const aggregatedResponse = {
-    promptFeedback: lastResponse === null || lastResponse === undefined ? undefined : lastResponse.promptFeedback
-  };
-  for (const response of responses) {
-    if (response.candidates) {
-      let candidateIndex = 0;
-      for (const candidate of response.candidates) {
-        if (!aggregatedResponse.candidates) {
-          aggregatedResponse.candidates = [];
-        }
-        if (!aggregatedResponse.candidates[candidateIndex]) {
-          aggregatedResponse.candidates[candidateIndex] = {
-            index: candidateIndex
-          };
-        }
-        aggregatedResponse.candidates[candidateIndex].citationMetadata = candidate.citationMetadata;
-        aggregatedResponse.candidates[candidateIndex].groundingMetadata = candidate.groundingMetadata;
-        aggregatedResponse.candidates[candidateIndex].finishReason = candidate.finishReason;
-        aggregatedResponse.candidates[candidateIndex].finishMessage = candidate.finishMessage;
-        aggregatedResponse.candidates[candidateIndex].safetyRatings = candidate.safetyRatings;
-        if (candidate.content && candidate.content.parts) {
-          if (!aggregatedResponse.candidates[candidateIndex].content) {
-            aggregatedResponse.candidates[candidateIndex].content = {
-              role: candidate.content.role || "user",
-              parts: []
-            };
-          }
-          const newPart = {};
-          for (const part of candidate.content.parts) {
-            if (part.text) {
-              newPart.text = part.text;
-            }
-            if (part.functionCall) {
-              newPart.functionCall = part.functionCall;
-            }
-            if (part.executableCode) {
-              newPart.executableCode = part.executableCode;
-            }
-            if (part.codeExecutionResult) {
-              newPart.codeExecutionResult = part.codeExecutionResult;
-            }
-            if (Object.keys(newPart).length === 0) {
-              newPart.text = "";
-            }
-            aggregatedResponse.candidates[candidateIndex].content.parts.push(newPart);
-          }
-        }
-      }
-      candidateIndex++;
-    }
-    if (response.usageMetadata) {
-      aggregatedResponse.usageMetadata = response.usageMetadata;
-    }
-  }
-  return aggregatedResponse;
-}
-async function generateContentStream(apiKey, model, params, requestOptions) {
-  const response = await makeModelRequest(model, Task.STREAM_GENERATE_CONTENT, apiKey, true, JSON.stringify(params), requestOptions);
-  return processStream(response);
-}
-async function generateContent(apiKey, model, params, requestOptions) {
-  const response = await makeModelRequest(model, Task.GENERATE_CONTENT, apiKey, false, JSON.stringify(params), requestOptions);
-  const responseJson = await response.json();
-  const enhancedResponse = addHelpers(responseJson);
-  return {
-    response: enhancedResponse
-  };
-}
-function formatSystemInstruction(input) {
-  if (input == null) {
-    return;
-  } else if (typeof input === "string") {
-    return { role: "system", parts: [{ text: input }] };
-  } else if (input.text) {
-    return { role: "system", parts: [input] };
-  } else if (input.parts) {
-    if (!input.role) {
-      return { role: "system", parts: input.parts };
-    } else {
-      return input;
-    }
-  }
-}
-function formatNewContent(request) {
-  let newParts = [];
-  if (typeof request === "string") {
-    newParts = [{ text: request }];
-  } else {
-    for (const partOrString of request) {
-      if (typeof partOrString === "string") {
-        newParts.push({ text: partOrString });
-      } else {
-        newParts.push(partOrString);
-      }
-    }
-  }
-  return assignRoleToPartsAndValidateSendMessageRequest(newParts);
-}
-function assignRoleToPartsAndValidateSendMessageRequest(parts) {
-  const userContent = { role: "user", parts: [] };
-  const functionContent = { role: "function", parts: [] };
-  let hasUserContent = false;
-  let hasFunctionContent = false;
-  for (const part of parts) {
-    if ("functionResponse" in part) {
-      functionContent.parts.push(part);
-      hasFunctionContent = true;
-    } else {
-      userContent.parts.push(part);
-      hasUserContent = true;
-    }
-  }
-  if (hasUserContent && hasFunctionContent) {
-    throw new GoogleGenerativeAIError("Within a single message, FunctionResponse cannot be mixed with other type of part in the request for sending chat message.");
-  }
-  if (!hasUserContent && !hasFunctionContent) {
-    throw new GoogleGenerativeAIError("No content is provided for sending chat message.");
-  }
-  if (hasUserContent) {
-    return userContent;
-  }
-  return functionContent;
-}
-function formatCountTokensInput(params, modelParams) {
-  var _a;
-  let formattedGenerateContentRequest = {
-    model: modelParams === null || modelParams === undefined ? undefined : modelParams.model,
-    generationConfig: modelParams === null || modelParams === undefined ? undefined : modelParams.generationConfig,
-    safetySettings: modelParams === null || modelParams === undefined ? undefined : modelParams.safetySettings,
-    tools: modelParams === null || modelParams === undefined ? undefined : modelParams.tools,
-    toolConfig: modelParams === null || modelParams === undefined ? undefined : modelParams.toolConfig,
-    systemInstruction: modelParams === null || modelParams === undefined ? undefined : modelParams.systemInstruction,
-    cachedContent: (_a = modelParams === null || modelParams === undefined ? undefined : modelParams.cachedContent) === null || _a === undefined ? undefined : _a.name,
-    contents: []
-  };
-  const containsGenerateContentRequest = params.generateContentRequest != null;
-  if (params.contents) {
-    if (containsGenerateContentRequest) {
-      throw new GoogleGenerativeAIRequestInputError("CountTokensRequest must have one of contents or generateContentRequest, not both.");
-    }
-    formattedGenerateContentRequest.contents = params.contents;
-  } else if (containsGenerateContentRequest) {
-    formattedGenerateContentRequest = Object.assign(Object.assign({}, formattedGenerateContentRequest), params.generateContentRequest);
-  } else {
-    const content = formatNewContent(params);
-    formattedGenerateContentRequest.contents = [content];
-  }
-  return { generateContentRequest: formattedGenerateContentRequest };
-}
-function formatGenerateContentInput(params) {
-  let formattedRequest;
-  if (params.contents) {
-    formattedRequest = params;
-  } else {
-    const content = formatNewContent(params);
-    formattedRequest = { contents: [content] };
-  }
-  if (params.systemInstruction) {
-    formattedRequest.systemInstruction = formatSystemInstruction(params.systemInstruction);
-  }
-  return formattedRequest;
-}
-function formatEmbedContentInput(params) {
-  if (typeof params === "string" || Array.isArray(params)) {
-    const content = formatNewContent(params);
-    return { content };
-  }
-  return params;
-}
-function validateChatHistory(history) {
-  let prevContent = false;
-  for (const currContent of history) {
-    const { role, parts } = currContent;
-    if (!prevContent && role !== "user") {
-      throw new GoogleGenerativeAIError(`First content should be with role 'user', got ${role}`);
-    }
-    if (!POSSIBLE_ROLES.includes(role)) {
-      throw new GoogleGenerativeAIError(`Each item should include role field. Got ${role} but valid roles are: ${JSON.stringify(POSSIBLE_ROLES)}`);
-    }
-    if (!Array.isArray(parts)) {
-      throw new GoogleGenerativeAIError("Content should have 'parts' property with an array of Parts");
-    }
-    if (parts.length === 0) {
-      throw new GoogleGenerativeAIError("Each Content should have at least one part");
-    }
-    const countFields = {
-      text: 0,
-      inlineData: 0,
-      functionCall: 0,
-      functionResponse: 0,
-      fileData: 0,
-      executableCode: 0,
-      codeExecutionResult: 0
-    };
-    for (const part of parts) {
-      for (const key of VALID_PART_FIELDS) {
-        if (key in part) {
-          countFields[key] += 1;
-        }
-      }
-    }
-    const validParts = VALID_PARTS_PER_ROLE[role];
-    for (const key of VALID_PART_FIELDS) {
-      if (!validParts.includes(key) && countFields[key] > 0) {
-        throw new GoogleGenerativeAIError(`Content with role '${role}' can't contain '${key}' part`);
-      }
-    }
-    prevContent = true;
-  }
-}
-function isValidResponse(response) {
-  var _a;
-  if (response.candidates === undefined || response.candidates.length === 0) {
-    return false;
-  }
-  const content = (_a = response.candidates[0]) === null || _a === undefined ? undefined : _a.content;
-  if (content === undefined) {
-    return false;
-  }
-  if (content.parts === undefined || content.parts.length === 0) {
-    return false;
-  }
-  for (const part of content.parts) {
-    if (part === undefined || Object.keys(part).length === 0) {
-      return false;
-    }
-    if (part.text !== undefined && part.text === "") {
-      return false;
-    }
-  }
-  return true;
-}
-
-class ChatSession {
-  constructor(apiKey, model, params, _requestOptions = {}) {
-    this.model = model;
-    this.params = params;
-    this._requestOptions = _requestOptions;
-    this._history = [];
-    this._sendPromise = Promise.resolve();
-    this._apiKey = apiKey;
-    if (params === null || params === undefined ? undefined : params.history) {
-      validateChatHistory(params.history);
-      this._history = params.history;
-    }
-  }
-  async getHistory() {
-    await this._sendPromise;
-    return this._history;
-  }
-  async sendMessage(request, requestOptions = {}) {
-    var _a, _b, _c, _d, _e, _f;
-    await this._sendPromise;
-    const newContent = formatNewContent(request);
-    const generateContentRequest = {
-      safetySettings: (_a = this.params) === null || _a === undefined ? undefined : _a.safetySettings,
-      generationConfig: (_b = this.params) === null || _b === undefined ? undefined : _b.generationConfig,
-      tools: (_c = this.params) === null || _c === undefined ? undefined : _c.tools,
-      toolConfig: (_d = this.params) === null || _d === undefined ? undefined : _d.toolConfig,
-      systemInstruction: (_e = this.params) === null || _e === undefined ? undefined : _e.systemInstruction,
-      cachedContent: (_f = this.params) === null || _f === undefined ? undefined : _f.cachedContent,
-      contents: [...this._history, newContent]
-    };
-    const chatSessionRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    let finalResult;
-    this._sendPromise = this._sendPromise.then(() => generateContent(this._apiKey, this.model, generateContentRequest, chatSessionRequestOptions)).then((result) => {
-      var _a2;
-      if (isValidResponse(result.response)) {
-        this._history.push(newContent);
-        const responseContent = Object.assign({
-          parts: [],
-          role: "model"
-        }, (_a2 = result.response.candidates) === null || _a2 === undefined ? undefined : _a2[0].content);
-        this._history.push(responseContent);
-      } else {
-        const blockErrorMessage = formatBlockErrorMessage(result.response);
-        if (blockErrorMessage) {
-          console.warn(`sendMessage() was unsuccessful. ${blockErrorMessage}. Inspect response object for details.`);
-        }
-      }
-      finalResult = result;
-    }).catch((e) => {
-      this._sendPromise = Promise.resolve();
-      throw e;
-    });
-    await this._sendPromise;
-    return finalResult;
-  }
-  async sendMessageStream(request, requestOptions = {}) {
-    var _a, _b, _c, _d, _e, _f;
-    await this._sendPromise;
-    const newContent = formatNewContent(request);
-    const generateContentRequest = {
-      safetySettings: (_a = this.params) === null || _a === undefined ? undefined : _a.safetySettings,
-      generationConfig: (_b = this.params) === null || _b === undefined ? undefined : _b.generationConfig,
-      tools: (_c = this.params) === null || _c === undefined ? undefined : _c.tools,
-      toolConfig: (_d = this.params) === null || _d === undefined ? undefined : _d.toolConfig,
-      systemInstruction: (_e = this.params) === null || _e === undefined ? undefined : _e.systemInstruction,
-      cachedContent: (_f = this.params) === null || _f === undefined ? undefined : _f.cachedContent,
-      contents: [...this._history, newContent]
-    };
-    const chatSessionRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    const streamPromise = generateContentStream(this._apiKey, this.model, generateContentRequest, chatSessionRequestOptions);
-    this._sendPromise = this._sendPromise.then(() => streamPromise).catch((_ignored) => {
-      throw new Error(SILENT_ERROR);
-    }).then((streamResult) => streamResult.response).then((response) => {
-      if (isValidResponse(response)) {
-        this._history.push(newContent);
-        const responseContent = Object.assign({}, response.candidates[0].content);
-        if (!responseContent.role) {
-          responseContent.role = "model";
-        }
-        this._history.push(responseContent);
-      } else {
-        const blockErrorMessage = formatBlockErrorMessage(response);
-        if (blockErrorMessage) {
-          console.warn(`sendMessageStream() was unsuccessful. ${blockErrorMessage}. Inspect response object for details.`);
-        }
-      }
-    }).catch((e) => {
-      if (e.message !== SILENT_ERROR) {
-        console.error(e);
-      }
-    });
-    return streamPromise;
-  }
-}
-async function countTokens(apiKey, model, params, singleRequestOptions) {
-  const response = await makeModelRequest(model, Task.COUNT_TOKENS, apiKey, false, JSON.stringify(params), singleRequestOptions);
-  return response.json();
-}
-async function embedContent(apiKey, model, params, requestOptions) {
-  const response = await makeModelRequest(model, Task.EMBED_CONTENT, apiKey, false, JSON.stringify(params), requestOptions);
-  return response.json();
-}
-async function batchEmbedContents(apiKey, model, params, requestOptions) {
-  const requestsWithModel = params.requests.map((request) => {
-    return Object.assign(Object.assign({}, request), { model });
-  });
-  const response = await makeModelRequest(model, Task.BATCH_EMBED_CONTENTS, apiKey, false, JSON.stringify({ requests: requestsWithModel }), requestOptions);
-  return response.json();
-}
-
-class GenerativeModel {
-  constructor(apiKey, modelParams, _requestOptions = {}) {
-    this.apiKey = apiKey;
-    this._requestOptions = _requestOptions;
-    if (modelParams.model.includes("/")) {
-      this.model = modelParams.model;
-    } else {
-      this.model = `models/${modelParams.model}`;
-    }
-    this.generationConfig = modelParams.generationConfig || {};
-    this.safetySettings = modelParams.safetySettings || [];
-    this.tools = modelParams.tools;
-    this.toolConfig = modelParams.toolConfig;
-    this.systemInstruction = formatSystemInstruction(modelParams.systemInstruction);
-    this.cachedContent = modelParams.cachedContent;
-  }
-  async generateContent(request, requestOptions = {}) {
-    var _a;
-    const formattedParams = formatGenerateContentInput(request);
-    const generativeModelRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    return generateContent(this.apiKey, this.model, Object.assign({ generationConfig: this.generationConfig, safetySettings: this.safetySettings, tools: this.tools, toolConfig: this.toolConfig, systemInstruction: this.systemInstruction, cachedContent: (_a = this.cachedContent) === null || _a === undefined ? undefined : _a.name }, formattedParams), generativeModelRequestOptions);
-  }
-  async generateContentStream(request, requestOptions = {}) {
-    var _a;
-    const formattedParams = formatGenerateContentInput(request);
-    const generativeModelRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    return generateContentStream(this.apiKey, this.model, Object.assign({ generationConfig: this.generationConfig, safetySettings: this.safetySettings, tools: this.tools, toolConfig: this.toolConfig, systemInstruction: this.systemInstruction, cachedContent: (_a = this.cachedContent) === null || _a === undefined ? undefined : _a.name }, formattedParams), generativeModelRequestOptions);
-  }
-  startChat(startChatParams) {
-    var _a;
-    return new ChatSession(this.apiKey, this.model, Object.assign({ generationConfig: this.generationConfig, safetySettings: this.safetySettings, tools: this.tools, toolConfig: this.toolConfig, systemInstruction: this.systemInstruction, cachedContent: (_a = this.cachedContent) === null || _a === undefined ? undefined : _a.name }, startChatParams), this._requestOptions);
-  }
-  async countTokens(request, requestOptions = {}) {
-    const formattedParams = formatCountTokensInput(request, {
-      model: this.model,
-      generationConfig: this.generationConfig,
-      safetySettings: this.safetySettings,
-      tools: this.tools,
-      toolConfig: this.toolConfig,
-      systemInstruction: this.systemInstruction,
-      cachedContent: this.cachedContent
-    });
-    const generativeModelRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    return countTokens(this.apiKey, this.model, formattedParams, generativeModelRequestOptions);
-  }
-  async embedContent(request, requestOptions = {}) {
-    const formattedParams = formatEmbedContentInput(request);
-    const generativeModelRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    return embedContent(this.apiKey, this.model, formattedParams, generativeModelRequestOptions);
-  }
-  async batchEmbedContents(batchEmbedContentRequest, requestOptions = {}) {
-    const generativeModelRequestOptions = Object.assign(Object.assign({}, this._requestOptions), requestOptions);
-    return batchEmbedContents(this.apiKey, this.model, batchEmbedContentRequest, generativeModelRequestOptions);
-  }
-}
-
-class GoogleGenerativeAI {
-  constructor(apiKey) {
-    this.apiKey = apiKey;
-  }
-  getGenerativeModel(modelParams, requestOptions) {
-    if (!modelParams.model) {
-      throw new GoogleGenerativeAIError(`Must provide a model name. ` + `Example: genai.getGenerativeModel({ model: 'my-model-name' })`);
-    }
-    return new GenerativeModel(this.apiKey, modelParams, requestOptions);
-  }
-  getGenerativeModelFromCachedContent(cachedContent, modelParams, requestOptions) {
-    if (!cachedContent.name) {
-      throw new GoogleGenerativeAIRequestInputError("Cached content must contain a `name` field.");
-    }
-    if (!cachedContent.model) {
-      throw new GoogleGenerativeAIRequestInputError("Cached content must contain a `model` field.");
-    }
-    const disallowedDuplicates = ["model", "systemInstruction"];
-    for (const key of disallowedDuplicates) {
-      if ((modelParams === null || modelParams === undefined ? undefined : modelParams[key]) && cachedContent[key] && (modelParams === null || modelParams === undefined ? undefined : modelParams[key]) !== cachedContent[key]) {
-        if (key === "model") {
-          const modelParamsComp = modelParams.model.startsWith("models/") ? modelParams.model.replace("models/", "") : modelParams.model;
-          const cachedContentComp = cachedContent.model.startsWith("models/") ? cachedContent.model.replace("models/", "") : cachedContent.model;
-          if (modelParamsComp === cachedContentComp) {
-            continue;
-          }
-        }
-        throw new GoogleGenerativeAIRequestInputError(`Different value for "${key}" specified in modelParams` + ` (${modelParams[key]}) and cachedContent (${cachedContent[key]})`);
-      }
-    }
-    const modelParamsFromCache = Object.assign(Object.assign({}, modelParams), { model: cachedContent.model, tools: cachedContent.tools, toolConfig: cachedContent.toolConfig, systemInstruction: cachedContent.systemInstruction, cachedContent });
-    return new GenerativeModel(this.apiKey, modelParamsFromCache, requestOptions);
-  }
-}
-var SchemaType, ExecutableCodeLanguage, Outcome, POSSIBLE_ROLES, HarmCategory, HarmBlockThreshold, HarmProbability, BlockReason, FinishReason, TaskType, FunctionCallingMode, DynamicRetrievalMode, GoogleGenerativeAIError, GoogleGenerativeAIResponseError, GoogleGenerativeAIFetchError, GoogleGenerativeAIRequestInputError, GoogleGenerativeAIAbortError, DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com", DEFAULT_API_VERSION = "v1beta", PACKAGE_VERSION = "0.24.1", PACKAGE_LOG_HEADER = "genai-js", Task, badFinishReasons, responseLineRE, VALID_PART_FIELDS, VALID_PARTS_PER_ROLE, SILENT_ERROR = "SILENT_ERROR";
-var init_dist = __esm(() => {
-  (function(SchemaType2) {
-    SchemaType2["STRING"] = "string";
-    SchemaType2["NUMBER"] = "number";
-    SchemaType2["INTEGER"] = "integer";
-    SchemaType2["BOOLEAN"] = "boolean";
-    SchemaType2["ARRAY"] = "array";
-    SchemaType2["OBJECT"] = "object";
-  })(SchemaType || (SchemaType = {}));
-  (function(ExecutableCodeLanguage2) {
-    ExecutableCodeLanguage2["LANGUAGE_UNSPECIFIED"] = "language_unspecified";
-    ExecutableCodeLanguage2["PYTHON"] = "python";
-  })(ExecutableCodeLanguage || (ExecutableCodeLanguage = {}));
-  (function(Outcome2) {
-    Outcome2["OUTCOME_UNSPECIFIED"] = "outcome_unspecified";
-    Outcome2["OUTCOME_OK"] = "outcome_ok";
-    Outcome2["OUTCOME_FAILED"] = "outcome_failed";
-    Outcome2["OUTCOME_DEADLINE_EXCEEDED"] = "outcome_deadline_exceeded";
-  })(Outcome || (Outcome = {}));
-  POSSIBLE_ROLES = ["user", "model", "function", "system"];
-  (function(HarmCategory2) {
-    HarmCategory2["HARM_CATEGORY_UNSPECIFIED"] = "HARM_CATEGORY_UNSPECIFIED";
-    HarmCategory2["HARM_CATEGORY_HATE_SPEECH"] = "HARM_CATEGORY_HATE_SPEECH";
-    HarmCategory2["HARM_CATEGORY_SEXUALLY_EXPLICIT"] = "HARM_CATEGORY_SEXUALLY_EXPLICIT";
-    HarmCategory2["HARM_CATEGORY_HARASSMENT"] = "HARM_CATEGORY_HARASSMENT";
-    HarmCategory2["HARM_CATEGORY_DANGEROUS_CONTENT"] = "HARM_CATEGORY_DANGEROUS_CONTENT";
-    HarmCategory2["HARM_CATEGORY_CIVIC_INTEGRITY"] = "HARM_CATEGORY_CIVIC_INTEGRITY";
-  })(HarmCategory || (HarmCategory = {}));
-  (function(HarmBlockThreshold2) {
-    HarmBlockThreshold2["HARM_BLOCK_THRESHOLD_UNSPECIFIED"] = "HARM_BLOCK_THRESHOLD_UNSPECIFIED";
-    HarmBlockThreshold2["BLOCK_LOW_AND_ABOVE"] = "BLOCK_LOW_AND_ABOVE";
-    HarmBlockThreshold2["BLOCK_MEDIUM_AND_ABOVE"] = "BLOCK_MEDIUM_AND_ABOVE";
-    HarmBlockThreshold2["BLOCK_ONLY_HIGH"] = "BLOCK_ONLY_HIGH";
-    HarmBlockThreshold2["BLOCK_NONE"] = "BLOCK_NONE";
-  })(HarmBlockThreshold || (HarmBlockThreshold = {}));
-  (function(HarmProbability2) {
-    HarmProbability2["HARM_PROBABILITY_UNSPECIFIED"] = "HARM_PROBABILITY_UNSPECIFIED";
-    HarmProbability2["NEGLIGIBLE"] = "NEGLIGIBLE";
-    HarmProbability2["LOW"] = "LOW";
-    HarmProbability2["MEDIUM"] = "MEDIUM";
-    HarmProbability2["HIGH"] = "HIGH";
-  })(HarmProbability || (HarmProbability = {}));
-  (function(BlockReason2) {
-    BlockReason2["BLOCKED_REASON_UNSPECIFIED"] = "BLOCKED_REASON_UNSPECIFIED";
-    BlockReason2["SAFETY"] = "SAFETY";
-    BlockReason2["OTHER"] = "OTHER";
-  })(BlockReason || (BlockReason = {}));
-  (function(FinishReason2) {
-    FinishReason2["FINISH_REASON_UNSPECIFIED"] = "FINISH_REASON_UNSPECIFIED";
-    FinishReason2["STOP"] = "STOP";
-    FinishReason2["MAX_TOKENS"] = "MAX_TOKENS";
-    FinishReason2["SAFETY"] = "SAFETY";
-    FinishReason2["RECITATION"] = "RECITATION";
-    FinishReason2["LANGUAGE"] = "LANGUAGE";
-    FinishReason2["BLOCKLIST"] = "BLOCKLIST";
-    FinishReason2["PROHIBITED_CONTENT"] = "PROHIBITED_CONTENT";
-    FinishReason2["SPII"] = "SPII";
-    FinishReason2["MALFORMED_FUNCTION_CALL"] = "MALFORMED_FUNCTION_CALL";
-    FinishReason2["OTHER"] = "OTHER";
-  })(FinishReason || (FinishReason = {}));
-  (function(TaskType2) {
-    TaskType2["TASK_TYPE_UNSPECIFIED"] = "TASK_TYPE_UNSPECIFIED";
-    TaskType2["RETRIEVAL_QUERY"] = "RETRIEVAL_QUERY";
-    TaskType2["RETRIEVAL_DOCUMENT"] = "RETRIEVAL_DOCUMENT";
-    TaskType2["SEMANTIC_SIMILARITY"] = "SEMANTIC_SIMILARITY";
-    TaskType2["CLASSIFICATION"] = "CLASSIFICATION";
-    TaskType2["CLUSTERING"] = "CLUSTERING";
-  })(TaskType || (TaskType = {}));
-  (function(FunctionCallingMode2) {
-    FunctionCallingMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
-    FunctionCallingMode2["AUTO"] = "AUTO";
-    FunctionCallingMode2["ANY"] = "ANY";
-    FunctionCallingMode2["NONE"] = "NONE";
-  })(FunctionCallingMode || (FunctionCallingMode = {}));
-  (function(DynamicRetrievalMode2) {
-    DynamicRetrievalMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
-    DynamicRetrievalMode2["MODE_DYNAMIC"] = "MODE_DYNAMIC";
-  })(DynamicRetrievalMode || (DynamicRetrievalMode = {}));
-  GoogleGenerativeAIError = class GoogleGenerativeAIError extends Error {
-    constructor(message) {
-      super(`[GoogleGenerativeAI Error]: ${message}`);
-    }
-  };
-  GoogleGenerativeAIResponseError = class GoogleGenerativeAIResponseError extends GoogleGenerativeAIError {
-    constructor(message, response) {
-      super(message);
-      this.response = response;
-    }
-  };
-  GoogleGenerativeAIFetchError = class GoogleGenerativeAIFetchError extends GoogleGenerativeAIError {
-    constructor(message, status, statusText, errorDetails) {
-      super(message);
-      this.status = status;
-      this.statusText = statusText;
-      this.errorDetails = errorDetails;
-    }
-  };
-  GoogleGenerativeAIRequestInputError = class GoogleGenerativeAIRequestInputError extends GoogleGenerativeAIError {
-  };
-  GoogleGenerativeAIAbortError = class GoogleGenerativeAIAbortError extends GoogleGenerativeAIError {
-  };
-  (function(Task2) {
-    Task2["GENERATE_CONTENT"] = "generateContent";
-    Task2["STREAM_GENERATE_CONTENT"] = "streamGenerateContent";
-    Task2["COUNT_TOKENS"] = "countTokens";
-    Task2["EMBED_CONTENT"] = "embedContent";
-    Task2["BATCH_EMBED_CONTENTS"] = "batchEmbedContents";
-  })(Task || (Task = {}));
-  badFinishReasons = [
-    FinishReason.RECITATION,
-    FinishReason.SAFETY,
-    FinishReason.LANGUAGE
-  ];
-  responseLineRE = /^data\: (.*)(?:\n\n|\r\r|\r\n\r\n)/;
-  VALID_PART_FIELDS = [
-    "text",
-    "inlineData",
-    "functionCall",
-    "functionResponse",
-    "executableCode",
-    "codeExecutionResult"
-  ];
-  VALID_PARTS_PER_ROLE = {
-    user: ["text", "inlineData"],
-    function: ["functionResponse"],
-    model: ["text", "functionCall", "executableCode", "codeExecutionResult"],
-    system: ["text"]
-  };
-});
 
 // src/core/logger.ts
 import { appendFileSync, readdirSync, unlinkSync } from "fs";
@@ -7583,17 +6643,6 @@ function registerExitHooks() {
     process.exit(143);
   });
 }
-function logInfo(message, data) {
-  log.info(message, data);
-}
-function logError(message, error2, data) {
-  const errorMeta = error2 instanceof Error ? { name: error2.name, message: error2.message, stack: error2.stack } : error2 !== undefined ? { error: error2 } : undefined;
-  const combined = errorMeta ? { ...data ?? {}, ...errorMeta } : data;
-  log.error(message, combined);
-}
-function logDebug(message, data) {
-  log.debug(message, data);
-}
 var LEVELS, FLUSH_LINE_THRESHOLD = 64, buffer, FLUSH_INTERVAL_MS = 1000, flushTimer = null, RETENTION_DAYS = 14, retentionDone = false, log, exitHooksRegistered = false;
 var init_logger = __esm(() => {
   init_paths();
@@ -7611,6 +6660,41 @@ var init_logger = __esm(() => {
     debug: (msg, meta) => emit("debug", msg, meta)
   };
   registerExitHooks();
+});
+
+// src/core/llm/config.ts
+import { existsSync, readFileSync as readFileSync2 } from "fs";
+import { join as join2 } from "path";
+function loadConfig() {
+  const configDir = join2(process.env.HOME ?? "", ".config", "memmem");
+  const configPath = join2(configDir, "config.json");
+  if (!configFileDeps.existsSync(configPath)) {
+    return null;
+  }
+  try {
+    const configContent = configFileDeps.readFileSync(configPath, "utf-8");
+    const config2 = JSON.parse(configContent);
+    const hasProviders = Array.isArray(config2.providers) && config2.providers.length > 0;
+    if (!config2.provider || !config2.apiKey && !hasProviders) {
+      console.warn("Invalid config: missing provider or apiKey field");
+      return null;
+    }
+    if (config2.provider !== "gemini" && config2.provider !== "zai") {
+      console.warn(`Invalid config: unknown provider "${config2.provider}"`);
+      return null;
+    }
+    return config2;
+  } catch (error2) {
+    console.warn(`Failed to load config from ${configPath}: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    return null;
+  }
+}
+var configFileDeps;
+var init_config = __esm(() => {
+  configFileDeps = {
+    existsSync,
+    readFileSync: readFileSync2
+  };
 });
 
 // src/core/ratelimiter.ts
@@ -7692,275 +6776,13 @@ function getEmbeddingRateLimiter() {
   }
   return embeddingLimiter;
 }
-function getLLMRateLimiter() {
-  if (!llmLimiter) {
-    const config2 = loadConfigFn();
-    const ratelimitConfig = config2?.ratelimit?.llm;
-    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
-    llmLimiter = new RateLimiter({
-      requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? 1
-    });
-  }
-  return llmLimiter;
-}
-var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, DEFAULT_LLM_RPS = 0.5, embeddingLimiter = null, llmLimiter = null;
+var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, embeddingLimiter = null;
 var init_ratelimiter = __esm(() => {
   init_config();
   loadConfigFn = loadConfig;
 });
 
-// src/core/llm/gemini-provider.ts
-var exports_gemini_provider = {};
-__export(exports_gemini_provider, {
-  GeminiProvider: () => GeminiProvider
-});
-
-class GeminiProvider {
-  client;
-  model;
-  constructor(apiKey, model = DEFAULT_MODEL) {
-    if (!apiKey) {
-      throw new Error("GeminiProvider requires an API key");
-    }
-    this.client = new GoogleGenerativeAI(apiKey);
-    this.model = model;
-  }
-  async complete(prompt, options) {
-    await getLLMRateLimiter().acquire();
-    const startTime = Date.now();
-    logInfo("[GeminiProvider] Starting completion", {
-      model: this.model,
-      promptLength: prompt.length,
-      maxTokens: options?.maxTokens
-    });
-    try {
-      const generationConfig = {};
-      if (options?.maxTokens) {
-        generationConfig.maxOutputTokens = options.maxTokens;
-      }
-      const modelParams = { model: this.model };
-      if (options?.systemPrompt) {
-        modelParams.systemInstruction = options.systemPrompt;
-      }
-      if (Object.keys(generationConfig).length > 0) {
-        modelParams.generationConfig = generationConfig;
-      }
-      logDebug("[GeminiProvider] Sending request", {
-        model: this.model,
-        hasSystemPrompt: !!options?.systemPrompt
-      });
-      const generativeModel = this.client.getGenerativeModel(modelParams, {
-        timeout: REQUEST_TIMEOUT_MS
-      });
-      const result = await generativeModel.generateContent(prompt);
-      const duration3 = Date.now() - startTime;
-      const parsed = this.parseResult(result);
-      logInfo("[GeminiProvider] Completion successful", {
-        duration: duration3,
-        inputTokens: parsed.usage.input_tokens,
-        outputTokens: parsed.usage.output_tokens,
-        responseLength: parsed.text.length
-      });
-      return parsed;
-    } catch (error2) {
-      const duration3 = Date.now() - startTime;
-      logError("[GeminiProvider] Completion failed", error2, {
-        model: this.model,
-        duration: duration3
-      });
-      throw new Error(`Gemini API call failed: ${error2 instanceof Error ? error2.message : String(error2)}`);
-    }
-  }
-  parseResult(result) {
-    const response = result.response;
-    const text = this.extractAnswerText(response);
-    const usage = this.extractUsage(response);
-    return { text, usage };
-  }
-  extractAnswerText(response) {
-    const parts = response.candidates?.[0]?.content?.parts;
-    if (parts && parts.length > 0) {
-      const answer = parts.filter((part) => part.thought !== true).map((part) => part.text ?? "").join("");
-      return answer;
-    }
-    return response.text() ?? "";
-  }
-  extractUsage(response) {
-    const usageMetadata = response.usageMetadata;
-    return {
-      input_tokens: usageMetadata?.promptTokenCount ?? 0,
-      output_tokens: usageMetadata?.candidatesTokenCount ?? 0,
-      cache_read_input_tokens: undefined,
-      cache_creation_input_tokens: undefined
-    };
-  }
-}
-var DEFAULT_MODEL = "gemini-2.0-flash", REQUEST_TIMEOUT_MS = 60000;
-var init_gemini_provider = __esm(() => {
-  init_dist();
-  init_logger();
-  init_ratelimiter();
-});
-
-// src/core/llm/zai-provider.ts
-var exports_zai_provider = {};
-__export(exports_zai_provider, {
-  ZAIProvider: () => ZAIProvider
-});
-
-class ZAIProvider {
-  apiKey;
-  model;
-  baseUrl;
-  constructor(apiKey, model = DEFAULT_MODEL2, baseUrl = DEFAULT_BASE_URL2) {
-    if (!apiKey) {
-      throw new Error("ZAIProvider requires an API key");
-    }
-    this.apiKey = apiKey;
-    this.model = model;
-    this.baseUrl = baseUrl;
-  }
-  async complete(prompt, options) {
-    await getLLMRateLimiter().acquire();
-    const startTime = Date.now();
-    logInfo("[ZAIProvider] Starting completion", {
-      model: this.model,
-      promptLength: prompt.length,
-      maxTokens: options?.maxTokens
-    });
-    try {
-      const messages = [];
-      if (options?.systemPrompt) {
-        messages.push({ role: "system", content: options.systemPrompt });
-      }
-      messages.push({ role: "user", content: prompt });
-      const requestBody = {
-        model: this.model,
-        messages,
-        temperature: 1,
-        max_tokens: options?.maxTokens,
-        stream: false
-      };
-      logDebug("[ZAIProvider] Sending request", {
-        model: this.model,
-        messagesCount: messages.length,
-        hasSystemPrompt: !!options?.systemPrompt
-      });
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          "Accept-Language": "en-US,en"
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2)
-      });
-      if (!response.ok) {
-        let errorData = {};
-        try {
-          errorData = await response.json();
-        } catch {}
-        const errorMessage = errorData.error?.message || response.statusText;
-        throw new Error(`Z.AI API request failed (${response.status}): ${errorMessage}`);
-      }
-      const data = await response.json();
-      const duration3 = Date.now() - startTime;
-      const text = data.choices?.[0]?.message?.content ?? "";
-      const usage = this.extractUsage(data);
-      logInfo("[ZAIProvider] Completion successful", {
-        duration: duration3,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        responseLength: text.length
-      });
-      return { text, usage };
-    } catch (error2) {
-      const duration3 = Date.now() - startTime;
-      logError("[ZAIProvider] Completion failed", error2, {
-        model: this.model,
-        duration: duration3
-      });
-      throw error2;
-    }
-  }
-  extractUsage(response) {
-    const usage = response.usage;
-    return {
-      input_tokens: usage?.prompt_tokens ?? 0,
-      output_tokens: usage?.completion_tokens ?? 0,
-      cache_read_input_tokens: undefined,
-      cache_creation_input_tokens: undefined
-    };
-  }
-}
-var DEFAULT_MODEL2 = "glm-4.5-air", REQUEST_TIMEOUT_MS2 = 120000, DEFAULT_BASE_URL2 = "https://api.z.ai/api/coding/paas/v4";
-var init_zai_provider = __esm(() => {
-  init_logger();
-  init_ratelimiter();
-});
-
-// src/core/llm/config.ts
-import { existsSync, readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
-function loadConfig() {
-  const configDir = join2(process.env.HOME ?? "", ".config", "memmem");
-  const configPath = join2(configDir, "config.json");
-  if (!configFileDeps.existsSync(configPath)) {
-    return null;
-  }
-  try {
-    const configContent = configFileDeps.readFileSync(configPath, "utf-8");
-    const config2 = JSON.parse(configContent);
-    const hasProviders = Array.isArray(config2.providers) && config2.providers.length > 0;
-    if (!config2.provider || !config2.apiKey && !hasProviders) {
-      console.warn("Invalid config: missing provider or apiKey field");
-      return null;
-    }
-    if (config2.provider !== "gemini" && config2.provider !== "zai") {
-      console.warn(`Invalid config: unknown provider "${config2.provider}"`);
-      return null;
-    }
-    return config2;
-  } catch (error2) {
-    console.warn(`Failed to load config from ${configPath}: ${error2 instanceof Error ? error2.message : String(error2)}`);
-    return null;
-  }
-}
-async function createProvider(config2) {
-  const { provider, apiKey, model, providers } = config2;
-  if (providers) {
-    const { RoundRobinProvider: RoundRobinProvider2 } = await Promise.resolve().then(() => exports_round_robin_provider);
-    const built = await Promise.all(providers.map((entry) => createProvider({ provider, apiKey: entry.apiKey, model: entry.model })));
-    return new RoundRobinProvider2(built);
-  }
-  if (!apiKey) {
-    throw new Error("Provider requires an apiKey");
-  }
-  const defaultModel = model ?? DEFAULT_MODELS[provider];
-  if (provider === "gemini") {
-    const { GeminiProvider: GeminiProvider2 } = await Promise.resolve().then(() => (init_gemini_provider(), exports_gemini_provider));
-    return new GeminiProvider2(apiKey, defaultModel);
-  } else if (provider === "zai") {
-    const { ZAIProvider: ZAIProvider2 } = await Promise.resolve().then(() => (init_zai_provider(), exports_zai_provider));
-    return new ZAIProvider2(apiKey, defaultModel);
-  }
-  throw new Error(`Unknown provider: ${provider}`);
-}
-var DEFAULT_MODELS, configFileDeps;
-var init_config = __esm(() => {
-  DEFAULT_MODELS = {
-    gemini: "gemini-2.0-flash",
-    zai: "glm-4.5-air"
-  };
-  configFileDeps = {
-    existsSync,
-    readFileSync: readFileSync2
-  };
-});
-
-// ../../node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var exports_external = {};
 __export(exports_external, {
   void: () => voidType,
@@ -8072,7 +6894,7 @@ __export(exports_external, {
   BRAND: () => BRAND
 });
 
-// ../../node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {};
@@ -8203,7 +7025,7 @@ var getParsedType = (data) => {
   }
 };
 
-// ../../node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -8322,7 +7144,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../../node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -8425,7 +7247,7 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../../node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -8433,7 +7255,7 @@ function setErrorMap(map) {
 function getErrorMap() {
   return overrideErrorMap;
 }
-// ../../node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -8539,14 +7361,14 @@ var isAborted = (x) => x.status === "aborted";
 var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
-// ../../node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../../node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 class ParseInputLazyPath {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -11933,7 +10755,7 @@ var coerce = {
   date: (arg) => ZodDate.create({ ...arg, coerce: true })
 };
 var NEVER = INVALID;
-// ../../node_modules/zod/v4/core/core.js
+// node_modules/zod/v4/core/core.js
 var NEVER2 = Object.freeze({
   status: "aborted"
 });
@@ -11993,7 +10815,7 @@ function config(newConfig) {
     Object.assign(globalConfig, newConfig);
   return globalConfig;
 }
-// ../../node_modules/zod/v4/core/util.js
+// node_modules/zod/v4/core/util.js
 var exports_util = {};
 __export(exports_util, {
   unwrapMessage: () => unwrapMessage,
@@ -12507,7 +11329,7 @@ class Class {
   constructor(..._args) {}
 }
 
-// ../../node_modules/zod/v4/core/errors.js
+// node_modules/zod/v4/core/errors.js
 var initializer = (inst, def) => {
   inst.name = "$ZodError";
   Object.defineProperty(inst, "_zod", {
@@ -12581,7 +11403,7 @@ function formatError(error, _mapper) {
   return fieldErrors;
 }
 
-// ../../node_modules/zod/v4/core/parse.js
+// node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
@@ -12630,7 +11452,7 @@ var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
   } : { success: true, data: result.value };
 };
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
-// ../../node_modules/zod/v4/core/regexes.js
+// node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][^\s-]{8,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
@@ -12688,7 +11510,7 @@ var _null = /null/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// ../../node_modules/zod/v4/core/checks.js
+// node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a;
   inst._zod ?? (inst._zod = {});
@@ -13072,7 +11894,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// ../../node_modules/zod/v4/core/doc.js
+// node_modules/zod/v4/core/doc.js
 class Doc {
   constructor(args = []) {
     this.content = [];
@@ -13110,14 +11932,14 @@ class Doc {
   }
 }
 
-// ../../node_modules/zod/v4/core/versions.js
+// node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 0,
   patch: 0
 };
 
-// ../../node_modules/zod/v4/core/schemas.js
+// node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a;
   inst ?? (inst = {});
@@ -14348,7 +13170,7 @@ function handleRefineResult(result, payload, input, inst) {
     payload.issues.push(issue(_iss));
   }
 }
-// ../../node_modules/zod/v4/locales/en.js
+// node_modules/zod/v4/locales/en.js
 var parsedType = (data) => {
   const t = typeof data;
   switch (t) {
@@ -14465,7 +13287,7 @@ function en_default2() {
     localeError: error()
   };
 }
-// ../../node_modules/zod/v4/core/registries.js
+// node_modules/zod/v4/core/registries.js
 var $output = Symbol("ZodOutput");
 var $input = Symbol("ZodInput");
 
@@ -14515,7 +13337,7 @@ function registry() {
   return new $ZodRegistry;
 }
 var globalRegistry = /* @__PURE__ */ registry();
-// ../../node_modules/zod/v4/core/api.js
+// node_modules/zod/v4/core/api.js
 function _string(Class2, params) {
   return new Class2({
     type: "string",
@@ -14950,7 +13772,7 @@ function _refine(Class2, fn, _params) {
   });
   return schema;
 }
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -15012,7 +13834,7 @@ function getLiteralValue(schema) {
     return directValue;
   return;
 }
-// ../../node_modules/zod/v4/classic/iso.js
+// node_modules/zod/v4/classic/iso.js
 var exports_iso = {};
 __export(exports_iso, {
   time: () => time2,
@@ -15053,7 +13875,7 @@ function duration2(params) {
   return _isoDuration(ZodISODuration, params);
 }
 
-// ../../node_modules/zod/v4/classic/errors.js
+// node_modules/zod/v4/classic/errors.js
 var initializer2 = (inst, issues) => {
   $ZodError.init(inst, issues);
   inst.name = "ZodError";
@@ -15082,13 +13904,13 @@ var ZodRealError = $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
-// ../../node_modules/zod/v4/classic/parse.js
+// node_modules/zod/v4/classic/parse.js
 var parse3 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse3 = /* @__PURE__ */ _safeParse(ZodRealError);
 var safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
 
-// ../../node_modules/zod/v4/classic/schemas.js
+// node_modules/zod/v4/classic/schemas.js
 var ZodType2 = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   $ZodType.init(inst, def);
   inst.def = def;
@@ -15693,10 +14515,10 @@ function superRefine(fn) {
 function preprocess(fn, schema) {
   return pipe(transform(fn), schema);
 }
-// ../../node_modules/zod/v4/classic/external.js
+// node_modules/zod/v4/classic/external.js
 config(en_default2());
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -16528,16 +15350,16 @@ class UrlElicitationRequiredError extends McpError {
   }
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-// ../../node_modules/zod-to-json-schema/dist/esm/Options.js
+// node_modules/zod-to-json-schema/dist/esm/Options.js
 var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
-// ../../node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -16558,7 +15380,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 60000;
 
 class Protocol {
@@ -17381,7 +16203,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -17421,7 +16243,7 @@ class AjvJsonSchemaValidator {
   }
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 class ExperimentalServerTasks {
   constructor(_server) {
     this._server = _server;
@@ -17443,7 +16265,7 @@ class ExperimentalServerTasks {
   }
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -17478,7 +16300,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 class Server extends Protocol {
   constructor(_serverInfo, options) {
     super(options);
@@ -17811,10 +16633,10 @@ class Server extends Protocol {
   }
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 class ReadBuffer {
   append(chunk) {
     this._buffer = this._buffer ? Buffer.concat([this._buffer, chunk]) : chunk;
@@ -17844,7 +16666,7 @@ function serializeMessage(message) {
 `;
 }
 
-// ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 class StdioServerTransport {
   constructor(_stdin = process2.stdin, _stdout = process2.stdout) {
     this._stdin = _stdin;
@@ -18153,21 +16975,6 @@ function migrateExtractionState(db) {
     db.exec("ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
   }
 }
-
-// src/core/query-normalizer.ts
-init_config();
-init_logger();
-async function resolveQueryNormalizer(deps = { loadConfig, createProvider }) {
-  const config2 = deps.loadConfig();
-  if (!config2)
-    return;
-  try {
-    return await deps.createProvider(config2);
-  } catch (err) {
-    log.warn("query normalizer unavailable", { error: err.message });
-    return;
-  }
-}
 // src/mcp/schemas.ts
 var SearchInputSchema = exports_external.object({
   query: exports_external.union([
@@ -18249,17 +17056,6 @@ async function run(kind, text) {
 
 // src/core/search.ts
 init_logger();
-
-// src/core/score.ts
-var COS_FLOOR = 0.6;
-var COS_RANGE = 1 - COS_FLOOR;
-function distanceToScore(distance) {
-  const cos = 1 - distance * distance / 2;
-  const scaled = (cos - COS_FLOOR) / COS_RANGE;
-  return Math.max(0, Math.min(1, scaled));
-}
-
-// src/core/search.ts
 function isValidCalendarDate(dateStr) {
   const [year, month, day] = dateStr.split("-").map(Number);
   const date4 = new Date(Date.UTC(year, month - 1, day));
@@ -18330,9 +17126,6 @@ async function normalizeQuery(query, provider) {
   if (!provider) {
     return query;
   }
-  if (!/[^\x00-\x7F]/.test(query)) {
-    return query;
-  }
   try {
     const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.
 
@@ -18356,7 +17149,7 @@ function mapRow(row) {
     project: row.project
   };
   if (row.distance !== undefined) {
-    result.score = distanceToScore(row.distance);
+    result.score = 1 / (1 + row.distance);
   }
   return result;
 }
@@ -18842,19 +17635,14 @@ function formatAssistantMessage(messages, index, msg) {
 }
 
 // src/mcp/handlers.ts
-async function handleSearch(params, db, queryNormalizerProvider) {
+async function handleSearch(params, db) {
   const options = {
     db,
     limit: params.limit,
     after: params.after,
     before: params.before
   };
-  let results;
-  if (params.query === undefined) {
-    results = listRecent(options);
-  } else {
-    results = Array.isArray(params.query) ? await searchMulti(params.query, { ...options, queryNormalizerProvider }) : await search(params.query, { ...options, queryNormalizerProvider });
-  }
+  const results = params.query === undefined ? listRecent(options) : Array.isArray(params.query) ? await searchMulti(params.query, options) : await search(params.query, options);
   return results.map((result) => {
     const card = {
       id: String(result.id),
@@ -18885,7 +17673,7 @@ function handleFetch(params, db) {
 // src/mcp/tools.ts
 var searchTool = {
   name: "search",
-  description: 'Search indexed event/fact memory records. Write queries in English — memory records are stored in English, so English queries retrieve best (translate a non-English query before searching). Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Omit query entirely to list the most recent records in reverse chronological order — combine with after/before for time-based recall like "what did I do today" (e.g. after the current date). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.',
+  description: 'Search indexed event/fact memory records. Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Omit query entirely to list the most recent records in reverse chronological order — combine with after/before for time-based recall like "what did I do today" (e.g. after the current date). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.',
   inputSchema: {
     type: "object",
     properties: {
@@ -18894,7 +17682,7 @@ var searchTool = {
           { type: "string", minLength: 2 },
           { type: "array", items: { type: "string", minLength: 2 }, minItems: 2, maxItems: 5 }
         ],
-        description: "Search query, written in English (records are stored in English). A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity). Optional — omit to list recent records by time (use with after/before)."
+        description: "Search query. A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity). Optional — omit to list recent records by time (use with after/before)."
       },
       limit: {
         type: "integer",
@@ -18977,8 +17765,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const params = SearchInputSchema.parse(args);
       const db = openDatabase();
       try {
-        const queryNormalizerProvider = await resolveQueryNormalizer();
-        const results = await handleSearch(params, db, queryNormalizerProvider);
+        const results = await handleSearch(params, db);
         return {
           content: [
             {

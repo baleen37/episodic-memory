@@ -23,7 +23,7 @@ export interface ExtractMemoryOptions {
   maxTokens?: number;
 }
 
-export const MEMORY_EXTRACT_SYSTEM_PROMPT = `You extract durable memory records from transcript spans.
+const MEMORY_EXTRACT_SYSTEM_PROMPT = `You extract durable memory records from transcript spans.
 
 Rules:
 - Return JSON array only, with no markdown or explanations.
@@ -37,7 +37,6 @@ Rules:
 - Do not summarize the whole conversation.
 - Do not include speculative assistant reasoning.
 - Keep each text under 240 characters.
-- Always write each record's text in English, even when the transcript is in another language. Translate non-English content into clear English; preserve code identifiers, file paths, and proper nouns verbatim.
 
 Response format:
 [

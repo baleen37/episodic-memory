@@ -1,12 +1,10 @@
 import { openDatabase } from '../core/db.js';
 import { search } from '../core/search.js';
-import { resolveQueryNormalizer } from '../core/query-normalizer.js';
 
 export async function runSearchCli(args: { query: string; limit?: number; after?: string; before?: string; sourceKind?: string }): Promise<void> {
   const db = openDatabase();
   try {
-    const queryNormalizerProvider = await resolveQueryNormalizer();
-    const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind, queryNormalizerProvider });
+    const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind });
     for (const result of results) {
       const date = result.observedAt ? new Date(result.observedAt).toISOString().split('T')[0] : 'unknown-date';
       console.log(`## [${result.kind}, ${result.sourceKind}, ${date}] ${result.project ?? 'unknown-project'}`);
