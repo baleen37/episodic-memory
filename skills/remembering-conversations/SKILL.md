@@ -25,10 +25,10 @@ Task tool:
 
 The agent will:
 
-1. Search indexed event/fact memory records with `search`. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
-2. Read archived transcript lines with `read` only when memory records are not enough.
+1. Search indexed event/fact memory records with `search`. Each result is a compact card with `id`, `kind`, `text`, and `score`. Use `fetch` with a result `id` when raw transcript evidence is needed.
+2. Fetch the source transcript for a record with `fetch` only when the memory card text is not enough.
 3. Synthesize concise findings.
-4. Return actionable insights with `archive_path:line_start-line_end` sources.
+4. Return actionable insights, citing the record `id` (and the source transcript via `fetch`) for each claim.
 
 ## When to Use
 
@@ -91,15 +91,22 @@ Omit `query` for time-based recall ("오늘 한 일") — returns newest records
 }
 ```
 
-### Read
-
-Use `archive_path`, `line_start`, and `line_end` from search results:
+Pass an array of 2-5 strings for multi-query AND search — returns only records matching every query, ranked by mean similarity:
 
 ```typescript
 {
-  path: "/path/from/search/result.jsonl",
-  startLine: 100,
-  endLine: 140
+  query: ["authentication", "rate limiting"],
+  limit: 10
+}
+```
+
+### Fetch
+
+`search` cards contain only `id`, `kind`, `text`, and `score` — no archive path or line numbers. To read the full source transcript for a record, pass its `id` to `fetch`:
+
+```typescript
+{
+  id: "16447"
 }
 ```
 
@@ -109,14 +116,14 @@ Use `archive_path`, `line_start`, and `line_end` from search results:
 2. Put exact IDs, error codes, and file names directly in the query.
 3. Use `after` / `before` for date ranges.
 4. Use `source_kind` to limit results to a transcript source.
-5. Read only the most promising transcript ranges.
+5. `fetch` only the most promising record `id`s for full transcript context.
 6. Synthesize decisions, gotchas, and reusable patterns.
 
 ## Important Notes
 
-- Always cite conversation paths and line ranges.
+- Always cite the record `id` you relied on; use `fetch` to surface the source transcript when evidence matters.
 - Past decisions may not apply directly; explain context before recommending reuse.
-- Search results are usually enough; use `read` for missing rationale or surrounding context.
+- Search cards are usually enough; use `fetch` for missing rationale or surrounding context.
 
 ## Further Reading
 
