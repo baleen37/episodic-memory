@@ -16,6 +16,12 @@ COPIED_CODEX_PLUGIN_FILE="$COPIED_PLUGIN_DIR/.codex-plugin/plugin.json"
 COPIED_MCP_FILE="$COPIED_PLUGIN_DIR/.mcp.json"
 ROOT_MCP_LAUNCHER_FILE="$REPO_ROOT/src/cli/mcp.ts"
 COPIED_MCP_LAUNCHER_FILE="$COPIED_PLUGIN_DIR/src/cli/mcp.ts"
+ROOT_AGENTS_DIR="$REPO_ROOT/agents"
+COPIED_AGENTS_DIR="$COPIED_PLUGIN_DIR/agents"
+ROOT_HOOKS_DIR="$REPO_ROOT/hooks"
+COPIED_HOOKS_DIR="$COPIED_PLUGIN_DIR/hooks"
+ROOT_SKILLS_DIR="$REPO_ROOT/skills"
+COPIED_SKILLS_DIR="$COPIED_PLUGIN_DIR/skills"
 
 fail() {
   echo "FAIL: $1"
@@ -48,6 +54,15 @@ assert_same_file_contents() {
   [[ -f "$expected_file" ]] || fail "file not found: $expected_file"
   [[ -f "$actual_file" ]] || fail "file not found: $actual_file"
   cmp -s "$expected_file" "$actual_file" || fail "$message"
+}
+
+assert_same_tree_contents() {
+  local expected_dir="$1"
+  local actual_dir="$2"
+  local message="$3"
+  [[ -d "$expected_dir" ]] || fail "directory not found: $expected_dir"
+  [[ -d "$actual_dir" ]] || fail "directory not found: $actual_dir"
+  diff -qr "$expected_dir" "$actual_dir" >/dev/null || fail "$message"
 }
 
 for file in \
@@ -101,6 +116,9 @@ assert_same_file_contents "$CLAUDE_PLUGIN_FILE" "$COPIED_CLAUDE_PLUGIN_FILE" "co
 assert_same_file_contents "$CODEX_PLUGIN_FILE" "$COPIED_CODEX_PLUGIN_FILE" "copied Codex manifest drift"
 assert_same_file_contents "$ROOT_MCP_FILE" "$COPIED_MCP_FILE" "copied MCP config drift"
 assert_same_file_contents "$ROOT_MCP_LAUNCHER_FILE" "$COPIED_MCP_LAUNCHER_FILE" "copied MCP launcher drift"
+assert_same_tree_contents "$ROOT_AGENTS_DIR" "$COPIED_AGENTS_DIR" "copied agents payload drift"
+assert_same_tree_contents "$ROOT_HOOKS_DIR" "$COPIED_HOOKS_DIR" "copied hooks payload drift"
+assert_same_tree_contents "$ROOT_SKILLS_DIR" "$COPIED_SKILLS_DIR" "copied skills payload drift"
 
 assert_equals "true" "$(grep -F 'process.env.PLUGIN_ROOT' "$ROOT_MCP_LAUNCHER_FILE" >/dev/null && echo true || echo false)" "root MCP launcher PLUGIN_ROOT support"
 assert_equals "true" "$(grep -F 'process.env.PLUGIN_ROOT' "$COPIED_MCP_LAUNCHER_FILE" >/dev/null && echo true || echo false)" "copied MCP launcher PLUGIN_ROOT support"

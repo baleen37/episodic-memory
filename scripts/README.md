@@ -87,7 +87,7 @@ Future runtimes should be added as adapter checks rather than by duplicating the
 - **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync`.
 - **MCP** calls `./bin/memmem mcp` with `cwd: "."` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
 
-The runtime still respects `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
+The runtime respects `PLUGIN_ROOT` first, then `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
 
 ### Error Analysis
 
