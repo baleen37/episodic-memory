@@ -1,20 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# package.json 버전을 단일 진실원본으로 삼아 나머지 메타데이터 파일에 기록한다.
+# package.json is the source of truth for shared plugin metadata.
 version="$(jq -r '.version' package.json)"
+description="$(jq -r '.description' package.json)"
+repository="$(jq -r '.repository.url // .repository' package.json)"
+homepage="$(jq -r '.homepage // .repository.url // .repository' package.json)"
+license="$(jq -r '.license' package.json)"
+keywords="$(jq -c '.keywords' package.json)"
 
 tmp="$(mktemp)"
-jq --arg version "$version" '.version = $version' \
+jq \
+  --arg version "$version" \
+  --arg description "$description" \
+  --arg repository "$repository" \
+  --arg homepage "$homepage" \
+  --arg license "$license" \
+  --argjson keywords "$keywords" \
+  '.version = $version
+   | .description = $description
+   | .repository = $repository
+   | .homepage = $homepage
+   | .license = $license
+   | .keywords = $keywords' \
   .claude-plugin/plugin.json > "$tmp"
 mv "$tmp" .claude-plugin/plugin.json
 
 tmp="$(mktemp)"
-jq --arg version "$version" '.version = $version' \
+jq \
+  --arg version "$version" \
+  --arg description "$description" \
+  --arg repository "$repository" \
+  --arg homepage "$homepage" \
+  --arg license "$license" \
+  --argjson keywords "$keywords" \
+  '.version = $version
+   | .description = $description
+   | .repository = $repository
+   | .homepage = $homepage
+   | .license = $license
+   | .keywords = $keywords' \
   .codex-plugin/plugin.json > "$tmp"
 mv "$tmp" .codex-plugin/plugin.json
 
 tmp="$(mktemp)"
-jq --arg version "$version" '.plugins[0].version = $version' \
+jq \
+  --arg version "$version" \
+  --arg description "$description" \
+  '.plugins[0].version = $version
+   | .plugins[0].description = $description' \
   .claude-plugin/marketplace.json > "$tmp"
 mv "$tmp" .claude-plugin/marketplace.json

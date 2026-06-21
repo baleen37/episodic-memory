@@ -2264,7 +2264,7 @@ function findRoot2(start) {
   }
   return start;
 }
-var PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || findRoot2(__dirname3);
+var PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot2(__dirname3);
 async function ensureDependenciesAndBuild() {
   const { installed } = checkDependencies();
   if (!installed) {

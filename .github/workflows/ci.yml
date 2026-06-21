@@ -27,6 +27,9 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Runtime compatibility
+        run: bun run compat:check
+
       - name: Build
         run: bun run build
 
