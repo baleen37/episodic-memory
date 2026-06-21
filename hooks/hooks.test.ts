@@ -107,8 +107,9 @@ describe('hooks.json sync-only hook configuration', () => {
   it('routes MCP through bin/memmem mcp subcommand', () => {
     const mcpConfig = JSON.parse(readRepoFile('.mcp.json'));
 
-    expect(mcpConfig.mcpServers.memmem.command).toBe('${CLAUDE_PLUGIN_ROOT}/bin/memmem');
+    expect(mcpConfig.mcpServers.memmem.command).toBe('./bin/memmem');
     expect(mcpConfig.mcpServers.memmem.args).toEqual(['mcp']);
+    expect(mcpConfig.mcpServers.memmem.cwd).toBe('.');
   });
 
   it('uses bun for wrapper dependency installation and builds', () => {
