@@ -63,6 +63,8 @@ jq empty "$CLAUDE_PLUGIN_FILE" || fail "invalid JSON: $CLAUDE_PLUGIN_FILE"
 jq empty "$CODEX_PLUGIN_FILE" || fail "invalid JSON: $CODEX_PLUGIN_FILE"
 jq empty "$CODEX_MARKETPLACE_FILE" || fail "invalid JSON: $CODEX_MARKETPLACE_FILE"
 
+bash "$SCRIPT_DIR/verify-runtime-compatibility.test.sh" >/dev/null
+
 package_version="$(jq -r '.version' "$PACKAGE_FILE")"
 package_description="$(jq -r '.description' "$PACKAGE_FILE")"
 package_repository="$(jq -r '.repository.url // .repository' "$PACKAGE_FILE")"
