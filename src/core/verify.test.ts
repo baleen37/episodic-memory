@@ -28,7 +28,7 @@ describe('verifyMemoryIndex', () => {
     const id = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'A memory record should point to existing archive lines.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath,
       lineStart: 1,
       lineEnd: 99,

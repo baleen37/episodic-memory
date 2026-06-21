@@ -17,7 +17,7 @@ describe('MCP schemas', () => {
   });
 
   test('rejects unknown search filter keys', () => {
-    expect(() => SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-projects' })).toThrow();
+    expect(() => SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-code-projects' })).toThrow();
   });
 
   test('accepts array of 2-5 query strings', () => {

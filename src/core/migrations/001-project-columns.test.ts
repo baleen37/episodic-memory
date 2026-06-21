@@ -46,8 +46,8 @@ test('adds project_name column and backfills from archived JSONL cwd', () => {
   const ins = db.prepare(
     'INSERT INTO memory_records (kind, text, source_kind, archive_path, line_start, line_end, project, status) VALUES (?,?,?,?,?,?,?,?)',
   );
-  ins.run('fact', 't1', 'claude-projects', claudePath, 1, 2, null, 'active');
-  ins.run('fact', 't2', 'claude-projects', claudePath, 3, 4, null, 'active');
+  ins.run('fact', 't1', 'claude-code-projects', claudePath, 1, 2, null, 'active');
+  ins.run('fact', 't2', 'claude-code-projects', claudePath, 3, 4, null, 'active');
   ins.run('fact', 't3', 'codex-sessions', codexPath, 1, 1, null, 'active');
 
   projectColumnsMigration.up(db);

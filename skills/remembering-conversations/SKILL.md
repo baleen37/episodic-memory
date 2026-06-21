@@ -77,7 +77,7 @@ Prefer the search-conversation agent. If direct MCP access is necessary:
   query: "React Router authentication errors",
   limit: 10,
   after: "2026-05-01",
-  source_kind: "claude-projects"
+  source_kind: "claude-code-projects"
 }
 ```
 

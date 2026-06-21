@@ -114,7 +114,7 @@ describe('CLI search output', () => {
     insertMemoryRecord(db, {
       kind: 'fact',
       text: 'The archive is the source of truth.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/a.jsonl',
       lineStart: 4,
       lineEnd: 8,
@@ -137,7 +137,7 @@ describe('CLI search output', () => {
     }
 
     const output = lines.join('\n');
-    expect(output).toContain('## [fact, claude-projects, 2026-06-01] memmem');
+    expect(output).toContain('## [fact, claude-code-projects, 2026-06-01] memmem');
     expect(output).toContain('The archive is the source of truth.');
     expect(output).toContain('Source: /archive/a.jsonl:4-8');
     expect(output).not.toContain('snippet');

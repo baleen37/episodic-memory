@@ -1,9 +1,10 @@
 import type { Database } from 'bun:sqlite';
 import type { Migration } from './types.js';
 import { projectColumnsMigration } from './001-project-columns.js';
+import { sourceKindRenameMigration } from './002-source-kind-rename.js';
 
 // Ordered registry. New migrations append with the next version number.
-export const MIGRATIONS: Migration[] = [projectColumnsMigration];
+export const MIGRATIONS: Migration[] = [projectColumnsMigration, sourceKindRenameMigration];
 
 function getUserVersion(db: Database): number {
   return (db.query('PRAGMA user_version').get() as { user_version: number }).user_version;

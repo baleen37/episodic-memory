@@ -35,7 +35,7 @@ Optional filters:
   "query": "authentication patterns",
   "after": "2026-05-01",
   "before": "2026-06-01",
-  "source_kind": "claude-projects",
+  "source_kind": "claude-code-projects",
   "limit": 10
 }
 ```

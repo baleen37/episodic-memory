@@ -73,7 +73,7 @@ Search indexed event/fact memory records. Use `read` with the returned archive p
 - `limit` (number, optional): Maximum results to return (1-50, default: 10)
 - `before` (string, optional): Only memories before this date (YYYY-MM-DD)
 - `after` (string, optional): Only memories after this date (YYYY-MM-DD)
-- `source_kind` (string, optional): Filter to a source kind such as `claude-projects` or `codex-sessions`
+- `source_kind` (string, optional): Filter to a source kind such as `claude-code-projects` or `codex-sessions`
 
 **Example:**
 
@@ -233,7 +233,7 @@ memmem search "what did we decide about memory records?"
 Expected output example:
 
 ```md
-## [event, claude-projects, 2026-06-01] memmem
+## [event, claude-code-projects, 2026-06-01] memmem
 The user decided to remove exchange as the primary concept and use event/fact memory records.
 Source: /path/to/archive.jsonl:120-124
 ```

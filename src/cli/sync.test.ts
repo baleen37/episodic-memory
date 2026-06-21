@@ -75,14 +75,14 @@ describe('syncTranscripts', () => {
     expect(result.spansConsidered).toBe(2);
     expect(result.spansSkipped).toBe(2);
     expect(result.memoryRecordsIndexed).toBe(0);
-    expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'session.jsonl'))).toBe(true);
+    expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl'))).toBe(true);
     expect(existsSync(join(archiveDir, 'codex-sessions', 'rollout.jsonl'))).toBe(true);
   });
 
   test('retries archive reindexing after a prior copied archive did not update the DB', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
-    const archivePath = join(archiveDir, 'claude-projects', 'proj', 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
 
     writeClaudeTranscript(sourcePath, 'Old question', 'Old answer');
@@ -108,7 +108,7 @@ describe('syncTranscripts', () => {
   test('reindexes archive-only files when provider is missing and keeps memory rows unchanged', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
-    const archivePath = join(archiveDir, 'claude-projects', 'proj', 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
     writeClaudeTranscript(sourcePath, 'Archive question', 'Archive answer');
     setupEnv(claudeDir, codexDir, archiveDir);
@@ -171,7 +171,7 @@ describe('syncTranscripts', () => {
     expect(result.spansSkipped).toBe(1);
     expect(result.memoryRecordsIndexed).toBe(0);
     expect(memoryCount.count).toBe(0);
-    expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'session.jsonl'))).toBe(true);
+    expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl'))).toBe(true);
   });
 
   test('continues syncing other archives when a source transcript copy fails', async () => {
@@ -181,14 +181,14 @@ describe('syncTranscripts', () => {
     const failingSourcePath = join(failingSourceDir, 'session.jsonl');
     const existingSourcePath = join(otherSourceDir, 'existing.jsonl');
     const otherSourcePath = join(otherSourceDir, 'other.jsonl');
-    const existingArchivePath = join(archiveDir, 'claude-projects', 'proj', 'existing.jsonl');
-    const blockedArchivePath = join(archiveDir, 'claude-projects', 'blocked');
+    const existingArchivePath = join(archiveDir, 'claude-code-projects', 'proj', 'existing.jsonl');
+    const blockedArchivePath = join(archiveDir, 'claude-code-projects', 'blocked');
     mkdirSync(failingSourceDir, { recursive: true });
     mkdirSync(otherSourceDir, { recursive: true });
     writeClaudeTranscript(failingSourcePath, 'Failing question', 'Failing answer');
     writeClaudeTranscript(existingSourcePath, 'Existing question', 'Existing answer');
     writeClaudeTranscript(otherSourcePath, 'Other question', 'Other answer');
-    mkdirSync(join(archiveDir, 'claude-projects', 'proj'), { recursive: true });
+    mkdirSync(join(archiveDir, 'claude-code-projects', 'proj'), { recursive: true });
     writeClaudeTranscript(existingArchivePath, 'Archived question', 'Archived answer');
     writeFileSync(blockedArchivePath, 'not a directory');
     const future = new Date(Date.now() + 1000);
@@ -203,9 +203,9 @@ describe('syncTranscripts', () => {
     expect(result.archived).toBe(2);
     expect(result.spansConsidered).toBe(2);
     expect(result.spansSkipped).toBe(2);
-    expect(existsSync(join(archiveDir, 'claude-projects', 'blocked', 'session.jsonl'))).toBe(false);
+    expect(existsSync(join(archiveDir, 'claude-code-projects', 'blocked', 'session.jsonl'))).toBe(false);
     expect(existsSync(existingArchivePath)).toBe(true);
-    expect(existsSync(join(archiveDir, 'claude-projects', 'proj', 'other.jsonl'))).toBe(true);
+    expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'other.jsonl'))).toBe(true);
   });
 
   test('does not copy or index transcripts below a .no-memmem directory', async () => {
@@ -225,7 +225,7 @@ describe('syncTranscripts', () => {
     expect(result.copied).toBe(0);
     expect(result.archived).toBe(0);
     expect(memoryCount.count).toBe(0);
-    expect(existsSync(join(archiveDir, 'claude-projects', 'ignored', 'session.jsonl'))).toBe(false);
+    expect(existsSync(join(archiveDir, 'claude-code-projects', 'ignored', 'session.jsonl'))).toBe(false);
   });
 
   test('skips reparsing an unchanged, fully-indexed archive on the next sync', async () => {
@@ -284,7 +284,7 @@ describe('syncTranscripts', () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourceDir = join(claudeDir, 'projects', 'proj');
     const sourcePath = join(sourceDir, 'session.jsonl');
-    const archivePath = join(archiveDir, 'claude-projects', 'proj', 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
     mkdirSync(sourceDir, { recursive: true });
     writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
     setupEnv(claudeDir, codexDir, archiveDir);
@@ -381,7 +381,7 @@ function seedMemoryRecord(database: ReturnType<typeof initDatabase>, archivePath
   const id = insertMemoryRecord(database, {
     kind: 'fact',
     text: 'Seeded memory record.',
-    sourceKind: 'claude-projects',
+    sourceKind: 'claude-code-projects',
     archivePath,
     lineStart: 1,
     lineEnd: 2,
@@ -394,7 +394,7 @@ function seedMemoryRecord(database: ReturnType<typeof initDatabase>, archivePath
   });
   insertMemoryRecordVector(database, id, Array.from({ length: 384 }, () => 0.1));
   upsertExtractionState(database, {
-    sourceKind: 'claude-projects',
+    sourceKind: 'claude-code-projects',
     archivePath,
     lineStart: 1,
     lineEnd: 2,
