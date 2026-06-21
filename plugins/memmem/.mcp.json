@@ -1,8 +1,9 @@
 {
   "mcpServers": {
     "memmem": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem",
-      "args": ["mcp"]
+      "command": "./bin/memmem",
+      "args": ["mcp"],
+      "cwd": "."
     }
   }
 }
