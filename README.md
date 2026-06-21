@@ -108,6 +108,28 @@ The plugin automatically:
 2. Syncs and indexes transcripts via the SessionStart hook
 3. Provides MCP tools for memory search and archive reading
 
+## Runtime compatibility
+
+memmem ships one shared runtime payload for Claude Code and Codex:
+
+- `skills/`, `agents/`, and `hooks/`
+- `.mcp.json`
+- `bin/memmem`
+- `dist/`
+
+Runtime-specific metadata stays separate:
+
+- Claude Code: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+- Codex: `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`
+
+Claude Code and Codex update differently. In Claude Code, marketplace refresh and installed plugin update are part of the Claude plugin system, and plugin `version` is the update boundary. In Codex, `codex plugin marketplace upgrade` refreshes marketplace snapshots; installed plugin cache and enabled state are separate.
+
+Maintainers should run the local compatibility preflight before release:
+
+```bash
+bun run compat:preflight
+```
+
 ## How It Works
 
 ### Transcript Sync (SessionStart Hook)

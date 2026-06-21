@@ -26,25 +26,11 @@ jobs:
 
       - name: Align standalone plugin metadata
         shell: bash
-        run: |
-          set -euo pipefail
+        run: bash scripts/sync-plugin-versions.sh
 
-          version="$(jq -r '.version' package.json)"
-
-          tmp="$(mktemp)"
-          jq --arg version "$version" '.version = $version' \
-            .claude-plugin/plugin.json > "$tmp"
-          mv "$tmp" .claude-plugin/plugin.json
-
-          tmp="$(mktemp)"
-          jq --arg version "$version" '.version = $version' \
-            .codex-plugin/plugin.json > "$tmp"
-          mv "$tmp" .codex-plugin/plugin.json
-
-          tmp="$(mktemp)"
-          jq --arg version "$version" '.plugins[0].version = $version' \
-            .claude-plugin/marketplace.json > "$tmp"
-          mv "$tmp" .claude-plugin/marketplace.json
+      - name: Refresh copied Codex marketplace plugin
+        shell: bash
+        run: bash scripts/sync-codex-marketplace-plugin.sh
 
       - name: Verify standalone plugin metadata
         shell: bash
@@ -58,7 +44,8 @@ jobs:
           if git diff --quiet -- \
             .claude-plugin/marketplace.json \
             .claude-plugin/plugin.json \
-            .codex-plugin/plugin.json; then
+            .codex-plugin/plugin.json \
+            plugins/memmem; then
             echo "No standalone plugin metadata changes to commit."
             exit 0
           fi
@@ -68,6 +55,7 @@ jobs:
           git add \
             .claude-plugin/marketplace.json \
             .claude-plugin/plugin.json \
-            .codex-plugin/plugin.json
+            .codex-plugin/plugin.json \
+            plugins/memmem
           git commit -m "chore: align standalone plugin metadata"
           git push

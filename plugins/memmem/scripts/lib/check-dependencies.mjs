@@ -21,7 +21,7 @@ function findRoot(start) {
   return start;
 }
 
-const ROOT = process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
+const ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
 /**
  * Check if dependencies are installed

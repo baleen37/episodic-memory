@@ -63,7 +63,13 @@ jq empty "$CLAUDE_PLUGIN_FILE" || fail "invalid JSON: $CLAUDE_PLUGIN_FILE"
 jq empty "$CODEX_PLUGIN_FILE" || fail "invalid JSON: $CODEX_PLUGIN_FILE"
 jq empty "$CODEX_MARKETPLACE_FILE" || fail "invalid JSON: $CODEX_MARKETPLACE_FILE"
 
+bash "$SCRIPT_DIR/verify-runtime-compatibility.test.sh" >/dev/null
+
 package_version="$(jq -r '.version' "$PACKAGE_FILE")"
+package_description="$(jq -r '.description' "$PACKAGE_FILE")"
+package_repository="$(jq -r '.repository.url // .repository' "$PACKAGE_FILE")"
+package_license="$(jq -r '.license' "$PACKAGE_FILE")"
+package_keywords="$(jq -c '.keywords' "$PACKAGE_FILE")"
 claude_version="$(jq -r '.version' "$CLAUDE_PLUGIN_FILE")"
 codex_version="$(jq -r '.version' "$CODEX_PLUGIN_FILE")"
 marketplace_version="$(jq -r '.plugins[0].version' "$MARKETPLACE_FILE")"
@@ -78,6 +84,53 @@ fi
 
 if [[ "$package_version" != "$marketplace_version" ]]; then
   fail "package.json version ($package_version) does not match .claude-plugin/marketplace.json ($marketplace_version)"
+fi
+
+if [[ "$package_description" == "null" || -z "$package_description" ]]; then
+  fail "package.json description must be set"
+fi
+
+if [[ "$package_repository" != "https://github.com/baleen37/memmem" ]]; then
+  fail "package.json repository must be https://github.com/baleen37/memmem"
+fi
+
+if [[ "$package_license" != "MIT" ]]; then
+  fail "package.json license must be MIT"
+fi
+
+if [[ "$package_keywords" != '["memory","transcripts","search","codex","claude"]' ]]; then
+  fail "package.json keywords must match runtime plugin discovery tags"
+fi
+
+claude_description="$(jq -r '.description' "$CLAUDE_PLUGIN_FILE")"
+codex_description="$(jq -r '.description' "$CODEX_PLUGIN_FILE")"
+marketplace_description="$(jq -r '.plugins[0].description' "$MARKETPLACE_FILE")"
+codex_repository="$(jq -r '.repository' "$CODEX_PLUGIN_FILE")"
+codex_license="$(jq -r '.license' "$CODEX_PLUGIN_FILE")"
+codex_keywords="$(jq -c '.keywords' "$CODEX_PLUGIN_FILE")"
+
+if [[ "$package_description" != "$claude_description" ]]; then
+  fail "package.json description does not match .claude-plugin/plugin.json"
+fi
+
+if [[ "$package_description" != "$codex_description" ]]; then
+  fail "package.json description does not match .codex-plugin/plugin.json"
+fi
+
+if [[ "$package_description" != "$marketplace_description" ]]; then
+  fail "package.json description does not match .claude-plugin/marketplace.json"
+fi
+
+if [[ "$package_repository" != "$codex_repository" ]]; then
+  fail "package.json repository does not match .codex-plugin/plugin.json"
+fi
+
+if [[ "$package_license" != "$codex_license" ]]; then
+  fail "package.json license does not match .codex-plugin/plugin.json"
+fi
+
+if [[ "$package_keywords" != "$codex_keywords" ]]; then
+  fail "package.json keywords do not match .codex-plugin/plugin.json"
 fi
 
 if [[ "$(jq -r '.interface | type' "$CODEX_PLUGIN_FILE")" != "object" ]]; then
@@ -131,12 +184,15 @@ assert_contains "$WORKFLOW_FILE" "- name: Run update action"
 assert_contains "$WORKFLOW_FILE" "uses: baleen37/baleen-marketplace/.github/actions/update-versions@"
 assert_contains "$WORKFLOW_FILE" "marketplace-json: .claude-plugin/marketplace.json"
 assert_contains "$WORKFLOW_FILE" "- name: Align standalone plugin metadata"
-assert_contains "$WORKFLOW_FILE" ".claude-plugin/plugin.json"
-assert_contains "$WORKFLOW_FILE" ".codex-plugin/plugin.json"
+assert_contains "$WORKFLOW_FILE" "bash scripts/sync-plugin-versions.sh"
+assert_contains "$WORKFLOW_FILE" "- name: Refresh copied Codex marketplace plugin"
+assert_contains "$WORKFLOW_FILE" "bash scripts/sync-codex-marketplace-plugin.sh"
 assert_contains "$WORKFLOW_FILE" "- name: Verify standalone plugin metadata"
 assert_contains "$WORKFLOW_FILE" "git push"
+assert_contains "$WORKFLOW_FILE" "plugins/memmem"
 assert_contains "$WORKFLOW_FILE" "permissions:"
 assert_contains "$WORKFLOW_FILE" "contents: write"
+assert_not_contains "$WORKFLOW_FILE" "jq --arg version"
 
 assert_contains "$ON_RELEASE_WORKFLOW_FILE" "release:"
 assert_contains "$ON_RELEASE_WORKFLOW_FILE" "types: [published]"

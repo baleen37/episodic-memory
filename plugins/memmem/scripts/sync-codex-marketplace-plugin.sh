@@ -10,6 +10,8 @@ cp -pR \
   .codex-plugin \
   .claude-plugin \
   .mcp.json \
+  agents \
+  hooks \
   skills \
   bin \
   dist \

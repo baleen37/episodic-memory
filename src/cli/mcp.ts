@@ -22,7 +22,7 @@ function findRoot(start: string): string {
   return start;
 }
 
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
+const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
 async function ensureDependenciesAndBuild(): Promise<void> {
   const { installed } = checkDependencies();

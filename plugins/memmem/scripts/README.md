@@ -55,6 +55,31 @@ runBuild() -> Promise<void>
 analyzeError(error: Error) -> { cause: string, fix: string }
 ```
 
+### Runtime compatibility checks
+
+`verify-runtime-compatibility.test.sh` validates the runtime adapter surfaces that can be checked without Claude or Codex binaries:
+
+- `package.json` is the shared metadata source of truth.
+- `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` match shared package metadata.
+- `.codex-plugin/plugin.json` has required Codex install metadata and MCP component paths.
+- `.agents/plugins/marketplace.json` points Codex at `./plugins/memmem`.
+
+Run:
+
+```bash
+bun run compat:check
+```
+
+`preflight-runtime-compatibility.sh` is the local full preflight. It additionally runs `claude plugin validate . --strict`, typecheck, focused MCP/hook tests, build, and CLI smoke.
+
+Run:
+
+```bash
+bun run compat:preflight
+```
+
+Future runtimes should be added as adapter checks rather than by duplicating the plugin payload. A new runtime entry should declare its manifest path, marketplace path if any, metadata fields, validation command, smoke command, and update/cache semantics.
+
 ## Single Entrypoint
 
 `bin/memmem` is the single entrypoint for the plugin. It is a graceful wrapper executable (built from `src/cli-graceful.mjs`) that checks dependencies, then dispatches into the bundled CLI (`dist/cli-internal.mjs`).
@@ -62,7 +87,7 @@ analyzeError(error: Error) -> { cause: string, fix: string }
 - **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync`.
 - **MCP** calls `./bin/memmem mcp` with `cwd: "."` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
 
-The runtime still respects `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
+The runtime respects `PLUGIN_ROOT` first, then `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
 
 ### Error Analysis
 
