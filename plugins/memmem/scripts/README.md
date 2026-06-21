@@ -60,9 +60,9 @@ analyzeError(error: Error) -> { cause: string, fix: string }
 `bin/memmem` is the single entrypoint for the plugin. It is a graceful wrapper executable (built from `src/cli-graceful.mjs`) that checks dependencies, then dispatches into the bundled CLI (`dist/cli-internal.mjs`).
 
 - **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync`.
-- **MCP** calls `${CLAUDE_PLUGIN_ROOT}/bin/memmem mcp`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
+- **MCP** calls `./bin/memmem mcp` with `cwd: "."` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
 
-Both paths respect `CLAUDE_PLUGIN_ROOT` for locating the plugin root, falling back to the executable's own location.
+The runtime still respects `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
 
 ### Error Analysis
 

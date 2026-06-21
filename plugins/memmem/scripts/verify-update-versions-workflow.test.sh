@@ -104,6 +104,20 @@ if [[ ! -f "$COPIED_PLUGIN_DIR/.mcp.json" ]]; then
   fail "copied plugin view must include .mcp.json"
 fi
 
+for mcp_file in "$REPO_ROOT/.mcp.json" "$COPIED_PLUGIN_DIR/.mcp.json"; do
+  if [[ "$(jq -r '.mcpServers.memmem.cwd // empty' "$mcp_file")" != "." ]]; then
+    fail "$mcp_file memmem server must set cwd to plugin root for Codex"
+  fi
+
+  if [[ "$(jq -r '.mcpServers.memmem.command' "$mcp_file")" != "./bin/memmem" ]]; then
+    fail "$mcp_file memmem server must use a Codex-compatible relative command"
+  fi
+
+  if grep -Fq 'CLAUDE_PLUGIN_ROOT' "$mcp_file"; then
+    fail "$mcp_file must not rely on Claude-only CLAUDE_PLUGIN_ROOT expansion"
+  fi
+done
+
 assert_contains "$WORKFLOW_FILE" "schedule:"
 assert_contains "$WORKFLOW_FILE" "- cron: '0 * * * *'"
 assert_contains "$WORKFLOW_FILE" "workflow_dispatch:"
