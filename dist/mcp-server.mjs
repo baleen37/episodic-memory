@@ -6663,7 +6663,7 @@ var init_logger = __esm(() => {
 });
 
 // src/core/llm/config.ts
-import { existsSync, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { join as join2 } from "path";
 function loadConfig() {
   const configDir = join2(process.env.HOME ?? "", ".config", "memmem");
@@ -6692,7 +6692,7 @@ function loadConfig() {
 var configFileDeps;
 var init_config = __esm(() => {
   configFileDeps = {
-    existsSync,
+    existsSync: existsSync2,
     readFileSync: readFileSync2
   };
 });
@@ -16847,8 +16847,62 @@ var projectColumnsMigration = {
   }
 };
 
+// src/core/migrations/002-source-kind-rename.ts
+import { existsSync, mkdirSync, renameSync } from "fs";
+import { dirname, sep } from "path";
+var RENAMES = [
+  { oldKind: "claude-projects", newKind: "claude-code-projects" },
+  { oldKind: "claude-transcripts", newKind: "claude-code-transcripts" }
+];
+function rewriteArchivePath(archivePath, oldKind, newKind) {
+  const oldSegment = `${sep}${oldKind}${sep}`;
+  const index = archivePath.indexOf(oldSegment);
+  if (index < 0)
+    return archivePath;
+  return `${archivePath.slice(0, index)}${sep}${newKind}${sep}${archivePath.slice(index + oldSegment.length)}`;
+}
+function moveArchiveFile(oldPath, newPath) {
+  if (oldPath === newPath || !existsSync(oldPath) || existsSync(newPath)) {
+    return;
+  }
+  mkdirSync(dirname(newPath), { recursive: true });
+  renameSync(oldPath, newPath);
+}
+function rewriteTableArchivePaths(db, table, oldKind, newKind) {
+  const rows = db.query(`
+    SELECT DISTINCT archive_path AS archivePath
+    FROM ${table}
+    WHERE archive_path LIKE ?
+  `).all(`%${sep}${oldKind}${sep}%`);
+  const update = db.prepare(`UPDATE ${table} SET archive_path = ? WHERE archive_path = ?`);
+  for (const { archivePath } of rows) {
+    const newArchivePath = rewriteArchivePath(archivePath, oldKind, newKind);
+    moveArchiveFile(archivePath, newArchivePath);
+    update.run(newArchivePath, archivePath);
+  }
+}
+function rewriteSourceKind(db, table, oldKind, newKind) {
+  db.query(`UPDATE ${table} SET source_kind = ? WHERE source_kind = ?`).run(newKind, oldKind);
+}
+var sourceKindRenameMigration = {
+  version: 2,
+  name: "source-kind-rename",
+  up(db) {
+    const run = db.transaction(() => {
+      for (const { oldKind, newKind } of RENAMES) {
+        rewriteTableArchivePaths(db, "memory_records", oldKind, newKind);
+        rewriteTableArchivePaths(db, "extraction_state", oldKind, newKind);
+        rewriteTableArchivePaths(db, "archive_index_state", oldKind, newKind);
+        rewriteSourceKind(db, "memory_records", oldKind, newKind);
+        rewriteSourceKind(db, "extraction_state", oldKind, newKind);
+      }
+    });
+    run();
+  }
+};
+
 // src/core/migrations/index.ts
-var MIGRATIONS = [projectColumnsMigration];
+var MIGRATIONS = [projectColumnsMigration, sourceKindRenameMigration];
 function getUserVersion(db) {
   return db.query("PRAGMA user_version").get().user_version;
 }

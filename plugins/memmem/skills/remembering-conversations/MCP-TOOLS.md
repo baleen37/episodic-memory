@@ -28,7 +28,7 @@ Omit `query` entirely to list the most recent records in reverse chronological o
 | `limit` | `number` | No | `10` | Max results (1-50) |
 | `after` | `string` | No | - | Filter results after this date (YYYY-MM-DD) |
 | `before` | `string` | No | - | Filter results before this date (YYYY-MM-DD) |
-| `source_kind` | `string` | No | - | Filter to a source such as `claude-projects` or `codex-sessions` |
+| `source_kind` | `string` | No | - | Filter to a source such as `claude-code-projects` or `codex-sessions` |
 
 ### Basic Usage
 
@@ -46,7 +46,7 @@ Omit `query` entirely to list the most recent records in reverse chronological o
   "query": "React Router authentication",
   "after": "2026-05-01",
   "before": "2026-06-01",
-  "source_kind": "claude-projects",
+  "source_kind": "claude-code-projects",
   "limit": 10
 }
 ```

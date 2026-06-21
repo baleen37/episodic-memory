@@ -1318,7 +1318,7 @@ var init_zai_provider = __esm(() => {
 });
 
 // src/core/llm/config.ts
-import { existsSync as existsSync6, readFileSync as readFileSync4 } from "fs";
+import { existsSync as existsSync7, readFileSync as readFileSync4 } from "fs";
 import { join as join6 } from "path";
 function loadConfig() {
   const configDir = join6(process.env.HOME ?? "", ".config", "memmem");
@@ -1371,7 +1371,7 @@ var init_config = __esm(() => {
     zai: "glm-4.5-air"
   };
   configFileDeps = {
-    existsSync: existsSync6,
+    existsSync: existsSync7,
     readFileSync: readFileSync4
   };
 });
@@ -1474,7 +1474,7 @@ var init_ratelimiter = __esm(() => {
 });
 
 // src/cli/doctor.ts
-import { basename, dirname, join as join2 } from "path";
+import { basename, dirname as dirname2, join as join2 } from "path";
 import { fileURLToPath } from "url";
 
 // src/core/db.ts
@@ -1600,8 +1600,62 @@ var projectColumnsMigration = {
   }
 };
 
+// src/core/migrations/002-source-kind-rename.ts
+import { existsSync, mkdirSync, renameSync } from "fs";
+import { dirname, sep } from "path";
+var RENAMES = [
+  { oldKind: "claude-projects", newKind: "claude-code-projects" },
+  { oldKind: "claude-transcripts", newKind: "claude-code-transcripts" }
+];
+function rewriteArchivePath(archivePath, oldKind, newKind) {
+  const oldSegment = `${sep}${oldKind}${sep}`;
+  const index = archivePath.indexOf(oldSegment);
+  if (index < 0)
+    return archivePath;
+  return `${archivePath.slice(0, index)}${sep}${newKind}${sep}${archivePath.slice(index + oldSegment.length)}`;
+}
+function moveArchiveFile(oldPath, newPath) {
+  if (oldPath === newPath || !existsSync(oldPath) || existsSync(newPath)) {
+    return;
+  }
+  mkdirSync(dirname(newPath), { recursive: true });
+  renameSync(oldPath, newPath);
+}
+function rewriteTableArchivePaths(db, table, oldKind, newKind) {
+  const rows = db.query(`
+    SELECT DISTINCT archive_path AS archivePath
+    FROM ${table}
+    WHERE archive_path LIKE ?
+  `).all(`%${sep}${oldKind}${sep}%`);
+  const update = db.prepare(`UPDATE ${table} SET archive_path = ? WHERE archive_path = ?`);
+  for (const { archivePath } of rows) {
+    const newArchivePath = rewriteArchivePath(archivePath, oldKind, newKind);
+    moveArchiveFile(archivePath, newArchivePath);
+    update.run(newArchivePath, archivePath);
+  }
+}
+function rewriteSourceKind(db, table, oldKind, newKind) {
+  db.query(`UPDATE ${table} SET source_kind = ? WHERE source_kind = ?`).run(newKind, oldKind);
+}
+var sourceKindRenameMigration = {
+  version: 2,
+  name: "source-kind-rename",
+  up(db) {
+    const run = db.transaction(() => {
+      for (const { oldKind, newKind } of RENAMES) {
+        rewriteTableArchivePaths(db, "memory_records", oldKind, newKind);
+        rewriteTableArchivePaths(db, "extraction_state", oldKind, newKind);
+        rewriteTableArchivePaths(db, "archive_index_state", oldKind, newKind);
+        rewriteSourceKind(db, "memory_records", oldKind, newKind);
+        rewriteSourceKind(db, "extraction_state", oldKind, newKind);
+      }
+    });
+    run();
+  }
+};
+
 // src/core/migrations/index.ts
-var MIGRATIONS = [projectColumnsMigration];
+var MIGRATIONS = [projectColumnsMigration, sourceKindRenameMigration];
 function getUserVersion(db) {
   return db.query("PRAGMA user_version").get().user_version;
 }
@@ -1839,11 +1893,11 @@ function hasCompletedExtractionState(db, archivePath, lineStart, lineEnd, source
 }
 
 // src/core/doctor.ts
-import { existsSync as existsSync2, readdirSync, statSync } from "fs";
+import { existsSync as existsSync3, readdirSync, statSync } from "fs";
 import { join } from "path";
 
 // src/core/verify.ts
-import { existsSync, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 function countLines(filePath) {
   const text = readFileSync2(filePath, "utf8");
   if (text.length === 0)
@@ -1864,7 +1918,7 @@ function verifyMemoryIndex(db) {
   `).all();
   const lineCounts = new Map;
   for (const record of activeRecords) {
-    if (!existsSync(record.archivePath)) {
+    if (!existsSync2(record.archivePath)) {
       missingArchives.push({ id: record.id, archivePath: record.archivePath });
       continue;
     }
@@ -1961,7 +2015,7 @@ function getMemoryStats(db) {
 var REQUIRED_DIST_ARTIFACTS = ["cli-internal.mjs", "mcp-server.mjs"];
 function newestMtime(dir, ext) {
   let newest = 0;
-  if (!existsSync2(dir))
+  if (!existsSync3(dir))
     return 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
@@ -1974,7 +2028,7 @@ function newestMtime(dir, ext) {
   return newest;
 }
 function checkBuild(paths) {
-  const missing = REQUIRED_DIST_ARTIFACTS.filter((name) => !existsSync2(join(paths.distDir, name)));
+  const missing = REQUIRED_DIST_ARTIFACTS.filter((name) => !existsSync3(join(paths.distDir, name)));
   if (missing.length > 0) {
     return {
       name: "build",
@@ -2051,7 +2105,7 @@ var STATUS_ICON = {
   fail: "✗"
 };
 function resolveRoot() {
-  const here = dirname(fileURLToPath(import.meta.url));
+  const here = dirname2(fileURLToPath(import.meta.url));
   return basename(here) === "cli" ? join2(here, "..", "..") : join2(here, "..");
 }
 function runDoctorCli() {
@@ -2090,29 +2144,29 @@ memmem is healthy.`);
 
 // src/cli/mcp.ts
 import { spawn as spawn2 } from "child_process";
-import { existsSync as existsSync4 } from "fs";
-import { dirname as dirname3, join as join4 } from "path";
+import { existsSync as existsSync5 } from "fs";
+import { dirname as dirname4, join as join4 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // scripts/lib/check-dependencies.mjs
-import { existsSync as existsSync3, statSync as statSync2, readdirSync as readdirSync2 } from "fs";
+import { existsSync as existsSync4, statSync as statSync2, readdirSync as readdirSync2 } from "fs";
 import { spawn } from "child_process";
-import { dirname as dirname2, join as join3 } from "path";
+import { dirname as dirname3, join as join3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-var __dirname2 = dirname2(fileURLToPath2(import.meta.url));
+var __dirname2 = dirname3(fileURLToPath2(import.meta.url));
 function findRoot(start) {
   let dir = start;
-  while (dir !== dirname2(dir)) {
-    if (existsSync3(join3(dir, "package.json")))
+  while (dir !== dirname3(dir)) {
+    if (existsSync4(join3(dir, "package.json")))
       return dir;
-    dir = dirname2(dir);
+    dir = dirname3(dir);
   }
   return start;
 }
 var ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname2);
 function checkDependencies() {
   const nodeModulesPath = join3(ROOT, "node_modules");
-  if (!existsSync3(nodeModulesPath)) {
+  if (!existsSync4(nodeModulesPath)) {
     return { installed: false, missing: ["node_modules"] };
   }
   return { installed: true, missing: [] };
@@ -2120,18 +2174,18 @@ function checkDependencies() {
 function checkBuildNeeded() {
   const mcpServerPath = join3(ROOT, "dist", "mcp-server.mjs");
   const packageJsonPath = join3(ROOT, "package.json");
-  if (!existsSync3(mcpServerPath)) {
+  if (!existsSync4(mcpServerPath)) {
     return { needsBuild: true, reason: "dist/mcp-server.mjs not found" };
   }
   const mcpServerMtime = statSync2(mcpServerPath).mtimeMs;
-  if (existsSync3(packageJsonPath)) {
+  if (existsSync4(packageJsonPath)) {
     const packageJsonMtime = statSync2(packageJsonPath).mtimeMs;
     if (packageJsonMtime > mcpServerMtime) {
       return { needsBuild: true, reason: "package.json newer than dist" };
     }
   }
   const srcDir = join3(ROOT, "src");
-  if (existsSync3(srcDir)) {
+  if (existsSync4(srcDir)) {
     const newest = newestSourceMtime(srcDir);
     if (newest > mcpServerMtime) {
       return { needsBuild: true, reason: "src newer than dist" };
@@ -2254,13 +2308,13 @@ function analyzeError(error) {
 }
 
 // src/cli/mcp.ts
-var __dirname3 = dirname3(fileURLToPath3(import.meta.url));
+var __dirname3 = dirname4(fileURLToPath3(import.meta.url));
 function findRoot2(start) {
   let dir = start;
-  while (dir !== dirname3(dir)) {
-    if (existsSync4(join4(dir, "package.json")))
+  while (dir !== dirname4(dir)) {
+    if (existsSync5(join4(dir, "package.json")))
       return dir;
-    dir = dirname3(dir);
+    dir = dirname4(dir);
   }
   return start;
 }
@@ -2288,7 +2342,7 @@ async function runMcpCli() {
     process.exit(1);
   }
   const mcpServerPath = join4(PLUGIN_ROOT, "dist", "mcp-server.mjs");
-  if (!existsSync4(mcpServerPath)) {
+  if (!existsSync5(mcpServerPath)) {
     console.error(`[memmem] ERROR: MCP server not found at ${mcpServerPath}`);
     console.error("Please run: bun run build");
     process.exit(1);
@@ -2930,7 +2984,7 @@ function runStatsCli() {
 }
 
 // src/cli/sync.ts
-import { copyFileSync, existsSync as existsSync9, mkdirSync as mkdirSync2, readdirSync as readdirSync4, renameSync, rmSync as rmSync2, statSync as statSync4, unlinkSync as unlinkSync2 } from "fs";
+import { copyFileSync, existsSync as existsSync10, mkdirSync as mkdirSync3, readdirSync as readdirSync4, renameSync as renameSync2, rmSync as rmSync2, statSync as statSync4, unlinkSync as unlinkSync2 } from "fs";
 import path6 from "path";
 
 // src/core/indexer.ts
@@ -3314,7 +3368,7 @@ init_logger();
 // src/core/lock.ts
 init_paths();
 init_logger();
-import { mkdirSync, readFileSync as readFileSync6, rmSync, statSync as statSync3, writeFileSync } from "fs";
+import { mkdirSync as mkdirSync2, readFileSync as readFileSync6, rmSync, statSync as statSync3, writeFileSync } from "fs";
 import path3 from "path";
 var STALE_MS = 30 * 60 * 1000;
 function lockPath() {
@@ -3322,7 +3376,7 @@ function lockPath() {
 }
 function tryCreate(lockDir) {
   try {
-    mkdirSync(lockDir);
+    mkdirSync2(lockDir);
     writeFileSync(path3.join(lockDir, "pid"), String(process.pid));
     return true;
   } catch (error) {
@@ -3387,7 +3441,7 @@ function makeRelease(lockDir) {
 init_paths();
 
 // src/core/sources/claude.ts
-import { existsSync as existsSync7 } from "fs";
+import { existsSync as existsSync8 } from "fs";
 import os2 from "os";
 import path4 from "path";
 
@@ -3498,17 +3552,17 @@ function parseClaudeJsonl(content, context) {
   return spans;
 }
 function createClaudeProjectsAdapter() {
-  return createClaudeAdapter("claude-projects", "projects");
+  return createClaudeAdapter("claude-code-projects", "projects");
 }
 function createClaudeTranscriptsAdapter() {
-  return createClaudeAdapter("claude-transcripts", "transcripts");
+  return createClaudeAdapter("claude-code-transcripts", "transcripts");
 }
-function createClaudeAdapter(kind, dirname4) {
+function createClaudeAdapter(kind, dirname5) {
   return {
     kind,
     roots() {
-      const root = path4.join(process.env.CLAUDE_CONFIG_DIR || path4.join(os2.homedir(), ".claude"), dirname4);
-      return existsSync7(root) ? [root] : [];
+      const root = path4.join(process.env.CLAUDE_CONFIG_DIR || path4.join(os2.homedir(), ".claude"), dirname5);
+      return existsSync8(root) ? [root] : [];
     },
     detect(filePath) {
       return filePath.endsWith(".jsonl");
@@ -3549,7 +3603,7 @@ function isToolResultContent(value) {
 }
 
 // src/core/sources/codex.ts
-import { existsSync as existsSync8 } from "fs";
+import { existsSync as existsSync9 } from "fs";
 import os3 from "os";
 import path5 from "path";
 function parseCodexJsonl(content, context) {
@@ -3643,7 +3697,7 @@ function createCodexSessionsAdapter() {
     kind: "codex-sessions",
     roots() {
       const root = path5.join(process.env.CODEX_HOME ?? path5.join(os3.homedir(), ".codex"), "sessions");
-      return existsSync8(root) ? [root] : [];
+      return existsSync9(root) ? [root] : [];
     },
     detect(filePath) {
       return filePath.endsWith(".jsonl");
@@ -3712,7 +3766,7 @@ async function syncTranscripts(db, options = {}) {
             error: error instanceof Error ? error.message : String(error)
           });
         }
-        if (existsSync9(archivePath)) {
+        if (existsSync10(archivePath)) {
           archiveFiles.set(archivePath, { adapter, archivePath });
         }
       }
@@ -3722,7 +3776,7 @@ async function syncTranscripts(db, options = {}) {
       }
     }
     const adapterArchiveRoot = path6.join(archiveDir, adapter.kind);
-    if (existsSync9(adapterArchiveRoot)) {
+    if (existsSync10(adapterArchiveRoot)) {
       for (const archivePath of findJsonlFiles(adapterArchiveRoot, adapter)) {
         archiveFiles.set(archivePath, { adapter, archivePath });
       }
@@ -3796,7 +3850,7 @@ async function loadExtractionProvider() {
 }
 function findJsonlFiles(root, adapter, excludedDirs = []) {
   const files = [];
-  if (existsSync9(path6.join(root, ".no-memmem"))) {
+  if (existsSync10(path6.join(root, ".no-memmem"))) {
     excludedDirs.push(root);
     return files;
   }
@@ -3817,7 +3871,7 @@ function purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles) {
       archiveFiles.delete(archivePath);
     }
   }
-  if (existsSync9(archivePathPrefix)) {
+  if (existsSync10(archivePathPrefix)) {
     rmSync2(archivePathPrefix, { recursive: true, force: true });
   }
 }
@@ -3827,10 +3881,10 @@ function isPathAtOrUnder(filePath, parentPath) {
 }
 function copyIfNewer(sourcePath, destinationPath) {
   const sourceBefore = statSync4(sourcePath);
-  if (existsSync9(destinationPath) && statSync4(destinationPath).mtimeMs >= sourceBefore.mtimeMs) {
+  if (existsSync10(destinationPath) && statSync4(destinationPath).mtimeMs >= sourceBefore.mtimeMs) {
     return false;
   }
-  mkdirSync2(path6.dirname(destinationPath), { recursive: true });
+  mkdirSync3(path6.dirname(destinationPath), { recursive: true });
   const tmpPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
   copyFileSync(sourcePath, tmpPath);
   const sourceAfter = statSync4(sourcePath);
@@ -3838,11 +3892,11 @@ function copyIfNewer(sourcePath, destinationPath) {
     unlinkIfExists(tmpPath);
     return false;
   }
-  renameSync(tmpPath, destinationPath);
+  renameSync2(tmpPath, destinationPath);
   return true;
 }
 function unlinkIfExists(filePath) {
-  if (existsSync9(filePath)) {
+  if (existsSync10(filePath)) {
     unlinkSync2(filePath);
   }
 }

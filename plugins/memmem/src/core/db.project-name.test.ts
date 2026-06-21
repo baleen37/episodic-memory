@@ -12,7 +12,7 @@ describe('insertMemoryRecord persists project_name', () => {
     const id = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'hello',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/a/b.jsonl',
       lineStart: 1,
       lineEnd: 2,

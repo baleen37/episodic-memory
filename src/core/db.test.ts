@@ -63,7 +63,7 @@ describe('memory record database schema', () => {
     const id = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'memmem stores fact and event memory records.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/a.jsonl',
       lineStart: 1,
       lineEnd: 3,
@@ -88,7 +88,7 @@ describe('memory record database schema', () => {
     expect(vector?.rowid).toBe(id);
 
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/unrelated.jsonl',
       lineStart: 20,
       lineEnd: 25,
@@ -100,7 +100,7 @@ describe('memory record database schema', () => {
     const sameId = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'memmem stores compact fact and event memory records.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/a.jsonl',
       lineStart: 1,
       lineEnd: 3,
@@ -118,7 +118,7 @@ describe('memory record database schema', () => {
     const differentSpanId = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'memmem stores fact and event memory records.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/b.jsonl',
       lineStart: 1,
       lineEnd: 3,
@@ -139,7 +139,7 @@ describe('memory record database schema', () => {
     const db = openTestDatabase();
 
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/state.jsonl',
       lineStart: 4,
       lineEnd: 8,
@@ -152,7 +152,7 @@ describe('memory record database schema', () => {
     expect(hasCompletedExtractionState(db, '/archive/state.jsonl', 4, 8, 'hash-1', CURRENT_EXTRACTION_VERSION)).toBe(false);
 
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/state.jsonl',
       lineStart: 4,
       lineEnd: 8,
@@ -172,7 +172,7 @@ describe('memory record database schema', () => {
     const id = insertMemoryRecord(db, {
       kind: 'event',
       text: 'The user approved event fact memory architecture.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/b.jsonl',
       lineStart: 10,
       lineEnd: 12,
@@ -184,7 +184,7 @@ describe('memory record database schema', () => {
     });
     insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.02));
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/b.jsonl',
       lineStart: 10,
       lineEnd: 12,
@@ -234,7 +234,7 @@ describe('memory record database schema', () => {
   test('upsertExtractionState persists attempt_count', () => {
     const db = openTestDatabase();
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects', archivePath: '/a.jsonl',
+      sourceKind: 'claude-code-projects', archivePath: '/a.jsonl',
       lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
       status: 'errored', attemptCount: 3, retryAfter: 999,
     });
@@ -247,7 +247,7 @@ describe('memory record database schema', () => {
   test('upsertExtractionState defaults attempt_count to 0 when omitted', () => {
     const db = openTestDatabase();
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects', archivePath: '/b.jsonl',
+      sourceKind: 'claude-code-projects', archivePath: '/b.jsonl',
       lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
       status: 'done',
     });
@@ -263,7 +263,7 @@ describe('memory record database schema', () => {
     expect(getExtractionAttemptCount(db, '/x.jsonl', 1, 5, 'h1', 1)).toBe(0);
 
     upsertExtractionState(db, {
-      sourceKind: 'claude-projects', archivePath: '/x.jsonl',
+      sourceKind: 'claude-code-projects', archivePath: '/x.jsonl',
       lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
       status: 'errored', attemptCount: 4, retryAfter: 999,
     });

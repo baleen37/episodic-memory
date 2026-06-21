@@ -19,7 +19,7 @@ describe('getMemoryStats', () => {
     const id = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'memmem stores atomic fact memory records.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/a.jsonl',
       lineStart: 1,
       lineEnd: 3,

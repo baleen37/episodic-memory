@@ -8,12 +8,12 @@ describe('parseClaudeJsonl', () => {
       JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', cwd: '/repo', gitBranch: 'main', message: { role: 'assistant', content: [{ type: 'text', text: 'Copy transcripts into archive.' }] } }),
     ].join('\n');
 
-    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-projects/s1.jsonl', sourceKind: 'claude-projects' });
+    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-code-projects/s1.jsonl', sourceKind: 'claude-code-projects' });
 
     expect(spans).toHaveLength(1);
     expect(spans[0]).toMatchObject({
-      archivePath: '/archive/claude-projects/s1.jsonl',
-      sourceKind: 'claude-projects',
+      archivePath: '/archive/claude-code-projects/s1.jsonl',
+      sourceKind: 'claude-code-projects',
       lineStart: 1,
       lineEnd: 2,
       sessionId: 's1',
@@ -37,7 +37,7 @@ describe('parseClaudeJsonl', () => {
       JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:03.000Z', sessionId: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'The file defines the parser.' }] } }),
     ].join('\n');
 
-    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-projects/s1.jsonl', sourceKind: 'claude-projects' });
+    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-code-projects/s1.jsonl', sourceKind: 'claude-code-projects' });
 
     expect(spans).toHaveLength(1);
     expect(spans[0].text).toBe('User: Inspect the file\nAssistant: I will read it.\nThe file defines the parser.');
@@ -48,7 +48,7 @@ describe('parseClaudeJsonl', () => {
   test('emits user-only spans when compact text is non-empty', () => {
     const jsonl = JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'Run command' } });
 
-    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-projects/s1.jsonl', sourceKind: 'claude-projects' });
+    const spans = parseClaudeJsonl(jsonl, { archivePath: '/archive/claude-code-projects/s1.jsonl', sourceKind: 'claude-code-projects' });
 
     expect(spans).toHaveLength(1);
     expect(spans[0].text).toBe('User: Run command');

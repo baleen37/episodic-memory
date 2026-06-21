@@ -113,7 +113,7 @@ describe('MCP Server - memmem__search tool', () => {
     });
 
     test('rejects removed source_kind filter', async () => {
-      const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-projects' });
+      const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-code-projects' });
       expect(result.isError).toBe(true);
     });
   });

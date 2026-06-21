@@ -103,11 +103,11 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
 }
 
 export function createClaudeProjectsAdapter(): SourceAdapter {
-  return createClaudeAdapter('claude-projects', 'projects');
+  return createClaudeAdapter('claude-code-projects', 'projects');
 }
 
 export function createClaudeTranscriptsAdapter(): SourceAdapter {
-  return createClaudeAdapter('claude-transcripts', 'transcripts');
+  return createClaudeAdapter('claude-code-transcripts', 'transcripts');
 }
 
 function createClaudeAdapter(kind: string, dirname: string): SourceAdapter {

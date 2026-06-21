@@ -74,7 +74,7 @@ describe('runDiagnostics', () => {
     const id = insertMemoryRecord(db, {
       kind: 'fact',
       text: 'A clean record.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath,
       lineStart: 1,
       lineEnd: 2,
@@ -150,7 +150,7 @@ describe('runDiagnostics', () => {
     insertMemoryRecord(db, {
       kind: 'fact',
       text: 'Record without a vector.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath,
       lineStart: 1,
       lineEnd: 2,

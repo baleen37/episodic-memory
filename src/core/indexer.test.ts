@@ -25,7 +25,7 @@ test('given-up span (attempt_count>=cap, retry_after null) is skipped', () => {
   process.env.TEST_DB_PATH = ':memory:';
   db = initDatabase();
   upsertExtractionState(db, {
-    sourceKind: 'claude-projects', archivePath: '/g.jsonl',
+    sourceKind: 'claude-code-projects', archivePath: '/g.jsonl',
     lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
     status: 'errored', attemptCount: ATTEMPT_CAP, retryAfter: null,
   });
@@ -38,7 +38,7 @@ test('errored span still within backoff window is skipped', () => {
   process.env.TEST_DB_PATH = ':memory:';
   db = initDatabase();
   upsertExtractionState(db, {
-    sourceKind: 'claude-projects', archivePath: '/w.jsonl',
+    sourceKind: 'claude-code-projects', archivePath: '/w.jsonl',
     lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
     status: 'errored', attemptCount: 2, retryAfter: Date.now() + 60_000,
   });
@@ -51,7 +51,7 @@ test('errored span past backoff window (not given up) is NOT skipped', () => {
   process.env.TEST_DB_PATH = ':memory:';
   db = initDatabase();
   upsertExtractionState(db, {
-    sourceKind: 'claude-projects', archivePath: '/r.jsonl',
+    sourceKind: 'claude-code-projects', archivePath: '/r.jsonl',
     lineStart: 1, lineEnd: 5, sourceHash: 'h1', extractionVersion: 1,
     status: 'errored', attemptCount: 2, retryAfter: Date.now() - 60_000,
   });
@@ -86,7 +86,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, (_, i) => i / 384));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -124,7 +124,7 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
 
     expect(result.memoryRecordsIndexed).toBe(1);
     expect(result.spansEmpty).toBe(0);
@@ -146,7 +146,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'same transcript content');
@@ -178,8 +178,8 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
 
     const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
     const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
@@ -197,7 +197,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'changed transcript content');
@@ -206,7 +206,7 @@ describe('reindexArchiveFile', () => {
       archivePath,
       lineStart: line,
       lineEnd: line,
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       sessionId: 's1',
       project: 'memmem',
       cwd: null,
@@ -231,8 +231,8 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', firstParser, provider);
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', secondParser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', firstParser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', secondParser, provider);
 
     const rows = db.query('SELECT line_start AS lineStart FROM memory_records ORDER BY line_start').all() as Array<{ lineStart: number }>;
     const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
@@ -250,7 +250,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'changed transcript content');
@@ -259,7 +259,7 @@ describe('reindexArchiveFile', () => {
       archivePath,
       lineStart: line,
       lineEnd: line,
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       sessionId: 's1',
       project: 'memmem',
       cwd: null,
@@ -284,9 +284,9 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', bothSpansParser, provider);
-    await reindexArchiveFile(db, archivePath, 'claude-projects', firstSpanParser, provider);
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', bothSpansParser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', bothSpansParser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', firstSpanParser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', bothSpansParser, provider);
 
     const rows = db.query('SELECT line_start AS lineStart FROM memory_records ORDER BY line_start').all() as Array<{ lineStart: number }>;
 
@@ -302,7 +302,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePathA = join(archiveDir, 'session-a.jsonl');
     const archivePathB = join(archiveDir, 'session-b.jsonl');
@@ -335,11 +335,11 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePathA, 'claude-projects', parser, provider);
-    await reindexArchiveFile(db, archivePathB, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePathA, 'claude-code-projects', parser, provider);
+    await reindexArchiveFile(db, archivePathB, 'claude-code-projects', parser, provider);
     returnEmpty = true;
     writeFileSync(archivePathB, 'changed to no extracted memory');
-    await reindexArchiveFile(db, archivePathB, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePathB, 'claude-code-projects', parser, provider);
 
     const rows = db.query('SELECT archive_path AS archivePath, dedupe_key AS dedupeKey FROM memory_records ORDER BY archive_path')
       .all() as Array<{ archivePath: string; dedupeKey: string }>;
@@ -359,7 +359,7 @@ describe('reindexArchiveFile', () => {
     });
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -389,9 +389,9 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
     spanText = 'Updated durable fact.';
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
 
     const rows = db.query('SELECT text FROM memory_records').all() as Array<{ text: string }>;
     const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
@@ -408,7 +408,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -436,8 +436,8 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
-    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
+    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
 
     expect(firstResult.spansErrored).toBe(1);
     expect(secondResult.spansSkipped).toBe(1);
@@ -451,7 +451,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -477,7 +477,7 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const firstResult = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
     expect(firstResult.spansErrored).toBe(1);
 
     const stateAfterFirst = db.query('SELECT status, attempt_count AS attemptCount FROM extraction_state').get() as { status: string; attemptCount: number } | null;
@@ -487,7 +487,7 @@ describe('reindexArchiveFile', () => {
     // Manually set retry_after to past so the span is eligible for retry
     db.query('UPDATE extraction_state SET retry_after = ? WHERE archive_path = ?').run(Date.now() - 1_000, archivePath);
 
-    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const secondResult = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
     expect(secondResult.spansErrored).toBe(1);
 
     const stateAfterSecond = db.query('SELECT status, attempt_count AS attemptCount FROM extraction_state').get() as { status: string; attemptCount: number } | null;
@@ -501,7 +501,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -530,10 +530,10 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
     writeFileSync(archivePath, 'DO NOT INDEX THIS CONVERSATION');
 
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider);
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider);
     const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
     const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
 
@@ -556,7 +556,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -565,7 +565,7 @@ describe('reindexArchiveFile', () => {
       archivePath,
       lineStart: line,
       lineEnd: line,
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       sessionId: 's1',
       project: 'memmem',
       cwd: null,
@@ -590,7 +590,7 @@ describe('reindexArchiveFile', () => {
     };
 
     // Budget of 2 → only first two spans are extracted; the third is left untouched.
-    const first = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 2 });
+    const first = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider, { extractionBudget: 2 });
     expect(first.extractionsPerformed).toBe(2);
     expect(completeCalls).toBe(2);
 
@@ -598,7 +598,7 @@ describe('reindexArchiveFile', () => {
     expect(stateCount.count).toBe(2);
 
     // A later sync with budget picks up exactly the remaining span.
-    const second = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 10 });
+    const second = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider, { extractionBudget: 10 });
     expect(second.extractionsPerformed).toBe(1);
     expect(second.spansSkipped).toBe(2);
     expect(completeCalls).toBe(3);
@@ -610,7 +610,7 @@ describe('reindexArchiveFile', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     dir = mkdtempSync(join(tmpdir(), 'memmem-indexer-'));
-    const archiveDir = join(dir, 'claude-projects');
+    const archiveDir = join(dir, 'claude-code-projects');
     mkdirSync(archiveDir, { recursive: true });
     const archivePath = join(archiveDir, 'session.jsonl');
     writeFileSync(archivePath, 'transcript content');
@@ -638,7 +638,7 @@ describe('reindexArchiveFile', () => {
       },
     };
 
-    const result = await reindexArchiveFile(db, archivePath, 'claude-projects', parser, provider, { extractionBudget: 0 });
+    const result = await reindexArchiveFile(db, archivePath, 'claude-code-projects', parser, provider, { extractionBudget: 0 });
     expect(result.extractionsPerformed).toBe(0);
     expect(completeCalls).toBe(0);
   });

@@ -3,7 +3,7 @@ import { buildMemoryExtractPrompt, extractMemoryRecordsFromSpan, parseMemoryExtr
 import type { LLMProvider } from './types.js';
 
 const span: TranscriptSpanForExtraction = {
-  sourceKind: 'claude-projects',
+  sourceKind: 'claude-code-projects',
   archivePath: '/archive/session.jsonl',
   lineStart: 10,
   lineEnd: 20,
@@ -17,7 +17,7 @@ describe('memory extractor', () => {
     const prompt = buildMemoryExtractPrompt(span, 5);
 
     expect(prompt).toContain('<transcript_span');
-    expect(prompt).toContain('source_kind="claude-projects"');
+    expect(prompt).toContain('source_kind="claude-code-projects"');
     expect(prompt).toContain('archive_path="/archive/session.jsonl"');
     expect(prompt).toContain('lines="10-20"');
     expect(prompt).toContain('fact');

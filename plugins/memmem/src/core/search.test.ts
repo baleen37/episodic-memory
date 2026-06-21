@@ -18,7 +18,7 @@ function memory(overrides: Partial<Parameters<typeof insertMemoryRecord>[1]> = {
   return {
     kind: 'fact',
     text,
-    sourceKind: 'claude-projects',
+    sourceKind: 'claude-code-projects',
     archivePath,
     lineStart: 4,
     lineEnd: 8,
@@ -54,7 +54,7 @@ describe('memory search', () => {
       id,
       kind: 'fact',
       text: 'The transcript archive is the source of truth.',
-      sourceKind: 'claude-projects',
+      sourceKind: 'claude-code-projects',
       archivePath: '/archive/a.jsonl',
       lineStart: 4,
       lineEnd: 8,
@@ -71,7 +71,7 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const vectorId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/a.jsonl',
+      archivePath: '/archive/claude-code-projects/a.jsonl',
       text: 'Semantic memory vector result.',
       project: 'alpha',
       observedAt: Date.UTC(2026, 4, 26),
@@ -100,7 +100,7 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/a.jsonl',
+      archivePath: '/archive/claude-code-projects/a.jsonl',
       text: 'Filter me old.',
       observedAt: Date.UTC(2026, 4, 25),
       dedupeKey: 'old-filter',
@@ -125,13 +125,13 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const alphaId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/alpha.jsonl',
+      archivePath: '/archive/claude-code-projects/alpha.jsonl',
       text: 'Project text query alpha.',
       project: 'alpha',
       dedupeKey: 'alpha-text',
     }));
     insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/beta.jsonl',
+      archivePath: '/archive/claude-code-projects/beta.jsonl',
       text: 'Project text query beta.',
       project: 'beta',
       dedupeKey: 'beta-text',
@@ -148,14 +148,14 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const alphaId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/alpha-vector.jsonl',
+      archivePath: '/archive/claude-code-projects/alpha-vector.jsonl',
       text: 'Alpha semantic only.',
       project: 'alpha',
       dedupeKey: 'alpha-vector',
     }));
     insertMemoryRecordVector(db, alphaId, Array.from({ length: 384 }, () => 0.1));
     const betaId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/beta-vector.jsonl',
+      archivePath: '/archive/claude-code-projects/beta-vector.jsonl',
       text: 'Beta semantic only.',
       project: 'beta',
       dedupeKey: 'beta-vector',
@@ -184,7 +184,7 @@ describe('memory search', () => {
     };
 
     const id = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/normalized.jsonl',
+      archivePath: '/archive/claude-code-projects/normalized.jsonl',
       text: 'English normalized text fallback.',
       project: null,
       dedupeKey: 'normalized',
@@ -203,13 +203,13 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const literalId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/literal.jsonl',
+      archivePath: '/archive/claude-code-projects/literal.jsonl',
       text: 'Literal 100% match.',
       project: null,
       dedupeKey: 'literal-percent',
     }));
     insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/wildcard.jsonl',
+      archivePath: '/archive/claude-code-projects/wildcard.jsonl',
       text: 'Literal 100abc match.',
       project: null,
       dedupeKey: 'wildcard-percent',
@@ -227,7 +227,7 @@ describe('memory search', () => {
 
     for (let i = 0; i < 2; i++) {
       const id = insertMemoryRecord(db, memory({
-        archivePath: `/archive/claude-projects/closer-${i}.jsonl`,
+        archivePath: `/archive/claude-code-projects/closer-${i}.jsonl`,
         text: 'Closer unrelated.',
         dedupeKey: `closer-${i}`,
       }));
@@ -253,7 +253,7 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     const supersededId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/superseded-vector.jsonl',
+      archivePath: '/archive/claude-code-projects/superseded-vector.jsonl',
       text: 'Superseded semantic only memory.',
       status: 'superseded',
       dedupeKey: 'superseded-vector-top-k',
@@ -261,7 +261,7 @@ describe('memory search', () => {
     insertMemoryRecordVector(db, supersededId, Array.from({ length: 384 }, () => 0.1));
 
     const activeId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/active-vector.jsonl',
+      archivePath: '/archive/claude-code-projects/active-vector.jsonl',
       text: 'Active semantic only memory.',
       dedupeKey: 'active-vector-after-superseded',
     }));
@@ -278,7 +278,7 @@ describe('memory search', () => {
     __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
 
     insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/nulls.jsonl',
+      archivePath: '/archive/claude-code-projects/nulls.jsonl',
       text: 'Null shape result.',
       lineStart: 5,
       lineEnd: 6,
@@ -314,12 +314,12 @@ describe('memory search', () => {
 
     const longText = `long query ${'a'.repeat(500)}`;
     const activeId = insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/long.jsonl',
+      archivePath: '/archive/claude-code-projects/long.jsonl',
       text: longText,
       dedupeKey: 'long-active',
     }));
     insertMemoryRecord(db, memory({
-      archivePath: '/archive/claude-projects/superseded.jsonl',
+      archivePath: '/archive/claude-code-projects/superseded.jsonl',
       text: 'long query superseded',
       status: 'superseded',
       dedupeKey: 'long-superseded',
