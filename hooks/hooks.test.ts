@@ -31,6 +31,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const hooks = loadHooksJson();
 
     expect(hooks).toHaveProperty('hooks');
+    expect(Object.keys(hooks)).toEqual(['hooks']);
     expect(Object.keys(hooks.hooks)).toEqual(['SessionStart', 'Stop']);
 
     const sessionStartHooks = hooks.hooks.SessionStart;
@@ -45,7 +46,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background',
+      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
     });
   });
 
@@ -63,7 +64,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background',
+      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
     });
   });
 
@@ -86,8 +87,8 @@ describe('hooks.json sync-only hook configuration', () => {
 
     // Both SessionStart and Stop run the same self-backgrounding sync command.
     expect(commands).toEqual([
-      '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background',
-      '${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background',
+      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
+      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
     ]);
     for (const command of commands) {
       expect(command).not.toContain('recall');

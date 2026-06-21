@@ -1,5 +1,4 @@
 {
-  "$schema": "../../schemas/hooks-schema.json",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background"
+            "command": "\"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem\" sync --background"
           }
         ]
       }
@@ -17,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/memmem sync --background"
+            "command": "\"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem\" sync --background"
           }
         ]
       }
