@@ -112,6 +112,14 @@ describe('hooks.json sync-only hook configuration', () => {
     expect(mcpConfig.mcpServers.memmem.cwd).toBe('.');
   });
 
+  it('MCP launcher accepts both Claude and Codex plugin root environment names', () => {
+    const mcpCli = readRepoFile('src/cli/mcp.ts');
+
+    expect(mcpCli).toContain('process.env.PLUGIN_ROOT');
+    expect(mcpCli).toContain('process.env.CLAUDE_PLUGIN_ROOT');
+    expect(mcpCli).toContain('findRoot(__dirname)');
+  });
+
   it('uses bun for wrapper dependency installation and builds', () => {
     const dependencyChecker = readRepoFile('scripts/lib/check-dependencies.mjs');
 
