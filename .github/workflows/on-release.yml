@@ -10,9 +10,18 @@ jobs:
   dispatch-marketplace-update:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.BALEEN_RELEASE_APP_ID }}
+          private-key: ${{ secrets.BALEEN_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: baleen-marketplace
+
       - name: Dispatch update_versions to baleen-marketplace
         uses: baleen37/baleen-marketplace/.github/actions/repository-dispatch@main
         with:
-          token: ${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           event-type: update_versions
           client-payload: '{"plugin": "memmem", "version": "${{ github.event.release.tag_name }}"}'
