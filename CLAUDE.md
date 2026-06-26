@@ -134,7 +134,7 @@ When adding a provider: implement `LLMProvider`, export it from `index.ts`, and 
 MCP exposes only:
 
 - **`search`**: accepts `query` as a single string, or an array of 2-5 strings for multi-query AND search (returns only records matching every query, scored by mean similarity). `query` may be omitted to list the most recent records in reverse chronological order (combine with `after`/`before` for time-based recall like "what did I do today"). Returns compact memory records with `kind`, `text`, `archive_path`, `line_start`, `line_end`, `source_kind`, `project`, `timestamp`, and optional `score`.
-- **`read`**: renders archived transcript content for an archive path and optional line range.
+- **`fetch`**: takes a memory record `id` from a search result and returns that record's full source transcript, rendered as markdown.
 
 There is no summary detail or graph layer in the target architecture.
 

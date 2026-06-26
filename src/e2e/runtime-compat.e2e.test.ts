@@ -17,7 +17,6 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const BIN = join(REPO_ROOT, 'bin', 'memmem');
-const CLI_BUNDLE = join(REPO_ROOT, 'dist', 'cli-internal.mjs');
 const MCP_BUNDLE = join(REPO_ROOT, 'dist', 'mcp-server.mjs');
 
 const RUNTIME_ENVS: ReadonlyArray<readonly [string, Record<string, string | undefined>]> = [
@@ -179,7 +178,7 @@ describe('hooks.json command runs under each runtime env', () => {
 });
 
 describe('MCP server starts and lists tools under each runtime env', () => {
-  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and read', async (_label, runtimeEnv) => {
+  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and fetch', async (_label, runtimeEnv) => {
     const tmpHome = makeTmpHome();
     let client: Client | null = null;
     try {

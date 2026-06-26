@@ -29,7 +29,7 @@ memmem은 Claude Code와 Codex 양쪽에서 같은 기능을 제공해야 한다
 검증한다 (스모크 묶음, 각 케이스를 Codex env / Claude env 대칭으로):
 
 1. **hooks 명령 실셸 실행** — `hooks/hooks.json`의 SessionStart/Stop 명령 문자열을 실제 셸(`sh -c`)로, 각 런타임 env var만 세팅해 실행 → exit 0.
-2. **MCP 기동** — `bin/memmem mcp`를 각 런타임 env로 기동 → MCP `initialize` 핸드셰이크 성공 + `tools/list`에 `search`, `read` 존재.
+2. **MCP 기동** — `bin/memmem mcp`를 각 런타임 env로 기동 → MCP `initialize` 핸드셰이크 성공 + `tools/list`에 `search`, `fetch` 존재.
 3. **CLI 플로우** — fixture archive를 임시 config 경로에 두고 `sync`(exit 0 + archive 파일 생성) → `read`(archive 라인 출력). **search는 제외** (별도 spawn 프로세스라 임베딩 모델 모킹이 안 통하고, 의미적 정확도는 이미 `src/core/search.test.ts`가 mock으로 커버).
 
 검증하지 않는다:

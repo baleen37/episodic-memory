@@ -316,7 +316,7 @@ Expected: `compat:check` PASS.
 - Consumes: Task 1의 `MCP_BUNDLE`, `RUNTIME_ENVS`, `makeTmpHome`, `cleanup`. `@modelcontextprotocol/sdk` client(이미 설치됨: `node_modules/@modelcontextprotocol/sdk/dist/esm/client/{index,stdio}.js`).
 - Produces: 없음(최종 단계).
 
-배경: `StdioClientTransport`가 MCP 서버 프로세스를 spawn하고 `initialize` 핸드셰이크를 자동 처리한다. `client.listTools()`로 `search`, `read` tool 존재를 확인한다. `command: 'bun'`, `args: [MCP_BUNDLE]`로 띄우되 env에 임시 `HOME`을 넣어 격리한다.
+배경: `StdioClientTransport`가 MCP 서버 프로세스를 spawn하고 `initialize` 핸드셰이크를 자동 처리한다. `client.listTools()`로 `search`, `fetch` tool 존재를 확인한다. `command: 'bun'`, `args: [MCP_BUNDLE]`로 띄우되 env에 임시 `HOME`을 넣어 격리한다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -331,7 +331,7 @@ describe 추가:
 
 ```typescript
 describe('MCP server starts and lists tools under each runtime env', () => {
-  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and read', async (_label, runtimeEnv) => {
+  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and fetch', async (_label, runtimeEnv) => {
     const tmpHome = makeTmpHome();
     let client: Client | null = null;
     try {
@@ -350,7 +350,7 @@ describe('MCP server starts and lists tools under each runtime env', () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       expect(names).toContain('search');
-      expect(names).toContain('read');
+      expect(names).toContain('fetch');
     } finally {
       await client?.close();
       cleanup(tmpHome);
