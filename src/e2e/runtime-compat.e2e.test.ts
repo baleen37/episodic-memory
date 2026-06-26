@@ -12,6 +12,8 @@ import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readdirSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const BIN = join(REPO_ROOT, 'bin', 'memmem');
@@ -171,6 +173,34 @@ describe('hooks.json command runs under each runtime env', () => {
       );
       expect(code).toBe(0);
     } finally {
+      cleanup(tmpHome);
+    }
+  }, 30_000);
+});
+
+describe('MCP server starts and lists tools under each runtime env', () => {
+  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and read', async (_label, runtimeEnv) => {
+    const tmpHome = makeTmpHome();
+    let client: Client | null = null;
+    try {
+      const transport = new StdioClientTransport({
+        command: 'bun',
+        args: [MCP_BUNDLE],
+        env: {
+          ...(process.env as Record<string, string>),
+          ...(runtimeEnv as Record<string, string>),
+          HOME: tmpHome,
+        },
+      });
+      client = new Client({ name: 'memmem-e2e', version: '1.0.0' });
+      await client.connect(transport); // performs the initialize handshake
+
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      expect(names).toContain('search');
+      expect(names).toContain('fetch');
+    } finally {
+      await client?.close();
       cleanup(tmpHome);
     }
   }, 30_000);
