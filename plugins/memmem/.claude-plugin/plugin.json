@@ -1,6 +1,6 @@
 {
   "name": "memmem",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "Memmem - Conversation memory with semantic search across Claude Code and Codex sessions",
   "author": {
     "name": "Baleen"
