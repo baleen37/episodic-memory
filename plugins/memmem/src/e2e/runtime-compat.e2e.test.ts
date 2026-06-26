@@ -60,6 +60,99 @@ function runToCompletion(
   });
 }
 
+describe('CLI sync then read works under each runtime env (no LLM, no network)', () => {
+  /** Write a minimal two-line Claude transcript into an isolated CLAUDE_CONFIG_DIR. */
+  function seedClaudeTranscript(claudeConfigDir: string): void {
+    const projDir = join(claudeConfigDir, 'projects', 'demo');
+    mkdirSync(projDir, { recursive: true });
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'e2e smoke transcript' },
+        timestamp: '2026-06-26T00:00:00Z',
+        sessionId: 's-e2e',
+        cwd: '/tmp',
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'smoke reply' }] },
+        timestamp: '2026-06-26T00:00:01Z',
+        sessionId: 's-e2e',
+        cwd: '/tmp',
+      }),
+    ];
+    writeFileSync(join(projDir, 's-e2e.jsonl'), lines.join('\n') + '\n');
+  }
+
+  /** Find the first archived transcript file under the isolated HOME. */
+  function findArchiveFile(tmpHome: string): string | null {
+    const base = join(tmpHome, '.config', 'memmem', 'conversation-archive');
+    if (!existsSync(base)) return null;
+    const stack = [base];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) stack.push(full);
+        else if (entry.name.endsWith('.jsonl')) return full;
+      }
+    }
+    return null;
+  }
+
+  test.each(RUNTIME_ENVS)('%s env: sync archives and read renders it', async (_label, runtimeEnv) => {
+    const tmpHome = makeTmpHome();
+    try {
+      const claudeConfigDir = join(tmpHome, 'claude');
+      const codexHome = join(tmpHome, 'codex');
+      mkdirSync(codexHome, { recursive: true });
+      seedClaudeTranscript(claudeConfigDir);
+
+      const childEnv = {
+        ...runtimeEnv,
+        HOME: tmpHome,
+        CLAUDE_CONFIG_DIR: claudeConfigDir,
+        CODEX_HOME: codexHome,
+      };
+
+      // sync (foreground): exits 0 and writes an archive file even with no LLM.
+      const sync = await runToCompletion([BIN, 'sync'], childEnv, 60_000);
+      expect(sync.code).toBe(0);
+
+      const archiveFile = findArchiveFile(tmpHome);
+      expect(archiveFile).not.toBeNull();
+
+      // read: renders the archived transcript lines.
+      const read = await runToCompletion(
+        [BIN, 'read', archiveFile!, '--start-line', '1', '--end-line', '2'],
+        childEnv,
+        20_000,
+      );
+      expect(read.code).toBe(0);
+      expect(read.stdout).toContain('# Conversation');
+    } finally {
+      cleanup(tmpHome);
+    }
+  }, 90_000);
+
+  test.each(RUNTIME_ENVS)('%s env: background sync parent exits 0', async (_label, runtimeEnv) => {
+    const tmpHome = makeTmpHome();
+    try {
+      // --background detaches a child (unref) and the parent returns immediately.
+      // We only assert the parent's exit code; the detached child needs an
+      // embedding model and is intentionally not awaited (would be flaky).
+      const { code } = await runToCompletion(
+        [BIN, 'sync', '--background'],
+        { ...runtimeEnv, HOME: tmpHome },
+        20_000,
+      );
+      expect(code).toBe(0);
+    } finally {
+      cleanup(tmpHome);
+    }
+  }, 30_000);
+});
+
 describe('hooks.json command runs under each runtime env', () => {
   // The literal command shape from hooks/hooks.json. We exec it via `sh -c`
   // exactly as a runtime's shell would, so the ${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}
