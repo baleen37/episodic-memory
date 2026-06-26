@@ -35,3 +35,27 @@ jobs:
 
       - name: Run tests
         run: bun test --jobs=1
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Install native sqlite-vec for Linux
+        run: bun add -d sqlite-vec-linux-x64 --ignore-scripts
+
+      - name: Build
+        run: bun run build
+
+      - name: Runtime compatibility e2e
+        run: bun test src/e2e/
