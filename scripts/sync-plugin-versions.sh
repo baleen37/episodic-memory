@@ -42,12 +42,3 @@ jq \
    | .keywords = $keywords' \
   .codex-plugin/plugin.json > "$tmp"
 mv "$tmp" .codex-plugin/plugin.json
-
-tmp="$(mktemp)"
-jq \
-  --arg version "$version" \
-  --arg description "$description" \
-  '.plugins[0].version = $version
-   | .plugins[0].description = $description' \
-  .claude-plugin/marketplace.json > "$tmp"
-mv "$tmp" .claude-plugin/marketplace.json

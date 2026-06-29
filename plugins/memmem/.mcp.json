@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "memmem": {
-      "command": "./bin/memmem",
-      "args": ["mcp"],
-      "cwd": "."
-    }
-  }
-}

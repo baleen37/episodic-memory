@@ -10,9 +10,9 @@
  *
  * Run: bun --preload ./scripts/preload-sqlite.ts run scripts/bench-crosslingual.ts
  */
-import { openDatabase } from '../plugins/memmem/src/core/db.js';
-import { search } from '../plugins/memmem/src/core/search.js';
-import { resolveQueryNormalizer } from '../plugins/memmem/src/core/query-normalizer.js';
+import { openDatabase } from '../src/core/db.js';
+import { search } from '../src/core/search.js';
+import { resolveQueryNormalizer } from '../src/core/query-normalizer.js';
 
 const K = 10;
 

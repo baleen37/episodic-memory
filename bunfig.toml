@@ -4,11 +4,6 @@
 timeout = 15000
 # Preload script to set custom SQLite before tests run
 preload = ["./scripts/preload-sqlite.ts"]
-# Exclude the committed plugin mirror (plugins/memmem/**) from test discovery.
-# compat:check mirrors src/ into plugins/memmem/src/, so without this bun test
-# discovers and runs every test twice — once from the source, once from the
-# mirror — and the duplicated e2e suites race on shared resources (flaky).
-pathIgnorePatterns = ["plugins/**"]
 
 # Run tests serially to avoid module caching issues between tests
 # This is needed because bun:test's mock.module is hoisted globally

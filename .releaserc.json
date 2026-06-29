@@ -6,8 +6,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "jq --arg v \"${nextRelease.version}\" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json && bash scripts/sync-plugin-versions.sh && bun run build && bash scripts/sync-codex-marketplace-plugin.sh",
-        "successCmd": "RELEASE_VERSION=${nextRelease.version} bash scripts/dispatch-marketplace-update.sh"
+        "prepareCmd": "jq --arg v \"${nextRelease.version}\" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json && bash scripts/sync-plugin-versions.sh && bun run build"
       }
     ],
     [
@@ -17,9 +16,6 @@
           "package.json",
           ".claude-plugin/plugin.json",
           ".codex-plugin/plugin.json",
-          ".claude-plugin/marketplace.json",
-          ".agents/plugins/marketplace.json",
-          "plugins/memmem/**",
           "dist/**",
           "bin/**"
         ],

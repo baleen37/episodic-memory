@@ -28,7 +28,7 @@ jobs:
         run: bun run compat:check
 
       # Adds sqlite-vec-linux-x64 to package.json — must run AFTER compat:check,
-      # which asserts the root package.json matches the committed plugin mirror.
+      # which asserts the root package.json matches the plugin manifests.
       - name: Install native sqlite-vec for Linux
         run: bun add -d sqlite-vec-linux-x64 --ignore-scripts
 
