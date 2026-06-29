@@ -105,11 +105,14 @@ describe('hooks.json sync-only hook configuration', () => {
     expect(graceful).toContain("error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND'");
   });
 
-  it('routes MCP through bin/memmem mcp subcommand', () => {
+  it('routes MCP through the plugin-root aware bin/memmem mcp subcommand', () => {
     const mcpConfig = JSON.parse(readRepoFile('.mcp.json'));
 
-    expect(mcpConfig.mcpServers.memmem.command).toBe('./bin/memmem');
-    expect(mcpConfig.mcpServers.memmem.args).toEqual(['mcp']);
+    expect(mcpConfig.mcpServers.memmem.command).toBe('sh');
+    expect(mcpConfig.mcpServers.memmem.args).toEqual([
+      '-lc',
+      'exec "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/memmem" mcp',
+    ]);
     expect(mcpConfig.mcpServers.memmem.cwd).toBe('.');
   });
 
