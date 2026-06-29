@@ -11,8 +11,6 @@ CODEX_PLUGIN_FILE="$REPO_ROOT/.codex-plugin/plugin.json"
 CODEX_MARKETPLACE_FILE="$REPO_ROOT/.agents/plugins/marketplace.json"
 COPIED_PLUGIN_DIR="$REPO_ROOT/plugins/memmem"
 PACKAGE_FILE="$REPO_ROOT/package.json"
-DISPATCH_ACTION_SHA="12f7f29617c0083c78affd8c1e286e0a093fb0f9"
-
 fail() {
   echo "FAIL: $1"
   exit 1
@@ -196,10 +194,14 @@ assert_not_contains "$WORKFLOW_FILE" "jq --arg version"
 
 assert_contains "$ON_RELEASE_WORKFLOW_FILE" "release:"
 assert_contains "$ON_RELEASE_WORKFLOW_FILE" "types: [published]"
-assert_contains "$ON_RELEASE_WORKFLOW_FILE" "uses: baleen37/baleen-marketplace/.github/actions/dispatch-marketplace-update@$DISPATCH_ACTION_SHA"
-assert_contains "$ON_RELEASE_WORKFLOW_FILE" "github-token: \${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "uses: actions/create-github-app-token@v1"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "app-id: \${{ secrets.BALEEN_RELEASE_APP_ID }}"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "private-key: \${{ secrets.BALEEN_RELEASE_APP_PRIVATE_KEY }}"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "uses: baleen37/baleen-marketplace/.github/actions/repository-dispatch@main"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" "token: \${{ steps.app-token.outputs.token }}"
 assert_contains "$ON_RELEASE_WORKFLOW_FILE" "event-type: update_versions"
-assert_contains "$ON_RELEASE_WORKFLOW_FILE" "plugin: memmem"
-assert_not_contains "$ON_RELEASE_WORKFLOW_FILE" "dispatch-marketplace-update@main"
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" '"plugin": "memmem"'
+assert_contains "$ON_RELEASE_WORKFLOW_FILE" '"version": "${{ github.event.release.tag_name }}"'
+assert_not_contains "$ON_RELEASE_WORKFLOW_FILE" "dispatch-marketplace-update@"
 
 echo "PASS: update-versions and on-release workflow wiring is valid"
