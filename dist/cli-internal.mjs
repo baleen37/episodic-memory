@@ -2171,40 +2171,6 @@ function checkDependencies() {
   }
   return { installed: true, missing: [] };
 }
-function checkBuildNeeded() {
-  const mcpServerPath = join3(ROOT, "dist", "mcp-server.mjs");
-  const packageJsonPath = join3(ROOT, "package.json");
-  if (!existsSync4(mcpServerPath)) {
-    return { needsBuild: true, reason: "dist/mcp-server.mjs not found" };
-  }
-  const mcpServerMtime = statSync2(mcpServerPath).mtimeMs;
-  if (existsSync4(packageJsonPath)) {
-    const packageJsonMtime = statSync2(packageJsonPath).mtimeMs;
-    if (packageJsonMtime > mcpServerMtime) {
-      return { needsBuild: true, reason: "package.json newer than dist" };
-    }
-  }
-  const srcDir = join3(ROOT, "src");
-  if (existsSync4(srcDir)) {
-    const newest = newestSourceMtime(srcDir);
-    if (newest > mcpServerMtime) {
-      return { needsBuild: true, reason: "src newer than dist" };
-    }
-  }
-  return { needsBuild: false, reason: "" };
-}
-function newestSourceMtime(dir) {
-  let newest = 0;
-  for (const entry of readdirSync2(dir, { withFileTypes: true })) {
-    const full = join3(dir, entry.name);
-    if (entry.isDirectory()) {
-      newest = Math.max(newest, newestSourceMtime(full));
-    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
-      newest = Math.max(newest, statSync2(full).mtimeMs);
-    }
-  }
-  return newest;
-}
 function installDependencies(silent = false) {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
@@ -2248,39 +2214,6 @@ function installDependencies(silent = false) {
     }
   });
 }
-function runBuild() {
-  return new Promise((resolve, reject) => {
-    const isWindows = process.platform === "win32";
-    const bunCommand = isWindows ? "bun.exe" : "bun";
-    console.error("[memmem] Building plugin...");
-    let stderrOutput = "";
-    const child = spawn(bunCommand, ["run", "build", "--silent"], {
-      cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: isWindows
-    });
-    child.stdout.on("data", (data) => {
-      process.stderr.write(data);
-    });
-    child.stderr.on("data", (data) => {
-      stderrOutput += data.toString();
-      process.stderr.write(data);
-    });
-    child.on("exit", (code) => {
-      if (code === 0) {
-        console.error("[memmem] Build completed.");
-        resolve();
-      } else {
-        const error = new Error(`bun run build failed with exit code ${code}`);
-        error.stderr = stderrOutput;
-        reject(error);
-      }
-    });
-    child.on("error", (err) => {
-      reject(err);
-    });
-  });
-}
 function analyzeError(error) {
   const stderr = error.stderr || error.message || "";
   if (stderr.includes("EACCES") || stderr.includes("permission denied")) {
@@ -2319,21 +2252,16 @@ function findRoot2(start) {
   return start;
 }
 var PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot2(__dirname3);
-async function ensureDependenciesAndBuild() {
+async function ensureDependencies() {
   const { installed } = checkDependencies();
   if (!installed) {
     console.error("[memmem] Installing dependencies (first run only)...");
     await installDependencies(false);
   }
-  const { needsBuild, reason } = checkBuildNeeded();
-  if (needsBuild) {
-    console.error(`[memmem] Building plugin (${reason})...`);
-    await runBuild();
-  }
 }
 async function runMcpCli() {
   try {
-    await ensureDependenciesAndBuild();
+    await ensureDependencies();
   } catch (error) {
     const analysis = analyzeError(error);
     console.error("[memmem] ERROR: setup failed.");
