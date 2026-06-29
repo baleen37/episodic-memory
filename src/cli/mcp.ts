@@ -4,9 +4,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import {
   checkDependencies,
-  checkBuildNeeded,
   installDependencies,
-  runBuild,
   analyzeError,
 } from '../../scripts/lib/check-dependencies.mjs';
 
@@ -24,23 +22,20 @@ function findRoot(start: string): string {
 
 const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
-async function ensureDependenciesAndBuild(): Promise<void> {
+// 시작 시 빌드를 트리거하지 않는다. 빌드는 수 초가 걸려 MCP stdio 핸드셰이크를
+// 막고 시작 타임아웃을 유발한다. 배포본은 dist/가 이미 빌드되어 있으며, 누락 시
+// runMcpCli가 친절한 에러를 낸다(아래). 로컬 소스 개발 시엔 `bun run build` 사용.
+export async function ensureDependencies(): Promise<void> {
   const { installed } = checkDependencies();
   if (!installed) {
     console.error('[memmem] Installing dependencies (first run only)...');
     await installDependencies(false);
   }
-
-  const { needsBuild, reason } = checkBuildNeeded();
-  if (needsBuild) {
-    console.error(`[memmem] Building plugin (${reason})...`);
-    await runBuild();
-  }
 }
 
 export async function runMcpCli(): Promise<void> {
   try {
-    await ensureDependenciesAndBuild();
+    await ensureDependencies();
   } catch (error) {
     const analysis = analyzeError(error as Error);
     console.error('[memmem] ERROR: setup failed.');
