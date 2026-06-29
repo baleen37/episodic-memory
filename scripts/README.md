@@ -60,9 +60,8 @@ analyzeError(error: Error) -> { cause: string, fix: string }
 `verify-runtime-compatibility.test.sh` validates the runtime adapter surfaces that can be checked without Claude or Codex binaries:
 
 - `package.json` is the shared metadata source of truth.
-- `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` match shared package metadata.
+- `.claude-plugin/plugin.json` matches shared package metadata.
 - `.codex-plugin/plugin.json` has required Codex install metadata and MCP component paths.
-- `.agents/plugins/marketplace.json` points Codex at `./plugins/memmem`.
 
 Run:
 
