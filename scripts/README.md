@@ -84,7 +84,7 @@ Future runtimes should be added as adapter checks rather than by duplicating the
 `bin/memmem` is the single entrypoint for the plugin. It is a graceful wrapper executable (built from `src/cli-graceful.mjs`) that checks dependencies, then dispatches into the bundled CLI (`dist/cli-internal.mjs`).
 
 - **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync`.
-- **MCP** calls `./bin/memmem mcp` with `cwd: "."` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
+- **MCP** calls `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/memmem mcp` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
 
 The runtime respects `PLUGIN_ROOT` first, then `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
 
