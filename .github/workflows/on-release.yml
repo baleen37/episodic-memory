@@ -7,7 +7,7 @@ on:
 permissions: {}
 
 jobs:
-  dispatch-marketplace-update:
+  notify-marketplace:
     runs-on: ubuntu-latest
     steps:
       - name: Generate GitHub App token
@@ -19,9 +19,9 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: baleen-marketplace
 
-      - name: Dispatch update_versions to baleen-marketplace
-        uses: baleen37/baleen-marketplace/.github/actions/repository-dispatch@main
+      - name: Notify marketplace
+        uses: baleen37/baleen-marketplace/.github/actions/notify@v1
         with:
+          source: memmem
+          version: ${{ github.event.release.tag_name }}
           token: ${{ steps.app-token.outputs.token }}
-          event-type: update_versions
-          client-payload: '{"plugin": "memmem", "version": "${{ github.event.release.tag_name }}"}'
