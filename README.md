@@ -22,7 +22,7 @@ integrated into the Claude Code and Codex plugin ecosystems.
 
 ### `search-conversation`
 
-Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
+Search indexed event/fact memory records. Returns compact candidates with `id`, `kind`, `project`, `description`, and optional `score`. Use `fetch` with a returned `id` only when raw transcript evidence is needed.
 Saves context by searching first and reading archive lines only when needed.
 
 **The agent automatically:**

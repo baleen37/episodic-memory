@@ -112,9 +112,9 @@ describe('MCP Server - memmem__search tool', () => {
       expect(result.isError).toBe(true);
     });
 
-    test('rejects removed source_kind filter', async () => {
+    test('accepts source_kind filter advertised by the tool schema', async () => {
       const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-code-projects' });
-      expect(result.isError).toBe(true);
+      expect(result.isError).toBe(false);
     });
   });
 
@@ -131,6 +131,7 @@ describe('MCP Server - memmem__search tool', () => {
       expect(result.isError).toBe(false);
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed).toHaveProperty('results');
+      expect(parsed).not.toHaveProperty('usage');
     });
   });
 });

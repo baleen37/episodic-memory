@@ -6,7 +6,8 @@ import type { SearchInput, FetchInput } from './schemas.js';
 export interface SearchResult {
   id: string;
   kind: 'fact' | 'event';
-  text: string;
+  project: string | null;
+  description: string;
   score?: number;
 }
 
@@ -16,6 +17,7 @@ export async function handleSearch(params: SearchInput, db: Database): Promise<S
     limit: params.limit,
     after: params.after,
     before: params.before,
+    sourceKind: params.source_kind,
   };
   const results = params.query === undefined
     ? listRecent(options)
@@ -27,7 +29,8 @@ export async function handleSearch(params: SearchInput, db: Database): Promise<S
     const card: SearchResult = {
       id: String(result.id),
       kind: result.kind,
-      text: result.text,
+      project: result.project,
+      description: result.text,
     };
     if (result.score !== undefined) card.score = Math.round(result.score * 1000) / 1000;
     return card;

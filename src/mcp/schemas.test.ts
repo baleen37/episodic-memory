@@ -16,8 +16,16 @@ describe('MCP schemas', () => {
     });
   });
 
+  test('accepts source_kind search filter advertised by the MCP tool', () => {
+    expect(SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-code-projects' })).toEqual({
+      query: 'memory search',
+      limit: 10,
+      source_kind: 'claude-code-projects',
+    });
+  });
+
   test('rejects unknown search filter keys', () => {
-    expect(() => SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-code-projects' })).toThrow();
+    expect(() => SearchInputSchema.parse({ query: 'memory search', unknown: 'value' })).toThrow();
   });
 
   test('accepts array of 2-5 query strings', () => {
