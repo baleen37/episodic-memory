@@ -28,7 +28,7 @@ describe('handlers', () => {
     resetRateLimiters();
   });
 
-  test('maps search results to compact memory cards', async () => {
+  test('maps search results to compact memory candidates', async () => {
     insertMemoryRecord(db, {
       kind: 'fact',
       text: 'memory search transcript result',
@@ -50,7 +50,8 @@ describe('handlers', () => {
       {
         id: '1',
         kind: 'fact',
-        text: 'memory search transcript result',
+        project: 'memmem',
+        description: 'memory search transcript result',
       },
     ]);
   });
@@ -87,7 +88,7 @@ describe('handlers', () => {
 
     const results = await handleSearch({ limit: 10 }, db);
 
-    expect(results.map(c => c.text)).toEqual(['newer work', 'older work']);
+    expect(results.map(c => c.description)).toEqual(['newer work', 'older work']);
   });
 
   test('fetch returns the source transcript for a record id', () => {
@@ -218,7 +219,8 @@ describe('handlers', () => {
     const card = results.find(c => c.id === String(id2))!;
     expect(typeof card.id).toBe('string');
     expect(card).toHaveProperty('kind');
-    expect(card).toHaveProperty('text');
+    expect(card).toHaveProperty('project');
+    expect(card).toHaveProperty('description');
   });
 
   test('string query → single-search 동작이 그대로 유지된다', async () => {

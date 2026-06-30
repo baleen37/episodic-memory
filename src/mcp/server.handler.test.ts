@@ -55,10 +55,13 @@ describe('MCP Server Handlers', () => {
       expect(typeof results[0].id).toBe('string');
       expect(results[0]).toMatchObject({
         kind: 'event',
-        text: 'test query content answer text',
+        project: 'memmem',
+        description: 'test query content answer text',
       });
+      expect(results[0]).not.toHaveProperty('text');
       expect(results[0]).not.toHaveProperty('archive_path');
-      expect(results[0]).not.toHaveProperty('source_kind');
+      expect(results[0]).not.toHaveProperty('source');
+      expect(results[0]).not.toHaveProperty('next_action');
       expect(results[0]).not.toHaveProperty('timestamp');
     });
 

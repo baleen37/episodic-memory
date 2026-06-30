@@ -2,7 +2,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const searchTool: Tool = {
   name: 'search',
-  description: 'Search indexed event/fact memory records. Pass a single query string, or an array of 2-5 query strings for multi-query AND search (only records matching every query, ranked by mean similarity). Omit query entirely to list the most recent records in reverse chronological order — combine with after/before for time-based recall like "what did I do today" (e.g. after the current date). Returns compact memory cards (id, kind, text, score). Call the fetch tool with a result id to read the full source transcript.',
+  description: 'Find compact memory candidates. Returns id, kind, project, description, and optional score. Use fetch with a result id only when you need the source transcript.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -11,14 +11,14 @@ export const searchTool: Tool = {
           { type: 'string', minLength: 2 },
           { type: 'array', items: { type: 'string', minLength: 2 }, minItems: 2, maxItems: 5 },
         ],
-        description: 'Search query. A single string for normal search, or an array of 2-5 strings for multi-query AND search (returns only records matching ALL queries, scored by mean similarity). Optional — omit to list recent records by time (use with after/before).',
+        description: 'Search query. Use a string for normal search, an array of 2-5 strings for AND search, or omit to list recent records.',
       },
       limit: {
         type: 'integer',
         minimum: 1,
         maximum: 50,
         default: 10,
-        description: 'Maximum number of results to return',
+        description: 'Maximum candidate count to return',
       },
       after: {
         type: 'string',
@@ -49,7 +49,7 @@ export const searchTool: Tool = {
 
 export const fetchTool: Tool = {
   name: 'fetch',
-  description: 'Fetch the full source transcript for a memory record returned by search. Takes the record id and returns the original conversation transcript (rendered as markdown) for that memory.',
+  description: 'Read the source transcript for one memory candidate returned by search.',
   inputSchema: {
     type: 'object',
     properties: {
