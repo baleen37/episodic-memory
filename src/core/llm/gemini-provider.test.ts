@@ -97,6 +97,26 @@ describe('GeminiProvider', () => {
       expect(result.usage.output_tokens).toBe(5);
     });
 
+    it('should keep the default Gemini request timeout at 60 seconds', async () => {
+      const provider = new GeminiProvider('test-api-key', 'gemini-2.0-flash');
+      await provider.complete('test prompt');
+
+      expect(mockGetGenerativeModel).toHaveBeenCalledWith(
+        expect.any(Object),
+        { timeout: 60_000 },
+      );
+    });
+
+    it('should allow slow Gemma thinking-model extractions up to 120 seconds', async () => {
+      const provider = new GeminiProvider('test-api-key', 'gemma-4-31b-it');
+      await provider.complete('test prompt');
+
+      expect(mockGetGenerativeModel).toHaveBeenCalledWith(
+        expect.any(Object),
+        { timeout: 120_000 },
+      );
+    });
+
     it('should work with maxTokens option', async () => {
       const provider = new GeminiProvider('test-api-key');
       const options: LLMOptions = {

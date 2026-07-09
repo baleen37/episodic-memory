@@ -1131,6 +1131,9 @@ var exports_gemini_provider = {};
 __export(exports_gemini_provider, {
   GeminiProvider: () => GeminiProvider
 });
+function getRequestTimeoutMs(model) {
+  return model.startsWith("gemma-4-") ? GEMMA_THINKING_MODEL_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+}
 
 class GeminiProvider {
   client;
@@ -1167,7 +1170,7 @@ class GeminiProvider {
         hasSystemPrompt: !!options?.systemPrompt
       });
       const generativeModel = this.client.getGenerativeModel(modelParams, {
-        timeout: REQUEST_TIMEOUT_MS
+        timeout: getRequestTimeoutMs(this.model)
       });
       const result = await generativeModel.generateContent(prompt);
       const duration = Date.now() - startTime;
@@ -1212,7 +1215,7 @@ class GeminiProvider {
     };
   }
 }
-var DEFAULT_MODEL = "gemini-2.0-flash", REQUEST_TIMEOUT_MS = 60000;
+var DEFAULT_MODEL = "gemini-2.0-flash", REQUEST_TIMEOUT_MS = 60000, GEMMA_THINKING_MODEL_REQUEST_TIMEOUT_MS = 120000;
 var init_gemini_provider = __esm(() => {
   init_dist();
   init_logger();
