@@ -26,10 +26,16 @@ const DEFAULT_MODEL = 'gemini-2.0-flash';
  * Per-request timeout in milliseconds. Without it a single completion can hang
  * for many minutes (observed >12min), which keeps the sync lock held and lets
  * concurrent syncs pile up. Successful extraction durations observed in
- * production logs: p50 ~20s, p95 ~52s, p99 ~67s — 60s covers ~p98 while
- * keeping the cost of a hung request (× round-robin failover) bounded.
+ * production logs: p50 ~20s, p95 ~52s, p99 ~67s.
  */
 const REQUEST_TIMEOUT_MS = 60_000;
+const GEMMA_THINKING_MODEL_REQUEST_TIMEOUT_MS = 120_000;
+
+function getRequestTimeoutMs(model: string): number {
+  return model.startsWith('gemma-4-')
+    ? GEMMA_THINKING_MODEL_REQUEST_TIMEOUT_MS
+    : REQUEST_TIMEOUT_MS;
+}
 
 /**
  * LLM provider implementation using Google's Gemini API.
@@ -102,7 +108,7 @@ export class GeminiProvider implements LLMProvider {
       });
 
       const generativeModel = this.client.getGenerativeModel(modelParams, {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout: getRequestTimeoutMs(this.model),
       });
 
       const result = await generativeModel.generateContent(prompt);
