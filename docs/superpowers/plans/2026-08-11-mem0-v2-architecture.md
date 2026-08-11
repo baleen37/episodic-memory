@@ -865,6 +865,18 @@ The system prompt is long. Copy it verbatim from `mem0/configs/prompts.py:469-94
 
 Do **not** paraphrase, shorten, or translate it. Do not append the `use_input_language` Language Requirement block — storage is English.
 
+The upstream text is checked in as a test fixture at
+`src/core/memory/__fixtures__/additive-extraction-prompt.upstream.txt` (33,660 chars),
+and a test asserts the constant is byte-identical to it. Byte-identical means
+byte-identical: five lines carry **trailing whitespace** that editors strip
+silently. Generate the constant from the fixture with shell redirection rather
+than retyping or hand-editing it.
+
+The constant must be a **literal in the source file**. Do not `readFileSync` the
+fixture at runtime: `bun build` does not inline a runtime read, so the shipped
+bundle would throw `ENOENT` at import. The fixture exists for the test to compare
+against, not for production to load.
+
 Section order is fixed (`prompts.py:1035-1042`): Summary, Last k Messages, Recently Extracted Memories, Existing Memories, New Messages, Observation Date, Current Date, [Custom Instructions], `# Output:` — joined by `\n\n`.
 
 - [ ] **Step 1: Write the failing test**
