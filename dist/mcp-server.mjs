@@ -6663,7 +6663,7 @@ var init_logger = __esm(() => {
 });
 
 // src/core/llm/config.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join as join2 } from "path";
 function loadConfig() {
   const configDir = join2(process.env.HOME ?? "", ".config", "memmem");
@@ -6692,8 +6692,8 @@ function loadConfig() {
 var configFileDeps;
 var init_config = __esm(() => {
   configFileDeps = {
-    existsSync: existsSync2,
-    readFileSync: readFileSync2
+    existsSync,
+    readFileSync
   };
 });
 
@@ -6780,6 +6780,112 @@ var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, embeddingLimiter = null;
 var init_ratelimiter = __esm(() => {
   init_config();
   loadConfigFn = loadConfig;
+});
+
+// node_modules/@google/generative-ai/dist/index.mjs
+var SchemaType, ExecutableCodeLanguage, Outcome, HarmCategory, HarmBlockThreshold, HarmProbability, BlockReason, FinishReason, TaskType, FunctionCallingMode, DynamicRetrievalMode, Task, badFinishReasons;
+var init_dist = __esm(() => {
+  (function(SchemaType2) {
+    SchemaType2["STRING"] = "string";
+    SchemaType2["NUMBER"] = "number";
+    SchemaType2["INTEGER"] = "integer";
+    SchemaType2["BOOLEAN"] = "boolean";
+    SchemaType2["ARRAY"] = "array";
+    SchemaType2["OBJECT"] = "object";
+  })(SchemaType || (SchemaType = {}));
+  (function(ExecutableCodeLanguage2) {
+    ExecutableCodeLanguage2["LANGUAGE_UNSPECIFIED"] = "language_unspecified";
+    ExecutableCodeLanguage2["PYTHON"] = "python";
+  })(ExecutableCodeLanguage || (ExecutableCodeLanguage = {}));
+  (function(Outcome2) {
+    Outcome2["OUTCOME_UNSPECIFIED"] = "outcome_unspecified";
+    Outcome2["OUTCOME_OK"] = "outcome_ok";
+    Outcome2["OUTCOME_FAILED"] = "outcome_failed";
+    Outcome2["OUTCOME_DEADLINE_EXCEEDED"] = "outcome_deadline_exceeded";
+  })(Outcome || (Outcome = {}));
+  (function(HarmCategory2) {
+    HarmCategory2["HARM_CATEGORY_UNSPECIFIED"] = "HARM_CATEGORY_UNSPECIFIED";
+    HarmCategory2["HARM_CATEGORY_HATE_SPEECH"] = "HARM_CATEGORY_HATE_SPEECH";
+    HarmCategory2["HARM_CATEGORY_SEXUALLY_EXPLICIT"] = "HARM_CATEGORY_SEXUALLY_EXPLICIT";
+    HarmCategory2["HARM_CATEGORY_HARASSMENT"] = "HARM_CATEGORY_HARASSMENT";
+    HarmCategory2["HARM_CATEGORY_DANGEROUS_CONTENT"] = "HARM_CATEGORY_DANGEROUS_CONTENT";
+    HarmCategory2["HARM_CATEGORY_CIVIC_INTEGRITY"] = "HARM_CATEGORY_CIVIC_INTEGRITY";
+  })(HarmCategory || (HarmCategory = {}));
+  (function(HarmBlockThreshold2) {
+    HarmBlockThreshold2["HARM_BLOCK_THRESHOLD_UNSPECIFIED"] = "HARM_BLOCK_THRESHOLD_UNSPECIFIED";
+    HarmBlockThreshold2["BLOCK_LOW_AND_ABOVE"] = "BLOCK_LOW_AND_ABOVE";
+    HarmBlockThreshold2["BLOCK_MEDIUM_AND_ABOVE"] = "BLOCK_MEDIUM_AND_ABOVE";
+    HarmBlockThreshold2["BLOCK_ONLY_HIGH"] = "BLOCK_ONLY_HIGH";
+    HarmBlockThreshold2["BLOCK_NONE"] = "BLOCK_NONE";
+  })(HarmBlockThreshold || (HarmBlockThreshold = {}));
+  (function(HarmProbability2) {
+    HarmProbability2["HARM_PROBABILITY_UNSPECIFIED"] = "HARM_PROBABILITY_UNSPECIFIED";
+    HarmProbability2["NEGLIGIBLE"] = "NEGLIGIBLE";
+    HarmProbability2["LOW"] = "LOW";
+    HarmProbability2["MEDIUM"] = "MEDIUM";
+    HarmProbability2["HIGH"] = "HIGH";
+  })(HarmProbability || (HarmProbability = {}));
+  (function(BlockReason2) {
+    BlockReason2["BLOCKED_REASON_UNSPECIFIED"] = "BLOCKED_REASON_UNSPECIFIED";
+    BlockReason2["SAFETY"] = "SAFETY";
+    BlockReason2["OTHER"] = "OTHER";
+  })(BlockReason || (BlockReason = {}));
+  (function(FinishReason2) {
+    FinishReason2["FINISH_REASON_UNSPECIFIED"] = "FINISH_REASON_UNSPECIFIED";
+    FinishReason2["STOP"] = "STOP";
+    FinishReason2["MAX_TOKENS"] = "MAX_TOKENS";
+    FinishReason2["SAFETY"] = "SAFETY";
+    FinishReason2["RECITATION"] = "RECITATION";
+    FinishReason2["LANGUAGE"] = "LANGUAGE";
+    FinishReason2["BLOCKLIST"] = "BLOCKLIST";
+    FinishReason2["PROHIBITED_CONTENT"] = "PROHIBITED_CONTENT";
+    FinishReason2["SPII"] = "SPII";
+    FinishReason2["MALFORMED_FUNCTION_CALL"] = "MALFORMED_FUNCTION_CALL";
+    FinishReason2["OTHER"] = "OTHER";
+  })(FinishReason || (FinishReason = {}));
+  (function(TaskType2) {
+    TaskType2["TASK_TYPE_UNSPECIFIED"] = "TASK_TYPE_UNSPECIFIED";
+    TaskType2["RETRIEVAL_QUERY"] = "RETRIEVAL_QUERY";
+    TaskType2["RETRIEVAL_DOCUMENT"] = "RETRIEVAL_DOCUMENT";
+    TaskType2["SEMANTIC_SIMILARITY"] = "SEMANTIC_SIMILARITY";
+    TaskType2["CLASSIFICATION"] = "CLASSIFICATION";
+    TaskType2["CLUSTERING"] = "CLUSTERING";
+  })(TaskType || (TaskType = {}));
+  (function(FunctionCallingMode2) {
+    FunctionCallingMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
+    FunctionCallingMode2["AUTO"] = "AUTO";
+    FunctionCallingMode2["ANY"] = "ANY";
+    FunctionCallingMode2["NONE"] = "NONE";
+  })(FunctionCallingMode || (FunctionCallingMode = {}));
+  (function(DynamicRetrievalMode2) {
+    DynamicRetrievalMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
+    DynamicRetrievalMode2["MODE_DYNAMIC"] = "MODE_DYNAMIC";
+  })(DynamicRetrievalMode || (DynamicRetrievalMode = {}));
+  (function(Task2) {
+    Task2["GENERATE_CONTENT"] = "generateContent";
+    Task2["STREAM_GENERATE_CONTENT"] = "streamGenerateContent";
+    Task2["COUNT_TOKENS"] = "countTokens";
+    Task2["EMBED_CONTENT"] = "embedContent";
+    Task2["BATCH_EMBED_CONTENTS"] = "batchEmbedContents";
+  })(Task || (Task = {}));
+  badFinishReasons = [
+    FinishReason.RECITATION,
+    FinishReason.SAFETY,
+    FinishReason.LANGUAGE
+  ];
+});
+
+// src/core/llm/gemini-provider.ts
+var init_gemini_provider = __esm(() => {
+  init_dist();
+  init_logger();
+  init_ratelimiter();
+});
+
+// src/core/llm/zai-provider.ts
+var init_zai_provider = __esm(() => {
+  init_logger();
+  init_ratelimiter();
 });
 
 // node_modules/zod/v3/external.js
@@ -16724,7 +16830,7 @@ class StdioServerTransport {
   }
 }
 
-// src/core/db.ts
+// src/core/memory/schema.ts
 init_paths();
 import { Database } from "bun:sqlite";
 import path2 from "path";
@@ -16734,314 +16840,64 @@ import * as sqliteVec from "sqlite-vec";
 // src/core/constants.ts
 var EMBEDDING_DIM = 384;
 
-// src/core/migrations/001-project-columns.ts
-import { readFileSync } from "fs";
-
-// src/core/project.ts
-import { execFileSync } from "child_process";
-var UNKNOWN = { project: "unknown", projectName: "unknown" };
-function normalizeRepoRoot(cwd) {
-  const marker = "/.worktrees/";
-  const i = cwd.indexOf(marker);
-  const root = i >= 0 ? cwd.slice(0, i) : cwd;
-  return root.replace(/\/+$/, "");
+// src/core/memory/schema.ts
+function createMemorySchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id         TEXT PRIMARY KEY,
+      memory     TEXT NOT NULL,
+      hash       TEXT NOT NULL,
+      metadata   TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_hash ON memories(hash)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id  TEXT NOT NULL,
+      old_memory TEXT,
+      new_memory TEXT,
+      event      TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_history_memory_id ON history(memory_id)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS entities (
+      id                TEXT PRIMARY KEY,
+      data              TEXT NOT NULL,
+      entity_type       TEXT,
+      linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+      created_at        INTEGER NOT NULL
+    )
+  `);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
 }
-function leaf(repoRoot) {
-  const parts = repoRoot.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "unknown";
-}
-function parseOrgRepo(remoteUrl) {
-  let s = remoteUrl.trim();
-  if (!s)
-    return null;
-  const scp = s.match(/^[^@]+@[^:]+:(.+)$/);
-  if (scp) {
-    s = scp[1];
-  } else {
-    const proto = s.match(/^[a-z]+:\/\/[^/]+\/(.+)$/i);
-    if (proto)
-      s = proto[1];
-    else if (s.includes("://") || s.includes("@"))
-      return null;
-    else if (!s.includes("/"))
-      return null;
-  }
-  s = s.replace(/\.git$/, "").replace(/\/+$/, "");
-  const parts = s.split("/").filter(Boolean);
-  if (parts.length < 2)
-    return null;
-  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-}
-var defaultGitReader = {
-  readRemoteOrgRepo(repoRoot) {
-    try {
-      const url = execFileSync("git", ["-C", repoRoot, "config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-      if (!url)
-        return null;
-      return parseOrgRepo(url);
-    } catch {
-      return null;
-    }
-  }
-};
-function resolveProject(cwd, opts = {}) {
-  if (!cwd)
-    return UNKNOWN;
-  const repoRoot = normalizeRepoRoot(cwd);
-  if (!repoRoot)
-    return UNKNOWN;
-  const reader = opts.gitReader ?? defaultGitReader;
-  const orgRepo = reader.readRemoteOrgRepo(repoRoot);
-  if (orgRepo) {
-    const name2 = orgRepo.split("/").filter(Boolean).pop() ?? orgRepo;
-    return { project: orgRepo, projectName: name2 };
-  }
-  const name = leaf(repoRoot);
-  return { project: name, projectName: name };
-}
-
-// src/core/migrations/001-project-columns.ts
-function hasColumn(db, table, column) {
-  const cols = db.query(`PRAGMA table_info(${table})`).all();
-  return cols.some((c) => c.name === column);
-}
-function readCwdFromArchive(archivePath) {
-  let content;
-  try {
-    content = readFileSync(archivePath, "utf8");
-  } catch {
-    return null;
-  }
-  for (const line of content.split(`
-`)) {
-    if (!line.trim())
-      continue;
-    try {
-      const obj = JSON.parse(line);
-      const cwd = typeof obj.cwd === "string" ? obj.cwd : typeof obj.payload?.cwd === "string" ? obj.payload.cwd : null;
-      if (cwd)
-        return cwd;
-    } catch {}
-  }
-  return null;
-}
-var projectColumnsMigration = {
-  version: 1,
-  name: "project-columns",
-  up(db) {
-    const run = db.transaction(() => {
-      if (!hasColumn(db, "memory_records", "project_name")) {
-        db.exec("ALTER TABLE memory_records ADD COLUMN project_name TEXT");
-      }
-      const paths = db.query(`SELECT DISTINCT archive_path AS p FROM memory_records
-           WHERE status = 'active' AND project IS NULL`).all();
-      const update = db.prepare(`UPDATE memory_records SET project = ?, project_name = ?
-         WHERE archive_path = ? AND project IS NULL`);
-      for (const { p } of paths) {
-        const cwd = readCwdFromArchive(p);
-        const { project, projectName } = resolveProject(cwd);
-        update.run(project, projectName, p);
-      }
-    });
-    run();
-  }
-};
-
-// src/core/migrations/002-source-kind-rename.ts
-import { existsSync, mkdirSync, renameSync } from "fs";
-import { dirname, sep } from "path";
-var RENAMES = [
-  { oldKind: "claude-projects", newKind: "claude-code-projects" },
-  { oldKind: "claude-transcripts", newKind: "claude-code-transcripts" }
-];
-function rewriteArchivePath(archivePath, oldKind, newKind) {
-  const oldSegment = `${sep}${oldKind}${sep}`;
-  const index = archivePath.indexOf(oldSegment);
-  if (index < 0)
-    return archivePath;
-  return `${archivePath.slice(0, index)}${sep}${newKind}${sep}${archivePath.slice(index + oldSegment.length)}`;
-}
-function moveArchiveFile(oldPath, newPath) {
-  if (oldPath === newPath || !existsSync(oldPath) || existsSync(newPath)) {
-    return;
-  }
-  mkdirSync(dirname(newPath), { recursive: true });
-  renameSync(oldPath, newPath);
-}
-function rewriteTableArchivePaths(db, table, oldKind, newKind) {
-  const rows = db.query(`
-    SELECT DISTINCT archive_path AS archivePath
-    FROM ${table}
-    WHERE archive_path LIKE ?
-  `).all(`%${sep}${oldKind}${sep}%`);
-  const update = db.prepare(`UPDATE ${table} SET archive_path = ? WHERE archive_path = ?`);
-  for (const { archivePath } of rows) {
-    const newArchivePath = rewriteArchivePath(archivePath, oldKind, newKind);
-    moveArchiveFile(archivePath, newArchivePath);
-    update.run(newArchivePath, archivePath);
-  }
-}
-function rewriteSourceKind(db, table, oldKind, newKind) {
-  db.query(`UPDATE ${table} SET source_kind = ? WHERE source_kind = ?`).run(newKind, oldKind);
-}
-var sourceKindRenameMigration = {
-  version: 2,
-  name: "source-kind-rename",
-  up(db) {
-    const run = db.transaction(() => {
-      for (const { oldKind, newKind } of RENAMES) {
-        rewriteTableArchivePaths(db, "memory_records", oldKind, newKind);
-        rewriteTableArchivePaths(db, "extraction_state", oldKind, newKind);
-        rewriteTableArchivePaths(db, "archive_index_state", oldKind, newKind);
-        rewriteSourceKind(db, "memory_records", oldKind, newKind);
-        rewriteSourceKind(db, "extraction_state", oldKind, newKind);
-      }
-    });
-    run();
-  }
-};
-
-// src/core/migrations/index.ts
-var MIGRATIONS = [projectColumnsMigration, sourceKindRenameMigration];
-function getUserVersion(db) {
-  return db.query("PRAGMA user_version").get().user_version;
-}
-function runMigrationsWith(db, migrations) {
-  const current = getUserVersion(db);
-  const pending = [...migrations].sort((a, b) => a.version - b.version).filter((m) => m.version > current);
-  for (const m of pending) {
-    m.up(db);
-    db.exec(`PRAGMA user_version = ${m.version}`);
-  }
-}
-function runMigrations(db) {
-  runMigrationsWith(db, MIGRATIONS);
-}
-
-// src/core/db.ts
-var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
-if (process.platform === "darwin" && !isTestEnvironment && true) {
-  try {
-    Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
-  } catch {}
-}
-function isWipeAllowed(isTestEnv, nodeEnv) {
-  return isTestEnv || nodeEnv === "test";
-}
-function openDatabase() {
-  return createDatabase(false);
-}
-function createDatabase(wipe) {
+function openMemoryDb() {
   const dbPath = getDbPath();
   const dbDir = path2.dirname(dbPath);
   if (dbPath !== ":memory:" && !fs2.existsSync(dbDir)) {
     fs2.mkdirSync(dbDir, { recursive: true });
   }
-  if (wipe && dbPath !== ":memory:") {
-    if (!isWipeAllowed(isTestEnvironment, "development")) {
-      throw new Error("initDatabase() wipes the database and is for tests only. Use openDatabase() in production.");
-    }
-    for (const suffix of ["", "-wal", "-shm"]) {
-      const filePath = `${dbPath}${suffix}`;
-      if (fs2.existsSync(filePath)) {
-        fs2.unlinkSync(filePath);
-      }
-    }
-  }
   const db = new Database(dbPath);
   sqliteVec.load(db);
-  db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA synchronous = NORMAL");
-  createSchema(db);
+  createMemorySchema(db);
   return db;
-}
-function createSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memory_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('fact', 'event')),
-      text TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      archive_path TEXT NOT NULL,
-      line_start INTEGER NOT NULL,
-      line_end INTEGER NOT NULL,
-      observed_at INTEGER,
-      project TEXT,
-      project_name TEXT,
-      confidence REAL NOT NULL DEFAULT 1.0,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
-      supersedes_id INTEGER,
-      dedupe_key TEXT NOT NULL,
-      extraction_version INTEGER NOT NULL,
-      embedding_version INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  db.exec("DROP INDEX IF EXISTS idx_memory_records_dedupe_key");
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key, archive_path, line_start, line_end)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_kind ON memory_records(kind)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_archive_path ON memory_records(archive_path)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_observed_at ON memory_records(observed_at)");
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_records USING vec0(
-      embedding float[${EMBEDDING_DIM}]
-    )
-  `);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS extraction_state (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source_kind TEXT NOT NULL,
-      archive_path TEXT NOT NULL,
-      line_start INTEGER NOT NULL,
-      line_end INTEGER NOT NULL,
-      source_hash TEXT NOT NULL,
-      extraction_version INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
-      error_message TEXT,
-      retry_after INTEGER,
-      attempt_count INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
-    )
-  `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS archive_index_state (
-      archive_path TEXT PRIMARY KEY,
-      content_mtime_ms REAL NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  migrateExtractionState(db);
-  runMigrations(db);
-}
-function migrateExtractionState(db) {
-  const cols = db.query("PRAGMA table_info(extraction_state)").all();
-  const hasAttemptCount = cols.some((c) => c.name === "attempt_count");
-  if (!hasAttemptCount) {
-    db.exec("ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
-  }
 }
 // src/mcp/schemas.ts
 var SearchInputSchema = exports_external.object({
-  query: exports_external.union([
-    exports_external.string().min(2),
-    exports_external.array(exports_external.string().min(2)).min(2).max(5)
-  ]).optional(),
-  limit: exports_external.number().int().min(1).max(50).default(10),
-  after: exports_external.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  before: exports_external.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  source_kind: exports_external.string().min(1).optional()
-}).strict();
-var FetchInputSchema = exports_external.object({
-  id: exports_external.union([exports_external.string().min(1), exports_external.number().int()])
+  query: exports_external.string().min(1),
+  limit: exports_external.number().int().min(1).max(50).optional(),
+  threshold: exports_external.number().min(0).max(1).optional(),
+  explain: exports_external.boolean().optional()
 }).strict();
 
 // src/core/embeddings-model.ts
@@ -17109,694 +16965,360 @@ async function run(kind, text) {
   }
 }
 
-// src/core/search.ts
-init_logger();
-function isValidCalendarDate(dateStr) {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  const date4 = new Date(Date.UTC(year, month - 1, day));
-  return date4.getUTCFullYear() === year && date4.getUTCMonth() === month - 1 && date4.getUTCDate() === day;
-}
-function validateISODate(dateStr, paramName) {
-  const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!isoDateRegex.test(dateStr)) {
-    throw new Error(`Invalid ${paramName} date: "${dateStr}". Expected YYYY-MM-DD format (e.g., 2025-10-01)`);
-  }
-  if (!isValidCalendarDate(dateStr)) {
-    throw new Error(`Invalid ${paramName} date: "${dateStr}". Not a valid calendar date.`);
+// src/core/memory/filters.ts
+var SCOPING_KEYS = ["user_id", "agent_id", "run_id"];
+function assertScoped(filters) {
+  const hasScope = SCOPING_KEYS.some((key) => filters[key] !== undefined);
+  if (!hasScope) {
+    throw new Error("filters must include at least one of: user_id, agent_id, run_id");
   }
 }
-function isoToTimestamp(isoDate) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return Date.UTC(year, month - 1, day);
+function field(key) {
+  if (!/^[A-Za-z0-9_]+$/.test(key)) {
+    throw new Error(`Invalid metadata filter key: ${key}`);
+  }
+  return `json_extract(metadata, '$.${key}')`;
 }
-function isoToExclusiveNextDayTimestamp(isoDate) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return Date.UTC(year, month - 1, day + 1);
+function escapeLike(value) {
+  return value.replace(/[\\%_]/g, (m) => `\\${m}`);
 }
-function escapeLikePattern(value) {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+function escapeGlob(value) {
+  return value.replace(/[\[*?]/g, (m) => `[${m}]`);
 }
-function makeLikePattern(value) {
-  return `%${escapeLikePattern(value)}%`;
+function operatorClause(key, op, params) {
+  const parts = [];
+  const col = field(key);
+  if ("eq" in op) {
+    parts.push(`${col} = ?`);
+    params.push(op.eq);
+  }
+  if ("ne" in op) {
+    parts.push(`${col} != ?`);
+    params.push(op.ne);
+  }
+  if (op.in) {
+    parts.push(`${col} IN (${op.in.map(() => "?").join(", ")})`);
+    params.push(...op.in);
+  }
+  if (op.nin) {
+    parts.push(`${col} NOT IN (${op.nin.map(() => "?").join(", ")})`);
+    params.push(...op.nin);
+  }
+  if ("gt" in op) {
+    parts.push(`${col} > ?`);
+    params.push(op.gt);
+  }
+  if ("gte" in op) {
+    parts.push(`${col} >= ?`);
+    params.push(op.gte);
+  }
+  if ("lt" in op) {
+    parts.push(`${col} < ?`);
+    params.push(op.lt);
+  }
+  if ("lte" in op) {
+    parts.push(`${col} <= ?`);
+    params.push(op.lte);
+  }
+  if (op.contains !== undefined) {
+    parts.push(`${col} GLOB ?`);
+    params.push(`*${escapeGlob(op.contains)}*`);
+  }
+  if (op.icontains !== undefined) {
+    parts.push(`${col} LIKE ? ESCAPE '\\'`);
+    params.push(`%${escapeLike(op.icontains)}%`);
+  }
+  return parts.length > 1 ? `(${parts.join(" AND ")})` : parts[0] ?? "1=1";
 }
-function buildFilterParts(options) {
-  const { after, before, sourceKind, projects, files } = options;
-  const filters = [];
+function buildFilterSql(filters) {
   const params = [];
-  if (after) {
-    filters.push("m.observed_at >= ?");
-    params.push(isoToTimestamp(after));
-  }
-  if (before) {
-    filters.push("m.observed_at < ?");
-    params.push(isoToExclusiveNextDayTimestamp(before));
-  }
-  if (sourceKind) {
-    filters.push("m.source_kind = ?");
-    params.push(sourceKind);
-  }
-  if (projects && projects.length > 0) {
-    filters.push(`m.project IN (${projects.map(() => "?").join(", ")})`);
-    params.push(...projects);
-  }
-  if (files && files.length > 0) {
-    const fileFilters = [];
-    for (const file of files) {
-      fileFilters.push(`(
-        m.archive_path LIKE ? ESCAPE '\\'
-        OR m.text LIKE ? ESCAPE '\\'
-      )`);
-      const pattern = makeLikePattern(file);
-      params.push(pattern, pattern);
+  const clause = build(filters, params);
+  return { clause, params };
+}
+function build(filters, params) {
+  const parts = [];
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined)
+      continue;
+    if (key === "AND") {
+      const sub = value.map((f) => build(f, params)).filter(Boolean);
+      if (sub.length)
+        parts.push(`(${sub.join(" AND ")})`);
+      continue;
     }
-    filters.push(`(${fileFilters.join(" OR ")})`);
+    if (key === "OR") {
+      const sub = value.map((f) => build(f, params)).filter(Boolean);
+      if (sub.length)
+        parts.push(`(${sub.join(" OR ")})`);
+      continue;
+    }
+    if (key === "NOT") {
+      const sub = build(value, params);
+      if (sub)
+        parts.push(`NOT (${sub})`);
+      continue;
+    }
+    if (value === "*") {
+      parts.push(`${field(key)} IS NOT NULL`);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      parts.push(`${field(key)} IN (${value.map(() => "?").join(", ")})`);
+      params.push(...value);
+      continue;
+    }
+    if (value !== null && typeof value === "object") {
+      parts.push(operatorClause(key, value, params));
+      continue;
+    }
+    parts.push(`${field(key)} = ?`);
+    params.push(value);
   }
-  return {
-    clause: filters.length > 0 ? `AND ${filters.join(" AND ")}` : "",
-    params,
-    hasFilters: filters.length > 0
-  };
+  return parts.join(" AND ");
 }
-async function normalizeQuery(query, provider) {
-  if (!provider) {
-    return query;
-  }
-  try {
-    const result = await provider.complete(`Normalize this search query to concise English. Return only the normalized query.
 
-Query: ${query}`);
-    const normalized = result.text.trim();
-    return normalized || query;
-  } catch {
-    return query;
-  }
+// src/core/memory/scoring.ts
+var ENTITY_BOOST_WEIGHT = 0.5;
+function lemmatizeForBm25(text) {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
-function mapRow(row) {
-  const result = {
-    id: row.id,
-    kind: row.kind,
-    text: row.text.length > 400 ? `${row.text.slice(0, 397)}...` : row.text,
-    sourceKind: row.sourceKind,
-    archivePath: row.archivePath,
-    lineStart: row.lineStart,
-    lineEnd: row.lineEnd,
-    observedAt: row.observedAt,
-    project: row.project
-  };
-  if (row.distance !== undefined) {
-    result.score = 1 / (1 + row.distance);
-  }
-  return result;
+function getBm25Params(query, lemmatized) {
+  const lemma = lemmatized ?? lemmatizeForBm25(query);
+  const numTerms = lemma ? lemma.split(" ").length : 1;
+  if (numTerms <= 3)
+    return [5, 0.7];
+  if (numTerms <= 6)
+    return [7, 0.6];
+  if (numTerms <= 9)
+    return [9, 0.5];
+  if (numTerms <= 15)
+    return [10, 0.5];
+  return [12, 0.5];
 }
+function normalizeBm25(rawScore, midpoint, steepness) {
+  return 1 / (1 + Math.exp(-steepness * (rawScore - midpoint)));
+}
+function scoreAndRank(args) {
+  const { semanticResults, bm25Scores, entityBoosts, threshold, topK, explain = false } = args;
+  const hasBm25 = Object.keys(bm25Scores).length > 0;
+  const hasEntity = Object.keys(entityBoosts).length > 0;
+  let maxPossible = 1;
+  if (hasBm25)
+    maxPossible += 1;
+  if (hasEntity)
+    maxPossible += ENTITY_BOOST_WEIGHT;
+  const scored = [];
+  for (const result of semanticResults) {
+    if (result.id === null || result.id === undefined)
+      continue;
+    const semanticScore = result.score || 0;
+    if (semanticScore < threshold)
+      continue;
+    const memIdStr = String(result.id);
+    const bm25Score = bm25Scores[memIdStr] ?? 0;
+    const entityBoost = entityBoosts[memIdStr] ?? 0;
+    const rawCombined = semanticScore + bm25Score + entityBoost;
+    const combined = Math.min(rawCombined / maxPossible, 1);
+    const scoredResult = {
+      id: memIdStr,
+      score: combined,
+      payload: result.payload
+    };
+    if (explain) {
+      scoredResult.score_details = {
+        semantic_score: semanticScore,
+        bm25_score: bm25Score,
+        entity_boost: entityBoost,
+        raw_score: rawCombined,
+        max_possible_score: maxPossible,
+        final_score: combined,
+        threshold
+      };
+    }
+    scored.push(scoredResult);
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK);
+}
+
+// src/core/memory/search.ts
 var MAX_KNN_K = 4096;
-function runVectorQuery(embedding, k, returnCount, options) {
-  const { db } = options;
-  const filterParts = buildFilterParts(options);
-  const stmt = db.query(`
-    SELECT
-      m.id,
-      m.kind,
-      m.text,
-      m.archive_path AS archivePath,
-      m.line_start AS lineStart,
-      m.line_end AS lineEnd,
-      m.source_kind AS sourceKind,
-      m.project,
-      m.observed_at AS observedAt,
-      vec.distance AS distance
-    FROM vec_memory_records vec
-    INNER JOIN memory_records m ON m.id = vec.rowid
-    WHERE vec.embedding MATCH ?
-      AND vec.k = ?
-      AND m.status = 'active'
-      ${filterParts.clause}
+var PROMOTED_PAYLOAD_KEYS = [
+  "user_id",
+  "agent_id",
+  "run_id",
+  "actor_id",
+  "role",
+  "attributed_to",
+  "expiration_date"
+];
+function validateThreshold(threshold) {
+  if (typeof threshold !== "number" || Number.isNaN(threshold)) {
+    throw new Error("threshold must be a valid number");
+  }
+  if (threshold < 0 || threshold > 1) {
+    throw new Error(`Invalid threshold: ${threshold}. Must be between 0 and 1 (inclusive).`);
+  }
+}
+async function searchMemories(args) {
+  const { db, query, filters, limit = 20, explain = false } = args;
+  const threshold = args.threshold ?? 0.1;
+  validateThreshold(threshold);
+  assertScoped(filters);
+  const queryLemmatized = lemmatizeForBm25(query);
+  const embedding = await embedQuery(query);
+  if (!embedding)
+    return { results: [] };
+  const internalLimit = Math.max(limit * 4, 60);
+  const { clause, params } = buildFilterSql(filters);
+  const filterClause = clause ? `AND ${clause}` : "";
+  const vectorCount = db.query("SELECT COUNT(*) AS c FROM vec_memories").get().c;
+  if (vectorCount === 0)
+    return { results: [] };
+  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(internalLimit, 1));
+  const semanticRows = db.query(`
+    SELECT m.id AS id, m.memory AS memory, m.hash AS hash, m.metadata AS metadata,
+           m.created_at AS created_at, m.updated_at AS updated_at,
+           m.rowid AS rowid, vec.distance AS distance
+    FROM vec_memories vec
+    INNER JOIN memories m ON m.rowid = vec.rowid
+    WHERE vec.embedding MATCH ? AND vec.k = ?
+      ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `);
-  const rows = stmt.all(Buffer.from(new Float32Array(embedding).buffer), k, ...filterParts.params, returnCount);
-  return rows.map(mapRow);
-}
-async function vectorSearch(query, options) {
-  const { db, limit = 10 } = options;
-  log.debug("vector search start", { query, limit });
-  const vecStart = Date.now();
-  const embedding = await embedQuery(query);
-  if (!embedding) {
-    return [];
-  }
-  const vectorCount = db.query("SELECT COUNT(*) AS count FROM vec_memory_records").get().count;
-  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(limit * 64, 1000));
-  const results = runVectorQuery(embedding, k, limit, options);
-  log.debug("vector results", { count: results.length, ms: Date.now() - vecStart });
-  return results;
-}
-function textSearch(queries, options) {
-  const { db, limit = 10 } = options;
-  const filterParts = buildFilterParts(options);
-  const queryClauses = queries.map(() => "m.text LIKE ? ESCAPE '\\'");
-  const queryParams = queries.map((query) => makeLikePattern(query));
-  const stmt = db.query(`
-    SELECT
-      m.id,
-      m.kind,
-      m.text,
-      m.archive_path AS archivePath,
-      m.line_start AS lineStart,
-      m.line_end AS lineEnd,
-      m.source_kind AS sourceKind,
-      m.project,
-      m.observed_at AS observedAt
-    FROM memory_records m
-    WHERE (${queryClauses.join(" OR ")})
-      AND m.status = 'active'
-      ${filterParts.clause}
-    ORDER BY m.observed_at DESC
-    LIMIT ?
-  `);
-  const rows = stmt.all(...queryParams, ...filterParts.params, limit);
-  return rows.map(mapRow);
-}
-function listRecent(options) {
-  const { db, limit = 10, after, before } = options;
-  if (after)
-    validateISODate(after, "--after");
-  if (before)
-    validateISODate(before, "--before");
-  const filterParts = buildFilterParts(options);
-  const stmt = db.query(`
-    SELECT
-      m.id,
-      m.kind,
-      m.text,
-      m.archive_path AS archivePath,
-      m.line_start AS lineStart,
-      m.line_end AS lineEnd,
-      m.source_kind AS sourceKind,
-      m.project,
-      m.observed_at AS observedAt
-    FROM memory_records m
-    WHERE m.status = 'active'
-      ${filterParts.clause}
-    ORDER BY m.observed_at DESC
-    LIMIT ?
-  `);
-  const rows = stmt.all(...filterParts.params, limit);
-  return rows.map(mapRow);
-}
-function getMemoryRecordLocation(db, id) {
-  const row = db.query(`
-    SELECT
-      archive_path AS archivePath,
-      line_start AS lineStart,
-      line_end AS lineEnd
-    FROM memory_records
-    WHERE id = ? AND status = 'active'
-  `).get(id);
-  return row ?? null;
-}
-async function search(query, options) {
-  const { limit = 10, after, before } = options;
-  if (after)
-    validateISODate(after, "--after");
-  if (before)
-    validateISODate(before, "--before");
-  const normalizedQuery = await normalizeQuery(query, options.queryNormalizerProvider);
-  const vectorResults = await vectorSearch(normalizedQuery, options);
-  const textQueries = normalizedQuery === query ? [query] : [query, normalizedQuery];
-  const fallbackResults = textSearch(textQueries, options);
-  log.debug("text fallback", { queries: textQueries, count: fallbackResults.length });
-  const combined = new Map;
-  for (const result of vectorResults)
-    combined.set(result.id, result);
-  for (const result of fallbackResults)
-    if (!combined.has(result.id))
-      combined.set(result.id, result);
-  return Array.from(combined.values()).slice(0, limit);
-}
-async function searchMulti(queries, options) {
-  const { limit = 10, after, before } = options;
-  if (after)
-    validateISODate(after, "--after");
-  if (before)
-    validateISODate(before, "--before");
-  if (queries.length === 1) {
-    return search(queries[0], options);
-  }
-  const { db } = options;
-  const vectorCount = db.query("SELECT COUNT(*) AS count FROM vec_memory_records").get().count;
-  const candidateCount = Math.min(vectorCount, MAX_KNN_K);
-  const embeddings = await Promise.all(queries.map((query) => embedQuery(query)));
-  const perQuery = embeddings.map((embedding) => embedding ? runVectorQuery(embedding, candidateCount, candidateCount, options) : []);
-  const byId = new Map;
-  for (const results of perQuery) {
-    for (const result of results) {
-      const entry = byId.get(result.id);
-      const score = result.score ?? 0;
-      if (entry) {
-        entry.scores.push(score);
-      } else {
-        byId.set(result.id, { record: result, scores: [score] });
-      }
-    }
-  }
-  const intersected = [];
-  for (const { record: record3, scores } of byId.values()) {
-    if (scores.length === queries.length) {
-      const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
-      intersected.push({ ...record3, score: mean });
-    }
-  }
-  intersected.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  return intersected.slice(0, limit);
-}
-
-// src/core/read.ts
-import * as fs3 from "fs";
-function parseJsonlMessages(jsonl, startLine, endLine) {
-  return selectJsonlLines(jsonl, startLine, endLine).flatMap((line) => {
+  `).all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, internalLimit);
+  const byRowid = new Map(semanticRows.map((r) => [r.rowid, r]));
+  const bm25Scores = {};
+  if (queryLemmatized) {
+    const [midpoint, steepness] = getBm25Params(query, queryLemmatized);
     try {
-      return [JSON.parse(line)];
-    } catch {
-      return [];
-    }
-  });
-}
-function selectJsonlLines(jsonl, startLine, endLine) {
-  const allLines = jsonl.trim().split(`
-`).filter((line) => line.trim());
-  return startLine !== undefined || endLine !== undefined ? allLines.slice(startLine !== undefined ? startLine - 1 : 0, endLine !== undefined ? endLine : undefined) : allLines;
-}
-function formatMetadata(firstMessage) {
-  let output = `## Metadata
-
-`;
-  if (firstMessage.sessionId) {
-    output += `**Session ID:** ${firstMessage.sessionId}
-
-`;
-  }
-  if (firstMessage.gitBranch) {
-    output += `**Git Branch:** ${firstMessage.gitBranch}
-
-`;
-  }
-  if (firstMessage.cwd) {
-    output += `**Working Directory:** ${firstMessage.cwd}
-
-`;
-  }
-  if (firstMessage.version) {
-    output += `**Claude Code Version:** ${firstMessage.version}
-
-`;
-  }
-  output += `---
-
-`;
-  return output;
-}
-function readConversation(path3, startLine, endLine) {
-  if (!fs3.existsSync(path3)) {
-    return null;
-  }
-  if (startLine === undefined || endLine === undefined) {
-    return null;
-  }
-  const jsonlContent = fs3.readFileSync(path3, "utf-8");
-  return formatConversationAsMarkdown(jsonlContent, startLine, endLine);
-}
-function filterValidMessages(messages) {
-  return messages.filter((msg) => {
-    if (msg.type !== "user" && msg.type !== "assistant")
-      return false;
-    if (!msg.timestamp)
-      return false;
-    if (!msg.message || !msg.message.content) {
-      if (msg.type === "assistant" && msg.message?.usage)
-        return true;
-      return false;
-    }
-    if (Array.isArray(msg.message.content) && msg.message.content.length === 0) {
-      if (msg.type === "assistant" && msg.message?.usage)
-        return true;
-      return false;
-    }
-    return true;
-  });
-}
-function formatSidechainStart() {
-  return `
----
-**\uD83D\uDD00 SIDECHAIN START**
----
-
-`;
-}
-function formatSidechainEnd() {
-  return `
----
-**\uD83D\uDD00 SIDECHAIN END**
----
-
-`;
-}
-function getRoleLabel(type, isSidechain) {
-  if (isSidechain) {
-    return type === "user" ? "Agent" : "Subagent";
-  }
-  return type === "user" ? "User" : "Agent";
-}
-function formatToolInput(input) {
-  let output = "";
-  if (input && typeof input === "object") {
-    for (const [key, value] of Object.entries(input)) {
-      if (typeof value === "string" && value.includes(`
-`)) {
-        output += `- **${key}:**
-\`\`\`
-${value}
-\`\`\`
-`;
-      } else if (typeof value === "string") {
-        output += `- **${key}:** ${value}
-`;
-      } else {
-        output += `- **${key}:**
-\`\`\`json
-${JSON.stringify(value, null, 2)}
-\`\`\`
-`;
-      }
-    }
-    output += `
-`;
-  }
-  return output;
-}
-function formatToolResultContent(content) {
-  if (typeof content === "string") {
-    if (content.includes(`
-`) || content.length > 100) {
-      return "```\n" + content + "\n```\n\n";
-    }
-    return `${content}
-
-`;
-  }
-  if (Array.isArray(content)) {
-    return "```json\n" + JSON.stringify(content, null, 2) + "\n```\n\n";
-  }
-  return "";
-}
-function findToolResult(messages, toolUseIndex, toolUseId) {
-  for (let j = toolUseIndex + 1;j < Math.min(toolUseIndex + 6, messages.length); j++) {
-    const laterMsg = messages[j];
-    if (laterMsg.type === "user" && Array.isArray(laterMsg.message.content)) {
-      for (const resultBlock of laterMsg.message.content) {
-        if (resultBlock.type === "tool_result" && resultBlock.tool_use_id === toolUseId) {
-          return resultBlock;
+      const keywordRows = db.query(`
+        SELECT rowid, bm25(fts_memories) AS raw
+        FROM fts_memories WHERE fts_memories MATCH ?
+        ORDER BY raw LIMIT ?
+      `).all(queryLemmatized, internalLimit);
+      for (const row of keywordRows) {
+        const semantic = byRowid.get(row.rowid);
+        if (!semantic)
+          continue;
+        const rawScore = -row.raw;
+        if (rawScore > 0) {
+          bm25Scores[semantic.id] = normalizeBm25(rawScore, midpoint, steepness);
         }
       }
-    }
+    } catch {}
   }
-  return null;
-}
-function formatUserMessage(msg) {
-  let output = "";
-  if (msg.toolUseResult) {
-    output += `**Tool Result:**
-
-`;
-    if (typeof msg.toolUseResult === "string") {
-      output += `${msg.toolUseResult}
-
-`;
-    } else if (Array.isArray(msg.toolUseResult)) {
-      for (const result of msg.toolUseResult) {
-        output += `${result.text || String(result)}
-
-`;
-      }
+  const entityBoosts = {};
+  const candidates = semanticRows.map((row) => ({
+    id: row.id,
+    score: 1 - row.distance,
+    payload: {
+      data: row.memory,
+      hash: row.hash,
+      metadata: row.metadata,
+      created_at: row.created_at,
+      updated_at: row.updated_at
     }
-    return output;
-  }
-  if (typeof msg.message.content === "string") {
-    output += `${msg.message.content}
-
-`;
-  } else if (Array.isArray(msg.message.content)) {
-    for (const block of msg.message.content) {
-      if (block.type === "text" && block.text) {
-        output += `${block.text}
-
-`;
-      }
-    }
-  }
-  return output;
-}
-function formatConversationAsMarkdown(jsonl, startLine, endLine) {
-  const allMessages = parseJsonlMessages(jsonl, startLine, endLine);
-  const messages = filterValidMessages(allMessages);
-  if (messages.length === 0) {
-    return formatNonClaudeJsonlFallback(selectJsonlLines(jsonl, startLine, endLine));
-  }
-  let output = `# Conversation
-
-`;
-  output += formatMetadata(messages[0]);
-  output += `## Messages
-
-`;
-  let inSidechain = false;
-  for (let i = 0;i < messages.length; i++) {
-    const msg = messages[i];
-    const timestamp = new Date(msg.timestamp).toLocaleString();
-    if (msg.type === "user" && Array.isArray(msg.message.content)) {
-      const hasOnlyToolResults = msg.message.content.every((block) => block.type === "tool_result");
-      if (hasOnlyToolResults) {
-        continue;
-      }
-    }
-    if (msg.isSidechain && !inSidechain) {
-      output += formatSidechainStart();
-      inSidechain = true;
-    } else if (!msg.isSidechain && inSidechain) {
-      output += formatSidechainEnd();
-      inSidechain = false;
-    }
-    const roleLabel = getRoleLabel(msg.type, msg.isSidechain);
-    output += `### **${roleLabel}** (${timestamp})
-
-`;
-    if (msg.type === "user") {
-      output += formatUserMessage(msg);
-    } else if (msg.type === "assistant") {
-      output += formatAssistantMessage(messages, i, msg);
-    }
-  }
-  if (inSidechain) {
-    output += formatSidechainEnd();
-  }
-  return output;
-}
-function formatNonClaudeJsonlFallback(lines) {
-  const renderedLines = lines.flatMap((line, index) => {
-    try {
-      const record3 = JSON.parse(line);
-      const codexMessage = formatCodexResponseItem(record3, index);
-      if (codexMessage)
-        return [codexMessage];
-      return ["```json\n" + JSON.stringify(record3, null, 2) + "\n```"];
-    } catch {
-      return [line];
-    }
+  }));
+  const scored = scoreAndRank({
+    semanticResults: candidates,
+    bm25Scores,
+    entityBoosts,
+    threshold,
+    topK: limit,
+    explain
   });
-  if (renderedLines.length === 0) {
-    return "";
-  }
-  return `# Conversation
-
-## Messages
-
-` + renderedLines.join(`
-
-`) + `
-`;
-}
-function formatCodexResponseItem(record3, index) {
-  if (record3?.type !== "response_item" || record3.payload?.type !== "message") {
-    return null;
-  }
-  const role = record3.payload.role === "assistant" ? "Agent" : "User";
-  const text = extractCodexMessageText(record3.payload.content);
-  if (!text) {
-    return null;
-  }
-  return `### **${role}** {#codex-${index + 1}}
-
-${text}
-`;
-}
-function extractCodexMessageText(content) {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return "";
-  }
-  return content.map((block) => {
-    if (typeof block === "string")
-      return block;
-    if (block && typeof block === "object" && "text" in block && typeof block.text === "string") {
-      return block.text;
-    }
-    return "";
-  }).filter(Boolean).join(`
-
-`);
-}
-function formatAssistantMessage(messages, index, msg) {
-  let output = "";
-  const content = msg.message.content;
-  if (typeof content === "string") {
-    output += `${content}
-
-`;
-  } else if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block.type === "text" && block.text) {
-        output += `${block.text}
-
-`;
-      } else if (block.type === "tool_use") {
-        output += `**Tool Use:** \`${block.name}\`
-
-`;
-        output += formatToolInput(block.input || {});
-        const toolUseId = block.id;
-        if (toolUseId) {
-          const result = findToolResult(messages, index, toolUseId);
-          if (result) {
-            output += `**Result:**
-`;
-            output += formatToolResultContent(result.content);
-          }
-        }
+  const results = [];
+  for (const item of scored) {
+    const payload = item.payload;
+    if (!payload || !payload.data)
+      continue;
+    const metadata = JSON.parse(payload.metadata || "{}");
+    const result = {
+      id: item.id,
+      memory: payload.data,
+      hash: payload.hash,
+      metadata,
+      score: item.score,
+      created_at: payload.created_at,
+      updated_at: payload.updated_at
+    };
+    for (const key of PROMOTED_PAYLOAD_KEYS) {
+      if (metadata[key] !== undefined) {
+        result[key] = metadata[key];
       }
     }
+    if (item.score_details)
+      result.score_details = item.score_details;
+    results.push(result);
   }
-  return output;
+  return { results };
 }
+
+// src/core/db.ts
+import { Database as Database2 } from "bun:sqlite";
+init_paths();
+import * as sqliteVec2 from "sqlite-vec";
+var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
+if (process.platform === "darwin" && !isTestEnvironment && true) {
+  try {
+    Database2.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+  } catch {}
+}
+
+// src/core/llm/index.ts
+init_gemini_provider();
+init_zai_provider();
+init_config();
+
+// src/cli/sync.ts
+init_logger();
+
+// src/core/lock.ts
+init_paths();
+init_logger();
+var STALE_MS = 30 * 60 * 1000;
+
+// src/cli/sync.ts
+init_paths();
+var LOCAL_USER_ID = "local";
 
 // src/mcp/handlers.ts
 async function handleSearch(params, db) {
-  const options = {
+  return searchMemories({
     db,
+    query: params.query,
+    filters: { user_id: LOCAL_USER_ID },
     limit: params.limit,
-    after: params.after,
-    before: params.before,
-    sourceKind: params.source_kind
-  };
-  const results = params.query === undefined ? listRecent(options) : Array.isArray(params.query) ? await searchMulti(params.query, options) : await search(params.query, options);
-  return results.map((result) => {
-    const card = {
-      id: String(result.id),
-      kind: result.kind,
-      project: result.project,
-      description: result.text
-    };
-    if (result.score !== undefined)
-      card.score = Math.round(result.score * 1000) / 1000;
-    return card;
+    threshold: params.threshold,
+    explain: params.explain
   });
-}
-function handleFetch(params, db) {
-  const id = typeof params.id === "string" ? Number(params.id) : params.id;
-  if (!Number.isInteger(id)) {
-    throw new Error(`Invalid memory record id: ${String(params.id)}`);
-  }
-  const location = getMemoryRecordLocation(db, id);
-  if (location === null) {
-    throw new Error(`Memory record not found: ${id}`);
-  }
-  const result = readConversation(location.archivePath, location.lineStart, location.lineEnd);
-  if (result === null) {
-    throw new Error(`Archive file not found for memory record ${id}: ${location.archivePath}`);
-  }
-  return result;
 }
 
 // src/mcp/tools.ts
 var searchTool = {
   name: "search",
-  description: "Find compact memory candidates. Returns id, kind, project, description, and optional score. Use fetch with a result id only when you need the source transcript.",
+  description: "Search stored memories. Returns memory records scored by hybrid semantic + keyword relevance.",
   inputSchema: {
     type: "object",
     properties: {
-      query: {
-        anyOf: [
-          { type: "string", minLength: 2 },
-          { type: "array", items: { type: "string", minLength: 2 }, minItems: 2, maxItems: 5 }
-        ],
-        description: "Search query. Use a string for normal search, an array of 2-5 strings for AND search, or omit to list recent records."
-      },
-      limit: {
-        type: "integer",
-        minimum: 1,
-        maximum: 50,
-        default: 10,
-        description: "Maximum candidate count to return"
-      },
-      after: {
-        type: "string",
-        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-        description: "Only return results after this date (YYYY-MM-DD format)"
-      },
-      before: {
-        type: "string",
-        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-        description: "Only return results before this date (YYYY-MM-DD format)"
-      },
-      source_kind: {
-        type: "string",
-        minLength: 1,
-        description: "Filter results to a transcript source kind"
-      }
+      query: { type: "string", description: "Search query." },
+      limit: { type: "number", description: "Max results. Default 20." },
+      threshold: { type: "number", description: "Minimum semantic score, 0-1. Default 0.1." },
+      explain: { type: "boolean", description: "Include score breakdown. Default false." }
     },
+    required: ["query"],
     additionalProperties: false
   },
   annotations: {
-    title: "Search Memory Records",
+    title: "Search Memories",
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false
   }
 };
-var fetchTool = {
-  name: "fetch",
-  description: "Read the source transcript for one memory candidate returned by search.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: {
-        anyOf: [{ type: "string", minLength: 1 }, { type: "integer" }],
-        description: "Memory record id from a search result"
-      }
-    },
-    required: ["id"],
-    additionalProperties: false
-  },
-  annotations: {
-    title: "Fetch Memory Source Transcript",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false
-  }
-};
-var allTools = [searchTool, fetchTool];
+var TOOLS = [searchTool];
 
 // src/mcp/server.ts
 function handleError(error2) {
@@ -17812,7 +17334,7 @@ var server = new Server({
 });
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: allTools
+    tools: TOOLS
   };
 });
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -17820,27 +17342,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     if (name === "search") {
       const params = SearchInputSchema.parse(args);
-      const db = openDatabase();
+      const db = openMemoryDb();
       try {
-        const results = await handleSearch(params, db);
+        const result = await handleSearch(params, db);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ results }, null, 2)
+              text: JSON.stringify(result, null, 2)
             }
           ]
         };
-      } finally {
-        db.close();
-      }
-    }
-    if (name === "fetch") {
-      const params = FetchInputSchema.parse(args);
-      const db = openDatabase();
-      try {
-        const result = handleFetch(params, db);
-        return { content: [{ type: "text", text: result }] };
       } finally {
         db.close();
       }
@@ -17876,6 +17388,5 @@ if (shouldRunAsEntrypoint()) {
 export {
   shouldRunAsEntrypoint,
   handleError,
-  SearchInputSchema,
-  FetchInputSchema
+  SearchInputSchema
 };
