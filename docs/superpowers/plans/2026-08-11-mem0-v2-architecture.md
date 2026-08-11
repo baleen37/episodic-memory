@@ -2147,14 +2147,15 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
     rows.push({
       id: randomUUID(),
       memory: m.text,
+      // Upstream's memory payload (main.py:1003-1029) carries only data,
+      // text_lemmatized, hash, timestamps, and attributed_to. Notably it does
+      // NOT persist linked_memory_ids on memory records — that field belongs to
+      // the entity store. Storing it here would also let hallucinated refs
+      // (indices the LLM invented) leak into metadata.
       metadata: {
         ...metadata,
         ...filters,
         attributed_to: m.attributed_to,
-        // Map integer refs back to real UUIDs before persisting.
-        linked_memory_ids: m.linked_memory_ids
-          .map(ref => uuidByIndex.get(ref) ?? ref)
-          .filter(Boolean),
       },
       embedding,
     });
@@ -2214,7 +2215,7 @@ async function retrieveExisting(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/core/memory/add.test.ts`
-Expected: PASS, 12 tests
+Expected: PASS, 13 tests
 
 - [ ] **Step 5: Commit**
 
