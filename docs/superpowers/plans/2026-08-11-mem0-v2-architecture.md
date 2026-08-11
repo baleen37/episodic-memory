@@ -659,6 +659,26 @@ describe('buildFilterSql', () => {
     expect(clause).not.toContain('DROP');
     expect(params).toContain("'; DROP TABLE memories; --");
   });
+
+  test('rejects a malicious metadata key instead of interpolating it', () => {
+    // Unvalidated, this key escapes json_extract and injects `OR 1=1`.
+    expect(() => buildFilterSql({ "x') OR 1=1 --": 'v' })).toThrow(/Invalid metadata filter key/);
+  });
+
+  test('accepts ordinary keys with underscores and digits', () => {
+    expect(() => buildFilterSql({ user_id: 'u1' })).not.toThrow();
+    expect(() => buildFilterSql({ field2: 'v' })).not.toThrow();
+  });
+
+  test('contains treats GLOB metacharacters literally', () => {
+    const meta = [{ tag: '[agmx]' }, { tag: 'gamma' }];
+    expect(run({ tag: { contains: '[agmx]' } }, meta)).toEqual(['id-0']);
+  });
+
+  test('contains treats an asterisk literally', () => {
+    const meta = [{ tag: 'a*b' }, { tag: 'axxb' }];
+    expect(run({ tag: { contains: 'a*b' } }, meta)).toEqual(['id-0']);
+  });
 });
 ```
 
@@ -702,12 +722,32 @@ export function assertScoped(filters: Filters): void {
   }
 }
 
+const SAFE_KEY = /^[A-Za-z0-9_]+$/;
+
+/**
+ * Metadata keys are interpolated into the JSON path, so they cannot be
+ * parameterized. Validate instead: an unchecked key escapes json_extract and
+ * injects arbitrary SQL (e.g. `x') OR 1=1 --` yields a tautology that bypasses
+ * every other predicate).
+ */
 function field(key: string): string {
+  if (!SAFE_KEY.test(key)) {
+    throw new Error(`Invalid metadata filter key: ${key}`);
+  }
   return `json_extract(metadata, '$.${key}')`;
 }
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, m => `\\${m}`);
+}
+
+/**
+ * GLOB has no ESCAPE clause; metacharacters are neutralized with bracket
+ * literals so `contains` means a literal case-sensitive substring.
+ * Single pass, so freshly inserted brackets are not re-escaped.
+ */
+function escapeGlob(value: string): string {
+  return value.replace(/[*?[\]]/g, m => `[${m}]`);
 }
 
 function operatorClause(key: string, op: Operator, params: unknown[]): string {
@@ -731,7 +771,7 @@ function operatorClause(key: string, op: Operator, params: unknown[]): string {
   if (op.contains !== undefined) {
     // GLOB is case-sensitive; LIKE is not.
     parts.push(`${col} GLOB ?`);
-    params.push(`*${op.contains}*`);
+    params.push(`*${escapeGlob(op.contains)}*`);
   }
   if (op.icontains !== undefined) {
     parts.push(`${col} LIKE ? ESCAPE '\\'`);
@@ -793,7 +833,7 @@ function build(filters: Filters, params: unknown[]): string {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/core/memory/filters.test.ts`
-Expected: PASS, 13 tests
+Expected: PASS, 18 tests
 
 - [ ] **Step 5: Commit**
 
