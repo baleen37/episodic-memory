@@ -5,6 +5,7 @@ import { createMemorySchema } from './schema.js';
 import { insertMemories } from './store.js';
 import { searchMemories } from './search.js';
 import { __setModelForTests } from '../embeddings.js';
+import { resetRateLimiters, __setLoadConfigForTests } from '../ratelimiter.js';
 
 // Deterministic 384-dim embeddings: direction encoded in the first slot.
 function vec(seed: number): number[] {
@@ -25,8 +26,16 @@ beforeEach(() => {
     if (text.includes('pottery')) return vec(1.5);
     return vec(3.0);
   });
+  __setLoadConfigForTests(() => ({
+    ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
+  }) as any);
+  resetRateLimiters();
 });
-afterEach(() => { __setModelForTests(null, null); });
+afterEach(() => {
+  __setModelForTests(null, null);
+  __setLoadConfigForTests(null);
+  resetRateLimiters();
+});
 
 function seed() {
   insertMemories(db, [

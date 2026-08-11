@@ -7,6 +7,7 @@ import { addMemories } from './add.js';
 import { LLMError } from './extract.js';
 import { md5 } from './store.js';
 import { __setModelForTests } from '../embeddings.js';
+import { resetRateLimiters, __setLoadConfigForTests } from '../ratelimiter.js';
 import type { LLMProvider } from '../llm/types.js';
 
 const EMB = () => { const v = new Array(384).fill(0); v[0] = 1; return v; };
@@ -20,8 +21,16 @@ beforeEach(() => {
   createMemorySchema(db);
   prompts = [];
   __setModelForTests(async () => {}, async () => EMB());
+  __setLoadConfigForTests(() => ({
+    ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
+  }) as any);
+  resetRateLimiters();
 });
-afterEach(() => { __setModelForTests(null, null); });
+afterEach(() => {
+  __setModelForTests(null, null);
+  __setLoadConfigForTests(null);
+  resetRateLimiters();
+});
 
 function provider(text: string): LLMProvider {
   return {
