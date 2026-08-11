@@ -158,6 +158,7 @@ describe('embedPassageBatch()', () => {
   });
 
   afterEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
     __setBatchModelForTests(null);
     __setEmbeddingConfigForTests(null);
     __resetEmbeddingConcurrencyForTests();

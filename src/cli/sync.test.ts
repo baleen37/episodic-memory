@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Database } from 'bun:sqlite';
 import { openMemoryDb } from '../core/memory/schema.js';
-import { __setModelForTests } from '../core/embeddings.js';
+import { __setModelForTests, __setBatchModelForTests } from '../core/embeddings.js';
 import { acquireSyncLock } from '../core/lock.js';
 import { __setLoadConfigForTests, resetRateLimiters } from '../core/ratelimiter.js';
 import { EXTRACTION_BUDGET_PER_SYNC, LOCAL_USER_ID, mapSourceToFilters, syncArchives } from './sync.js';
@@ -56,6 +56,7 @@ afterEach(() => {
   restoreEnv('MEMMEM_DB_PATH');
   restoreEnv('HOME');
   __setModelForTests(null, null);
+  __setBatchModelForTests(null);
   __setLoadConfigForTests(null);
   resetRateLimiters();
 });
@@ -407,6 +408,10 @@ function setupEnv(claudeDir: string, codexDir: string, archiveDir: string): void
 
 function setGoodEmbeddingModel(): void {
   __setModelForTests(async () => {}, async (_kind, _text) => Array.from({ length: 384 }, () => 0.1));
+  // addMemories embeds a span's facts through the batch path, which is a
+  // separate hook from the single-text one above (still used by embedQuery).
+  __setBatchModelForTests(async (_kind, texts) =>
+    texts.map(() => Array.from({ length: 384 }, () => 0.1)));
 }
 
 function makeProvider(): LLMProvider {
