@@ -75,4 +75,26 @@ describe('buildFilterSql', () => {
     expect(clause).not.toContain('DROP');
     expect(params).toContain("'; DROP TABLE memories; --");
   });
+  test('malicious key throws rather than injecting', () => {
+    expect(() => buildFilterSql({ "x') OR 1=1 --": 'val' })).toThrow(/Invalid metadata filter key/);
+  });
+  test('normal keys with underscores and digits work', () => {
+    expect(run({ user_id: 'u1', field2: 'x' }, [{ user_id: 'u1', field2: 'x' }])).toEqual(['id-0']);
+    expect(run({ agent_id: 'a1' }, [{ agent_id: 'a1' }])).toEqual(['id-0']);
+  });
+  test('contains with literal brackets matches only exact bracket sequence', () => {
+    const rows = [
+      { user_id: 'u1', pattern: '[agmx]' },
+      { user_id: 'u1', pattern: 'a' },
+      { user_id: 'u1', pattern: 'g' },
+    ];
+    expect(run({ pattern: { contains: '[agmx]' } }, rows)).toEqual(['id-0']);
+  });
+  test('contains with literal asterisk matches exact asterisk', () => {
+    const rows = [
+      { user_id: 'u1', pattern: 'a*b' },
+      { user_id: 'u1', pattern: 'axxb' },
+    ];
+    expect(run({ pattern: { contains: 'a*b' } }, rows)).toEqual(['id-0']);
+  });
 });

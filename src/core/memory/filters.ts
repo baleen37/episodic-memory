@@ -30,11 +30,19 @@ export function assertScoped(filters: Filters): void {
 }
 
 function field(key: string): string {
+  if (!/^[A-Za-z0-9_]+$/.test(key)) {
+    throw new Error(`Invalid metadata filter key: ${key}`);
+  }
   return `json_extract(metadata, '$.${key}')`;
 }
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, m => `\\${m}`);
+}
+
+function escapeGlob(value: string): string {
+  // Escape GLOB metacharacters: * ? [ using bracket literals
+  return value.replace(/[\[*?]/g, m => `[${m}]`);
 }
 
 function operatorClause(key: string, op: Operator, params: unknown[]): string {
@@ -58,7 +66,7 @@ function operatorClause(key: string, op: Operator, params: unknown[]): string {
   if (op.contains !== undefined) {
     // GLOB is case-sensitive; LIKE is not.
     parts.push(`${col} GLOB ?`);
-    params.push(`*${op.contains}*`);
+    params.push(`*${escapeGlob(op.contains)}*`);
   }
   if (op.icontains !== undefined) {
     parts.push(`${col} LIKE ? ESCAPE '\\'`);
