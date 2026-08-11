@@ -1,7 +1,4 @@
-/** Verbatim port of ADDITIVE_EXTRACTION_PROMPT from mem0/configs/prompts.py:469-943 (v2.0.17).
- *  Generated from src/core/memory/__fixtures__/additive-extraction-prompt.upstream.txt.
- *  Do not hand-edit: five lines carry trailing whitespace and eight backslashes are escaped. */
-export const ADDITIVE_EXTRACTION_PROMPT = `
+
 # ROLE
 
 You are a Memory Extractor — a precise, evidence-bound processor responsible for extracting rich, contextual memories from conversations. Your sole operation is ADD: identify every piece of memorable information and produce self-contained, contextually rich factual statements.
@@ -265,8 +262,8 @@ Summary: "User is an aspiring stand-up comedian interested in improving their cr
 Recently Extracted: []
 Existing Memories: []
 New Messages:
-[{"role": "user", "content": "Can you recommend some sports documentaries on Netflix with strong storytelling? I love \\"The Last Dance\\" by Michael Jordan."},
- {"role": "assistant", "content": "Great taste! Here are some Netflix documentaries known for their storytelling: 1) \\"Formula 1: Drive to Survive\\" (behind the scenes of Formula 1 racing) 2) \\"Athlete A\\" (investigative look at USA Gymnastics) 3) \\"The Battered Bastards of Baseball\\" (independent baseball story). All focus on powerful, narrative-driven sports stories."}]
+[{"role": "user", "content": "Can you recommend some sports documentaries on Netflix with strong storytelling? I love \"The Last Dance\" by Michael Jordan."},
+ {"role": "assistant", "content": "Great taste! Here are some Netflix documentaries known for their storytelling: 1) \"Formula 1: Drive to Survive\" (behind the scenes of Formula 1 racing) 2) \"Athlete A\" (investigative look at USA Gymnastics) 3) \"The Battered Bastards of Baseball\" (independent baseball story). All focus on powerful, narrative-driven sports stories."}]
 Observation Date: 2023-06-01
 
 Output:
@@ -476,79 +473,3 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - If nothing is worth extracting, return: {"memory": []}
 - No duplicate IDs. Use double quotes. No trailing commas.
 
-`;
-export const PAST_MESSAGE_TRUNCATION_LIMIT = 300;
-
-export interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-export interface ExistingMemoryRef {
-  id: string;
-  text: string;
-}
-
-export interface PromptArgs {
-  summary?: string | null;
-  recentlyExtractedMemories?: ExistingMemoryRef[];
-  existingMemories?: ExistingMemoryRef[];
-  newMessages: Message[];
-  lastKMessages?: Message[];
-  currentDate?: string;
-  observationDate?: string;
-  customInstructions?: string;
-}
-
-function truncate(text: string, limit = PAST_MESSAGE_TRUNCATION_LIMIT): string {
-  return text.length <= limit ? text : text.slice(0, limit);
-}
-
-function formatSummary(summary?: string | null): string {
-  return summary && summary.trim() ? summary : '';
-}
-
-function formatConversationHistory(messages?: Message[]): string {
-  if (!messages || messages.length === 0) return '';
-  return messages.map(m => `${m.role}: ${truncate(m.content)}`).join('\n');
-}
-
-function serializeMemories(memories?: ExistingMemoryRef[]): string {
-  if (!memories || memories.length === 0) return '[]';
-  return JSON.stringify(memories.map(m => ({ id: m.id, text: m.text })), null, 0)
-    .replace(/},"/g, '}, "')
-    .replace(/\{"id":/g, '{"id": ')
-    .replace(/,"text":/g, ', "text": ');
-}
-
-function formatNewMessages(messages: Message[]): string {
-  return JSON.stringify(messages.map(m => ({ role: m.role, content: m.content })));
-}
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Generates the full extraction prompt by combining the base prompt with context sections. */
-export function generateAdditiveExtractionPrompt(args: PromptArgs): string {
-  const now = new Date();
-  const currentDate = args.currentDate ?? isoDate(now);
-  const observationDate = args.observationDate ?? currentDate;
-
-  const sections = [
-    `## Summary\n${formatSummary(args.summary)}`,
-    `## Last k Messages\n${formatConversationHistory(args.lastKMessages)}`,
-    `## Recently Extracted Memories\n${serializeMemories(args.recentlyExtractedMemories)}`,
-    `## Existing Memories\n${serializeMemories(args.existingMemories)}`,
-    `## New Messages\n${formatNewMessages(args.newMessages)}`,
-    `## Observation Date\n${observationDate}`,
-    `## Current Date\n${currentDate}`,
-  ];
-
-  if (args.customInstructions) {
-    sections.push(`## Custom Instructions\n${args.customInstructions}`);
-  }
-
-  sections.push('# Output:');
-  return sections.join('\n\n');
-}
