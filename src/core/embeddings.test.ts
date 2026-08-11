@@ -1,7 +1,17 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { EMBEDDING_DIM } from './constants.js';
-import { resetRateLimiters, __setLoadConfigForTests } from './ratelimiter.js';
-import { __setModelForTests, isEmbeddingsDisabled, initEmbeddings, embedPassage, embedQuery } from './embeddings.js';
+import {
+  __setModelForTests,
+  __setBatchModelForTests,
+  __setEmbeddingConfigForTests,
+  __resetEmbeddingConcurrencyForTests,
+  isEmbeddingsDisabled,
+  initEmbeddings,
+  embedPassage,
+  embedQuery,
+  embedPassageBatch,
+  EmbeddingError,
+} from './embeddings.js';
 
 const mockEmbedding = Array.from({ length: EMBEDDING_DIM }, (_, i) => i * 0.001);
 let shouldFail = false;
@@ -40,20 +50,12 @@ describe('embedPassage() and embedQuery()', () => {
     lastKind = null;
     lastText = null;
     __setModelForTests(mockInit, mockGenerate);
-    __setLoadConfigForTests(() => ({
-      provider: 'gemini',
-      apiKey: 'test',
-      ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
-    }) as any);
-    resetRateLimiters();
   });
 
   afterEach(() => {
     delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
     shouldFail = false;
     __setModelForTests(null, null);
-    __setLoadConfigForTests(null);
-    resetRateLimiters();
   });
 
   test('embedPassage returns null when disabled', async () => {
@@ -80,10 +82,19 @@ describe('embedPassage() and embedQuery()', () => {
     expect(lastText).toBe('hello world');
   });
 
-  test('returns null on model error', async () => {
+  test('embedPassage throws EmbeddingError on model failure', async () => {
     shouldFail = true;
-    expect(await embedPassage('hello')).toBeNull();
-    expect(await embedQuery('hello')).toBeNull();
+    await expect(embedPassage('hello')).rejects.toThrow(EmbeddingError);
+  });
+
+  test('embedQuery throws EmbeddingError on model failure', async () => {
+    shouldFail = true;
+    await expect(embedQuery('hello')).rejects.toThrow(EmbeddingError);
+  });
+
+  test('EmbeddingError message names the failing kind', async () => {
+    shouldFail = true;
+    await expect(embedPassage('hello')).rejects.toThrow(/passage/);
   });
 
   test('handles concurrent passage and query requests', async () => {
@@ -117,5 +128,66 @@ describe('initEmbeddings()', () => {
 
   test('calls initModel when enabled', async () => {
     await expect(initEmbeddings()).resolves.toBeUndefined();
+  });
+});
+
+describe('embedPassageBatch()', () => {
+  let calls: number;
+  let peak: number;
+  let active: number;
+
+  beforeEach(() => {
+    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    calls = 0;
+    peak = 0;
+    active = 0;
+    __setEmbeddingConfigForTests(() => ({
+      provider: 'gemini',
+      apiKey: 'test',
+      embedding: { maxConcurrency: 2 },
+    }) as any);
+    __resetEmbeddingConcurrencyForTests();
+    __setBatchModelForTests(async (_kind, texts) => {
+      calls++;
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise(r => setTimeout(r, 10));
+      active--;
+      return texts.map(() => mockEmbedding);
+    });
+  });
+
+  afterEach(() => {
+    __setBatchModelForTests(null);
+    __setEmbeddingConfigForTests(null);
+    __resetEmbeddingConcurrencyForTests();
+  });
+
+  test('embeds N texts with one model call', async () => {
+    const result = await embedPassageBatch(['a', 'b', 'c']);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toHaveLength(EMBEDDING_DIM);
+    expect(calls).toBe(1);
+  });
+
+  test('returns an empty array for no texts without calling the model', async () => {
+    expect(await embedPassageBatch([])).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  test('caps concurrent batches at maxConcurrency', async () => {
+    await Promise.all(Array.from({ length: 6 }, () => embedPassageBatch(['x'])));
+    expect(peak).toBe(2);
+  });
+
+  test('throws EmbeddingError when the model returns the wrong count', async () => {
+    __setBatchModelForTests(async () => [mockEmbedding]);
+    await expect(embedPassageBatch(['a', 'b'])).rejects.toThrow(EmbeddingError);
+  });
+
+  test('returns empty when embeddings are disabled', async () => {
+    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    expect(await embedPassageBatch(['a'])).toEqual([]);
+    expect(calls).toBe(0);
   });
 });
