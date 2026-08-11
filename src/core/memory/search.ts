@@ -145,7 +145,7 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
     };
     for (const key of PROMOTED_PAYLOAD_KEYS) {
       if (metadata[key] !== undefined) {
-        (result as Record<string, unknown>)[key] = metadata[key];
+        (result as unknown as Record<string, unknown>)[key] = metadata[key];
       }
     }
     if (item.score_details) result.score_details = item.score_details;
