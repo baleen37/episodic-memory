@@ -1621,6 +1621,7 @@ function getMemoryStats(db) {
 
 // src/core/doctor.ts
 var REQUIRED_DIST_ARTIFACTS = ["cli-internal.mjs", "mcp-server.mjs"];
+var STALE_TOLERANCE_MS = 2000;
 function newestMtime(dir, ext) {
   let newest = 0;
   if (!existsSync(dir))
@@ -1647,7 +1648,7 @@ function checkBuild(paths) {
   }
   const srcMtime = newestMtime(paths.srcDir, ".ts");
   const distMtime = Math.min(...REQUIRED_DIST_ARTIFACTS.map((name) => statSync(join(paths.distDir, name)).mtimeMs));
-  if (srcMtime > distMtime) {
+  if (srcMtime > distMtime + STALE_TOLERANCE_MS) {
     return {
       name: "build",
       status: "fail",

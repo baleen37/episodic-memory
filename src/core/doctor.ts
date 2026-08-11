@@ -22,6 +22,10 @@ export interface DiagnosticPaths {
 // (mcp-wrapper.mjs, cli.mjs) are intentionally excluded since they are not rebuilt from src.
 const REQUIRED_DIST_ARTIFACTS = ['cli-internal.mjs', 'mcp-server.mjs'];
 
+// Bulk extracts (plugin install, tarball unpack) write src and dist in one pass, leaving
+// mtimes milliseconds apart in arbitrary order. Only treat src as newer beyond that noise.
+const STALE_TOLERANCE_MS = 2000;
+
 /** Newest mtime (ms epoch) across files with `ext` under `dir`, recursive. 0 if none. */
 export function newestMtime(dir: string, ext: string): number {
   let newest = 0;
@@ -54,7 +58,7 @@ function checkBuild(paths: DiagnosticPaths): DiagnosticResult {
   const distMtime = Math.min(
     ...REQUIRED_DIST_ARTIFACTS.map((name) => statSync(join(paths.distDir, name)).mtimeMs),
   );
-  if (srcMtime > distMtime) {
+  if (srcMtime > distMtime + STALE_TOLERANCE_MS) {
     return {
       name: 'build',
       status: 'fail',
