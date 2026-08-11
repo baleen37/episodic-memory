@@ -17,6 +17,12 @@ describe('ADDITIVE_EXTRACTION_PROMPT', () => {
   test('is the full upstream prompt, not a paraphrase', () => {
     expect(ADDITIVE_EXTRACTION_PROMPT.length).toBeGreaterThan(10000);
   });
+  test('prompt is byte-identical to the upstream source', async () => {
+    const upstream = await Bun.file(
+      `${import.meta.dir}/../../../.superpowers/sdd/2026-08-11-mem0-v2-architecture/additive-extraction-prompt.txt`
+    ).text();
+    expect(ADDITIVE_EXTRACTION_PROMPT).toBe(upstream);
+  });
 });
 
 describe('generateAdditiveExtractionPrompt', () => {
