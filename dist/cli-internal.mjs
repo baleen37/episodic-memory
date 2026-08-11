@@ -56,6 +56,9 @@ function getDbPath() {
   }
   return path.join(getIndexDir(), "conversations.db");
 }
+function getModelCacheDir() {
+  return ensureDir(path.join(getSuperpowersDir(), "models"));
+}
 function getLogDir() {
   return ensureDir(path.join(getSuperpowersDir(), "logs"));
 }
@@ -1890,6 +1893,7 @@ async function runMcpCli() {
 
 // src/core/embeddings-model.ts
 init_logger();
+init_paths();
 var embeddingPipeline = null;
 var loadingPromise = null;
 var PREFIX = {
@@ -1901,7 +1905,7 @@ var MODEL_ID = "Xenova/multilingual-e5-small";
 async function loadPipeline() {
   const { pipeline, env } = await import("@huggingface/transformers");
   log.info(`Loading embedding model ${MODEL_ID} (first run downloads ~150MB, may take 1-2 min)...`);
-  env.cacheDir = "./.cache";
+  env.cacheDir = getModelCacheDir();
   const start = Date.now();
   const result = await pipeline("feature-extraction", MODEL_ID, { dtype: "fp16" });
   const ms = Date.now() - start;
