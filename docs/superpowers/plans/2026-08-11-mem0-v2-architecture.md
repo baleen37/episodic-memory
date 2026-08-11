@@ -1665,11 +1665,15 @@ describe('searchMemories', () => {
     expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
   });
 
-  test('degrades to semantic-only when BM25 contributes nothing', async () => {
-    seed(); // 3 docs — IDF collapse, so no keyword signal
+  test('degrades to semantic-only when no keyword matches', async () => {
+    // A query term absent from every document yields no BM25 rows at all, so
+    // the divisor stays 1.0. (Note: a *small* corpus does NOT zero out BM25 —
+    // IDF collapses only when the term appears in nearly every document.)
+    seed();
     const { results } = await searchMemories({
-      db, query: 'puppy', filters: { user_id: 'alice' }, explain: true,
+      db, query: 'zzzznomatch', filters: { user_id: 'alice' }, explain: true,
     });
+    expect(results.length).toBeGreaterThan(0);
     expect(results[0].score_details!.max_possible_score).toBe(1.0);
   });
 
@@ -1694,10 +1698,22 @@ describe('searchMemories', () => {
     expect(results).toHaveLength(1);
   });
 
-  test('a high threshold filters everything out', async () => {
+  test('threshold drops candidates whose raw semantic score is below it', async () => {
+    // 'puppy' embeds to vec(0); m2/m3 sit at vec(1.5)/vec(3.0), so their
+    // semantic scores fall below 0.9 while m1 (an exact vector match) clears it.
     seed();
     const { results } = await searchMemories({
-      db, query: 'puppy', filters: { user_id: 'alice' }, threshold: 0.999999,
+      db, query: 'puppy', filters: { user_id: 'alice' }, threshold: 0.9,
+    });
+    expect(results.map(r => r.id)).toEqual(['m1']);
+  });
+
+  test('a threshold above every semantic score returns nothing', async () => {
+    // No document is close to this query direction, so every raw semantic
+    // score falls under the gate and nothing survives.
+    seed();
+    const { results } = await searchMemories({
+      db, query: 'pottery', filters: { user_id: 'bob' }, threshold: 0.9,
     });
     expect(results).toHaveLength(0);
   });
@@ -1886,7 +1902,7 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/core/memory/search.test.ts`
-Expected: PASS, 13 tests
+Expected: PASS, 14 tests
 
 - [ ] **Step 5: Commit**
 
