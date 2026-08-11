@@ -32,6 +32,7 @@ export interface SyncStats {
   filesIndexed: number;
   memoriesAdded: number;
   skipped: number;
+  failed: number;
 }
 
 interface ArchiveFile {
@@ -62,6 +63,7 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
     filesIndexed: 0,
     memoriesAdded: 0,
     skipped: 0,
+    failed: 0,
   };
 
   for (const adapter of getBuiltInSourceAdapters()) {
@@ -152,6 +154,7 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
     const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
 
     let deferred = false;
+    let hadFailure = false;
     for (const span of spans) {
       if (extractionBudget <= 0) {
         deferred = true;
@@ -159,22 +162,34 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
       }
       extractionBudget--;
 
-      const result = await addMemories({
-        db,
-        provider,
-        messages: span.messages,
-        filters,
-        sessionKey: filters.run_id ?? file.archivePath,
-        observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined,
-      });
-      stats.memoriesAdded += result.results.length;
+      try {
+        const result = await addMemories({
+          db,
+          provider,
+          messages: span.messages,
+          filters,
+          sessionKey: filters.run_id ?? file.archivePath,
+          observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined,
+        });
+        stats.memoriesAdded += result.results.length;
+      } catch (error) {
+        hadFailure = true;
+        stats.failed++;
+        log.warn('Span extraction failed; continuing sync.', {
+          archivePath: file.archivePath,
+          lineStart: span.lineStart,
+          lineEnd: span.lineEnd,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
-    // Only mark the file fully indexed when every span was processed. If the
-    // budget ran out partway through, leave the mtime marker unset so the next
-    // sync reconsiders this file (and re-runs already-processed spans through
-    // addMemories, whose md5 dedup makes that safe).
-    if (!deferred) {
+    // Only mark the file fully indexed when every span was processed without
+    // error. If the budget ran out partway through, or any span's extraction
+    // failed, leave the mtime marker unset so the next sync reconsiders this
+    // file (and re-runs already-processed spans through addMemories, whose
+    // md5 dedup makes that safe).
+    if (!deferred && !hadFailure) {
       setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
       indexed++;
     }

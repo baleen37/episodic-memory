@@ -240,6 +240,72 @@ describe('syncArchives', () => {
     expect(idle.filesIndexed).toBe(0);
   });
 
+  test('continues past a span whose extraction fails, storing memories from the spans that succeed', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'bad.jsonl'), 'Bad question', 'Bad answer');
+    writeClaudeTranscript(join(projDir, 'good.jsonl'), 'Good question', 'Good answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeFailingProvider(['Bad question']);
+
+    const result = await syncArchives(db, { provider });
+    const memoryCount = (db.query('SELECT COUNT(*) AS count FROM memories').get() as { count: number }).count;
+
+    expect(result.failed).toBe(1);
+    expect(result.memoriesAdded).toBe(1);
+    expect(memoryCount).toBe(1);
+  });
+
+  test('does not mark a file fully indexed when one of its spans fails extraction', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'bad.jsonl'), 'Bad question', 'Bad answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeFailingProvider(['Bad question']);
+
+    const first = await syncArchives(db, { provider });
+    expect(first.failed).toBe(1);
+    expect(first.filesIndexed).toBe(0);
+
+    // Not marked fully indexed, so a second sync retries it. This time the
+    // provider succeeds (md5 dedup makes the retry idempotent for any spans
+    // that happened to succeed before the failure).
+    const goodProvider = makeProvider();
+    const second = await syncArchives(db, { provider: goodProvider });
+    expect(second.filesIndexed).toBe(1);
+    expect(second.failed).toBe(0);
+  });
+
+  test('marks a file fully indexed when all of its spans succeed', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'session.jsonl'), 'Question', 'Answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeProvider();
+
+    const result = await syncArchives(db, { provider });
+
+    expect(result.failed).toBe(0);
+    expect(result.filesIndexed).toBe(1);
+
+    // Fully indexed → mtime recorded → an immediate re-sync must skip it.
+    const second = await syncArchives(db, { provider });
+    expect(second.filesIndexed).toBe(0);
+    expect(second.skipped).toBe(1);
+  });
+
   test('purges archive files (but not their prior extraction bookkeeping) when a synced source directory becomes excluded', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourceDir = join(claudeDir, 'projects', 'proj');
@@ -319,6 +385,28 @@ function makeProvider(): LLMProvider {
     async complete() {
       return {
         text: JSON.stringify({ memory: [{ id: '0', text: 'Durable fact.', attributed_to: 'user' }] }),
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+  };
+}
+
+/**
+ * A provider whose `complete()` throws when the prompt contains any of
+ * `failingMarkers` (matched against message content baked into the prompt),
+ * and succeeds (with a unique fact text) otherwise. Used to simulate one
+ * span's extraction failing mid-sync.
+ */
+function makeFailingProvider(failingMarkers: string[]): LLMProvider {
+  let call = 0;
+  return {
+    async complete(prompt: string) {
+      if (failingMarkers.some(marker => prompt.includes(marker))) {
+        throw new Error('simulated provider failure');
+      }
+      call++;
+      return {
+        text: JSON.stringify({ memory: [{ id: '0', text: `Fact ${call}.`, attributed_to: 'user' }] }),
         usage: { input_tokens: 1, output_tokens: 1 },
       };
     },
