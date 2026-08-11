@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
-import { embedQuery } from '../embeddings.js';
+import { EmbeddingError, embedQuery } from '../embeddings.js';
+import { log } from '../logger.js';
 import { assertScoped, buildFilterSql, type Filters } from './filters.js';
 import {
   getBm25Params, lemmatizeForBm25, normalizeBm25, scoreAndRank,
@@ -50,7 +51,16 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
   assertScoped(filters);
 
   const queryLemmatized = lemmatizeForBm25(query);
-  const embedding = await embedQuery(query);
+  let embedding: number[] | null;
+  try {
+    embedding = await embedQuery(query);
+  } catch (err) {
+    if (!(err instanceof EmbeddingError)) throw err;
+    // Search degrades to empty rather than failing: an unavailable embedder
+    // should not break the caller. Logged because it is otherwise invisible.
+    log.warn('search embedding failed; returning no results', { error: err.message });
+    return { results: [] };
+  }
   if (!embedding) return { results: [] };
 
   const internalLimit = Math.max(limit * 4, 60);
