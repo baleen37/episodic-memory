@@ -3,10 +3,9 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import path from 'path';
 import {
   getArchiveIndexMtime,
-  openDatabase,
+  openMemoryDb,
   setArchiveIndexMtime,
-} from '../core/db.js';
-import { createMemorySchema } from '../core/memory/schema.js';
+} from '../core/memory/schema.js';
 import { addMemories } from '../core/memory/add.js';
 import { deleteMemoriesByRunIds } from '../core/memory/store.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
@@ -217,14 +216,7 @@ export async function runSyncCli(): Promise<void> {
     log.info('sync already running; skipping');
     return;
   }
-  const db = openDatabase();
-  // Transitional: the mem0 memory tables (`memories`, `vec_memories`, etc.) live in a
-  // separate schema from the legacy `memory_records`/`extraction_state` tables that
-  // `openDatabase()` creates. Both currently coexist on this one connection because
-  // `archive_index_state` (and the migrations that touch it) still live in db.ts's old
-  // schema. Task 11 deletes the old schema and its migrations wholesale, at which point
-  // sync moves onto `openMemoryDb()` alone.
-  createMemorySchema(db);
+  const db = openMemoryDb();
   try {
     const result = await syncArchives(db);
     log.info(`Done.`, { ...result });

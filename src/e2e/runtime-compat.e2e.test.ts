@@ -123,6 +123,29 @@ describe('CLI sync works under each runtime env (no LLM, no network)', () => {
       const archiveFile = findArchiveFile(tmpHome);
       expect(archiveFile).not.toBeNull();
     } finally {
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  // Guards a regression that every unit test missed: the suites build their own
+  // in-memory databases, so nothing exercised the real openMemoryDb() path.
+  // When the sqlite-vec loader setup was briefly lost, all 446 tests still
+  // passed while every CLI command died with "does not support dynamic
+  // extension loading".
+  test.each(RUNTIME_ENVS)('%s env: opens a real database with sqlite-vec loaded', async (_label, runtimeEnv) => {
+    const tmpHome = makeTmpHome();
+    try {
+      const childEnv = {
+        ...runtimeEnv,
+        HOME: tmpHome,
+        MEMMEM_DB_PATH: join(tmpHome, 'index', 'conversations.db'),
+      };
+
+      const stats = await runToCompletion([BIN, 'stats'], childEnv, 60_000);
+      expect(stats.code).toBe(0);
+      expect(stats.stderr).not.toContain('dynamic extension loading');
+      expect(stats.stdout).toContain('Total memories');
+    } finally {
       cleanup(tmpHome);
     }
   }, 90_000);
