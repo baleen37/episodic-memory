@@ -19,10 +19,18 @@ import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/in
  * Maximum LLM extractions a single sync run may perform. Caps how long the sync
  * lock is held so it always finishes; leftover spans are indexed by later syncs.
  *
- * Sized against measured throughput: extraction runs ~25s/record (LLM latency +
- * rate limiting), so 20 keeps a single sync under ~10 minutes of lock hold.
+ * Sized against LLM latency alone. Embedding used to dominate this budget (a
+ * 0.5rps rate limiter cost ~2s per extracted fact); it is now a concurrency-
+ * capped batch call measured at 65ms for 10 facts, so it no longer factors in.
+ *
+ * Measured LLM latency over a real sync run: mean 53s per span, max 85s. At that
+ * rate 12 spans is ~10 minutes, which is the lock-hold ceiling the previous
+ * value of 20 was also aiming for (it just mis-estimated the per-span cost at
+ * 25s). Raising this further does not help throughput — it only holds the lock
+ * longer and makes concurrent syncs skip. The real cap on catching up with a
+ * backlog is provider latency, not this number.
  */
-export const EXTRACTION_BUDGET_PER_SYNC = 20;
+export const EXTRACTION_BUDGET_PER_SYNC = 12;
 
 /** Fixed local identifier used as the mem0 user_id scope for all archives synced by this machine. */
 export const LOCAL_USER_ID = 'local';
