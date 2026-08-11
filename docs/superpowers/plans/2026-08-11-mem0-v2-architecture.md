@@ -820,7 +820,7 @@ git commit -m "feat(memory): add mem0 metadata filter operators"
   ```
   `generateAdditiveExtractionPrompt(args: PromptArgs): string`
 
-The system prompt is long. Copy it verbatim from `mem0/configs/prompts.py:468-945` at tag `v2.0.17`:
+The system prompt is long. Copy it verbatim from `mem0/configs/prompts.py:469-943` at tag `v2.0.17`:
 `curl -sL https://raw.githubusercontent.com/mem0ai/mem0/v2.0.17/mem0/configs/prompts.py`
 
 Do **not** paraphrase, shorten, or translate it. Do not append the `use_input_language` Language Requirement block — storage is English.
@@ -920,7 +920,7 @@ Expected: FAIL — `Cannot find module './prompts.js'`
 Fetch the upstream prompt and paste it verbatim into the template literal (escape backticks and `${`):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/mem0ai/mem0/v2.0.17/mem0/configs/prompts.py | sed -n '468,945p'
+curl -sL https://raw.githubusercontent.com/mem0ai/mem0/v2.0.17/mem0/configs/prompts.py | sed -n '469,943p'
 ```
 
 ```ts
@@ -950,9 +950,9 @@ export interface PromptArgs {
   customInstructions?: string;
 }
 
-/** prompts.py:468-945. Copy the upstream text exactly. */
+/** prompts.py:469-943. Copy the upstream text exactly. */
 export const ADDITIVE_EXTRACTION_PROMPT = `
-<PASTE prompts.py lines 468-945 here verbatim>
+<PASTE prompts.py lines 469-943 here verbatim>
 `;
 
 function truncate(text: string, limit = PAST_MESSAGE_TRUNCATION_LIMIT): string {
@@ -2424,7 +2424,7 @@ git commit -m "docs: update CLAUDE.md for mem0 v2 architecture"
 
 **Correction to the spec:** it states `get_update_memory_messages` returns no grep hits in v2.0.17. That is true of `main.py` but not of `prompts.py`, where the function still exists at line 406 — dead code the pipeline no longer calls. The conclusion (no LLM-arbitrated update) holds.
 
-**Placeholder scan:** one intentional marker remains — `<PASTE prompts.py lines 468-945 here verbatim>` in Task 4. The prompt is ~480 lines; inlining it here would bloat the plan and risk transcription drift. The exact `curl` command and line range are given.
+**Placeholder scan:** one intentional marker remains — `<PASTE prompts.py lines 469-943 here verbatim>` in Task 4. The prompt is ~480 lines; inlining it here would bloat the plan and risk transcription drift. The exact `curl` command and line range are given.
 
 **Type consistency:** `Candidate`, `ScoredResult`, `ScoreDetails` (Task 1) flow unchanged into Task 7. `Filters` (Task 3) is used identically in 7, 8, 9. `Message` / `ExistingMemoryRef` (Task 4) are consumed unchanged by 5 and 8. `NewMemory` / `InsertResult` (Task 6) match Task 8's usage. `lemmatizeForBm25` lives in Task 1 and is imported by 6 and 7.
 
