@@ -19,7 +19,7 @@ describe('ADDITIVE_EXTRACTION_PROMPT', () => {
   });
   test('prompt is byte-identical to the upstream source', async () => {
     const upstream = await Bun.file(
-      `${import.meta.dir}/../../../.superpowers/sdd/2026-08-11-mem0-v2-architecture/additive-extraction-prompt.txt`
+      `${import.meta.dir}/__fixtures__/additive-extraction-prompt.upstream.txt`
     ).text();
     expect(ADDITIVE_EXTRACTION_PROMPT).toBe(upstream);
   });
