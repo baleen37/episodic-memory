@@ -137,4 +137,15 @@ describe('addMemories', () => {
     const rows = db.query('SELECT memory, hash FROM memories').all() as Array<{ memory: string; hash: string }>;
     for (const r of rows) expect(r.hash).toBe(md5(r.memory));
   });
+
+  test('does not persist LLM-invented linked_memory_ids into metadata', async () => {
+    const out = await addMemories({ db, provider: provider(JSON.stringify({
+      memory: [{ id: '0', text: 'A durable fact', attributed_to: 'user',
+                 linked_memory_ids: ['7', 'not-a-real-ref'] }] })), ...base });
+    expect(out.results).toHaveLength(1);
+    const row = db.query('SELECT metadata FROM memories LIMIT 1').get() as { metadata: string };
+    const meta = JSON.parse(row.metadata);
+    expect(meta.linked_memory_ids).toBeUndefined();
+    expect(JSON.stringify(meta)).not.toContain('not-a-real-ref');
+  });
 });

@@ -34,11 +34,7 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
 
   // Phase 1: one vector search over the whole batch, then remap UUIDs to integers.
   const existingMemories = await retrieveExisting(db, messages, filters);
-  const uuidByIndex = new Map<string, string>();
-  const remapped: ExistingMemoryRef[] = existingMemories.map((m, i) => {
-    uuidByIndex.set(String(i), m.id);
-    return { id: String(i), text: m.text };
-  });
+  const remapped: ExistingMemoryRef[] = existingMemories.map((m, i) => ({ id: String(i), text: m.text }));
 
   // Phase 2: a single LLM call. Raises LLMError on provider failure.
   const extracted = await extractMemories(provider, {
@@ -64,10 +60,6 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
         ...metadata,
         ...filters,
         attributed_to: m.attributed_to,
-        // Map integer refs back to real UUIDs before persisting.
-        linked_memory_ids: m.linked_memory_ids
-          .map(ref => uuidByIndex.get(ref) ?? ref)
-          .filter(Boolean),
       },
       embedding,
     });
