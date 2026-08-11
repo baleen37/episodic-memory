@@ -1321,7 +1321,7 @@ var init_zai_provider = __esm(() => {
 });
 
 // src/core/llm/config.ts
-import { existsSync as existsSync5, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync4, readFileSync } from "fs";
 import { join as join6 } from "path";
 function loadConfig() {
   const configDir = join6(process.env.HOME ?? "", ".config", "memmem");
@@ -1374,8 +1374,8 @@ var init_config = __esm(() => {
     zai: "glm-4.5-air"
   };
   configFileDeps = {
-    existsSync: existsSync5,
-    readFileSync: readFileSync2
+    existsSync: existsSync4,
+    readFileSync
   };
 });
 
@@ -1477,10 +1477,10 @@ var init_ratelimiter = __esm(() => {
 });
 
 // src/cli/doctor.ts
-import { basename, dirname as dirname2, join as join2 } from "path";
+import { basename, dirname, join as join2 } from "path";
 import { fileURLToPath } from "url";
 
-// src/core/db.ts
+// src/core/memory/schema.ts
 init_paths();
 import { Database } from "bun:sqlite";
 import path2 from "path";
@@ -1490,318 +1490,61 @@ import * as sqliteVec from "sqlite-vec";
 // src/core/constants.ts
 var EMBEDDING_DIM = 384;
 
-// src/core/migrations/001-project-columns.ts
-import { readFileSync } from "fs";
-
-// src/core/project.ts
-import { execFileSync } from "child_process";
-var UNKNOWN = { project: "unknown", projectName: "unknown" };
-function normalizeRepoRoot(cwd) {
-  const marker = "/.worktrees/";
-  const i = cwd.indexOf(marker);
-  const root = i >= 0 ? cwd.slice(0, i) : cwd;
-  return root.replace(/\/+$/, "");
+// src/core/memory/schema.ts
+function createMemorySchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id         TEXT PRIMARY KEY,
+      memory     TEXT NOT NULL,
+      hash       TEXT NOT NULL,
+      metadata   TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_hash ON memories(hash)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id  TEXT NOT NULL,
+      old_memory TEXT,
+      new_memory TEXT,
+      event      TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      is_deleted INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_history_memory_id ON history(memory_id)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS entities (
+      id                TEXT PRIMARY KEY,
+      data              TEXT NOT NULL,
+      entity_type       TEXT,
+      linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+      created_at        INTEGER NOT NULL
+    )
+  `);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
 }
-function leaf(repoRoot) {
-  const parts = repoRoot.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "unknown";
-}
-function parseOrgRepo(remoteUrl) {
-  let s = remoteUrl.trim();
-  if (!s)
-    return null;
-  const scp = s.match(/^[^@]+@[^:]+:(.+)$/);
-  if (scp) {
-    s = scp[1];
-  } else {
-    const proto = s.match(/^[a-z]+:\/\/[^/]+\/(.+)$/i);
-    if (proto)
-      s = proto[1];
-    else if (s.includes("://") || s.includes("@"))
-      return null;
-    else if (!s.includes("/"))
-      return null;
-  }
-  s = s.replace(/\.git$/, "").replace(/\/+$/, "");
-  const parts = s.split("/").filter(Boolean);
-  if (parts.length < 2)
-    return null;
-  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-}
-var defaultGitReader = {
-  readRemoteOrgRepo(repoRoot) {
-    try {
-      const url = execFileSync("git", ["-C", repoRoot, "config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-      if (!url)
-        return null;
-      return parseOrgRepo(url);
-    } catch {
-      return null;
-    }
-  }
-};
-function resolveProject(cwd, opts = {}) {
-  if (!cwd)
-    return UNKNOWN;
-  const repoRoot = normalizeRepoRoot(cwd);
-  if (!repoRoot)
-    return UNKNOWN;
-  const reader = opts.gitReader ?? defaultGitReader;
-  const orgRepo = reader.readRemoteOrgRepo(repoRoot);
-  if (orgRepo) {
-    const name2 = orgRepo.split("/").filter(Boolean).pop() ?? orgRepo;
-    return { project: orgRepo, projectName: name2 };
-  }
-  const name = leaf(repoRoot);
-  return { project: name, projectName: name };
-}
-
-// src/core/migrations/001-project-columns.ts
-function hasColumn(db, table, column) {
-  const cols = db.query(`PRAGMA table_info(${table})`).all();
-  return cols.some((c) => c.name === column);
-}
-function readCwdFromArchive(archivePath) {
-  let content;
-  try {
-    content = readFileSync(archivePath, "utf8");
-  } catch {
-    return null;
-  }
-  for (const line of content.split(`
-`)) {
-    if (!line.trim())
-      continue;
-    try {
-      const obj = JSON.parse(line);
-      const cwd = typeof obj.cwd === "string" ? obj.cwd : typeof obj.payload?.cwd === "string" ? obj.payload.cwd : null;
-      if (cwd)
-        return cwd;
-    } catch {}
-  }
-  return null;
-}
-var projectColumnsMigration = {
-  version: 1,
-  name: "project-columns",
-  up(db) {
-    const run = db.transaction(() => {
-      if (!hasColumn(db, "memory_records", "project_name")) {
-        db.exec("ALTER TABLE memory_records ADD COLUMN project_name TEXT");
-      }
-      const paths = db.query(`SELECT DISTINCT archive_path AS p FROM memory_records
-           WHERE status = 'active' AND project IS NULL`).all();
-      const update = db.prepare(`UPDATE memory_records SET project = ?, project_name = ?
-         WHERE archive_path = ? AND project IS NULL`);
-      for (const { p } of paths) {
-        const cwd = readCwdFromArchive(p);
-        const { project, projectName } = resolveProject(cwd);
-        update.run(project, projectName, p);
-      }
-    });
-    run();
-  }
-};
-
-// src/core/migrations/002-source-kind-rename.ts
-import { existsSync, mkdirSync, renameSync } from "fs";
-import { dirname, sep } from "path";
-var RENAMES = [
-  { oldKind: "claude-projects", newKind: "claude-code-projects" },
-  { oldKind: "claude-transcripts", newKind: "claude-code-transcripts" }
-];
-function rewriteArchivePath(archivePath, oldKind, newKind) {
-  const oldSegment = `${sep}${oldKind}${sep}`;
-  const index = archivePath.indexOf(oldSegment);
-  if (index < 0)
-    return archivePath;
-  return `${archivePath.slice(0, index)}${sep}${newKind}${sep}${archivePath.slice(index + oldSegment.length)}`;
-}
-function moveArchiveFile(oldPath, newPath) {
-  if (oldPath === newPath || !existsSync(oldPath) || existsSync(newPath)) {
-    return;
-  }
-  mkdirSync(dirname(newPath), { recursive: true });
-  renameSync(oldPath, newPath);
-}
-function rewriteTableArchivePaths(db, table, oldKind, newKind) {
-  const rows = db.query(`
-    SELECT DISTINCT archive_path AS archivePath
-    FROM ${table}
-    WHERE archive_path LIKE ?
-  `).all(`%${sep}${oldKind}${sep}%`);
-  const update = db.prepare(`UPDATE ${table} SET archive_path = ? WHERE archive_path = ?`);
-  for (const { archivePath } of rows) {
-    const newArchivePath = rewriteArchivePath(archivePath, oldKind, newKind);
-    moveArchiveFile(archivePath, newArchivePath);
-    update.run(newArchivePath, archivePath);
-  }
-}
-function rewriteSourceKind(db, table, oldKind, newKind) {
-  db.query(`UPDATE ${table} SET source_kind = ? WHERE source_kind = ?`).run(newKind, oldKind);
-}
-var sourceKindRenameMigration = {
-  version: 2,
-  name: "source-kind-rename",
-  up(db) {
-    const run = db.transaction(() => {
-      for (const { oldKind, newKind } of RENAMES) {
-        rewriteTableArchivePaths(db, "memory_records", oldKind, newKind);
-        rewriteTableArchivePaths(db, "extraction_state", oldKind, newKind);
-        rewriteTableArchivePaths(db, "archive_index_state", oldKind, newKind);
-        rewriteSourceKind(db, "memory_records", oldKind, newKind);
-        rewriteSourceKind(db, "extraction_state", oldKind, newKind);
-      }
-    });
-    run();
-  }
-};
-
-// src/core/migrations/index.ts
-var MIGRATIONS = [projectColumnsMigration, sourceKindRenameMigration];
-function getUserVersion(db) {
-  return db.query("PRAGMA user_version").get().user_version;
-}
-function runMigrationsWith(db, migrations) {
-  const current = getUserVersion(db);
-  const pending = [...migrations].sort((a, b) => a.version - b.version).filter((m) => m.version > current);
-  for (const m of pending) {
-    m.up(db);
-    db.exec(`PRAGMA user_version = ${m.version}`);
-  }
-}
-function runMigrations(db) {
-  runMigrationsWith(db, MIGRATIONS);
-}
-
-// src/core/db.ts
-var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
-if (process.platform === "darwin" && !isTestEnvironment && true) {
-  try {
-    Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
-  } catch {}
-}
-function isWipeAllowed(isTestEnv, nodeEnv) {
-  return isTestEnv || nodeEnv === "test";
-}
-function openDatabase() {
-  return createDatabase(false);
-}
-function createDatabase(wipe) {
+function openMemoryDb() {
   const dbPath = getDbPath();
   const dbDir = path2.dirname(dbPath);
   if (dbPath !== ":memory:" && !fs2.existsSync(dbDir)) {
     fs2.mkdirSync(dbDir, { recursive: true });
   }
-  if (wipe && dbPath !== ":memory:") {
-    if (!isWipeAllowed(isTestEnvironment, "development")) {
-      throw new Error("initDatabase() wipes the database and is for tests only. Use openDatabase() in production.");
-    }
-    for (const suffix of ["", "-wal", "-shm"]) {
-      const filePath = `${dbPath}${suffix}`;
-      if (fs2.existsSync(filePath)) {
-        fs2.unlinkSync(filePath);
-      }
-    }
-  }
   const db = new Database(dbPath);
   sqliteVec.load(db);
-  db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA synchronous = NORMAL");
-  createSchema(db);
+  createMemorySchema(db);
   return db;
-}
-function createSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memory_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('fact', 'event')),
-      text TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      archive_path TEXT NOT NULL,
-      line_start INTEGER NOT NULL,
-      line_end INTEGER NOT NULL,
-      observed_at INTEGER,
-      project TEXT,
-      project_name TEXT,
-      confidence REAL NOT NULL DEFAULT 1.0,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
-      supersedes_id INTEGER,
-      dedupe_key TEXT NOT NULL,
-      extraction_version INTEGER NOT NULL,
-      embedding_version INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  db.exec("DROP INDEX IF EXISTS idx_memory_records_dedupe_key");
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key, archive_path, line_start, line_end)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_kind ON memory_records(kind)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_archive_path ON memory_records(archive_path)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_observed_at ON memory_records(observed_at)");
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_records USING vec0(
-      embedding float[${EMBEDDING_DIM}]
-    )
-  `);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS extraction_state (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source_kind TEXT NOT NULL,
-      archive_path TEXT NOT NULL,
-      line_start INTEGER NOT NULL,
-      line_end INTEGER NOT NULL,
-      source_hash TEXT NOT NULL,
-      extraction_version INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
-      error_message TEXT,
-      retry_after INTEGER,
-      attempt_count INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
-    )
-  `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS archive_index_state (
-      archive_path TEXT PRIMARY KEY,
-      content_mtime_ms REAL NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  migrateExtractionState(db);
-  runMigrations(db);
-}
-function migrateExtractionState(db) {
-  const cols = db.query("PRAGMA table_info(extraction_state)").all();
-  const hasAttemptCount = cols.some((c) => c.name === "attempt_count");
-  if (!hasAttemptCount) {
-    db.exec("ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
-  }
-}
-function getArchiveIndexMtime(db, archivePath) {
-  const row = db.query("SELECT content_mtime_ms AS mtime FROM archive_index_state WHERE archive_path = ?").get(archivePath);
-  return row ? row.mtime : null;
-}
-function setArchiveIndexMtime(db, archivePath, contentMtimeMs) {
-  const now = Date.now();
-  db.query(`
-    INSERT INTO archive_index_state (archive_path, content_mtime_ms, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(archive_path) DO UPDATE SET
-      content_mtime_ms = excluded.content_mtime_ms,
-      updated_at = excluded.updated_at
-  `).run(archivePath, contentMtimeMs, now);
 }
 
 // src/core/doctor.ts
-import { existsSync as existsSync2, readdirSync, statSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
 // src/core/verify.ts
@@ -1850,7 +1593,7 @@ function getMemoryStats(db) {
 var REQUIRED_DIST_ARTIFACTS = ["cli-internal.mjs", "mcp-server.mjs"];
 function newestMtime(dir, ext) {
   let newest = 0;
-  if (!existsSync2(dir))
+  if (!existsSync(dir))
     return 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
@@ -1863,7 +1606,7 @@ function newestMtime(dir, ext) {
   return newest;
 }
 function checkBuild(paths) {
-  const missing = REQUIRED_DIST_ARTIFACTS.filter((name) => !existsSync2(join(paths.distDir, name)));
+  const missing = REQUIRED_DIST_ARTIFACTS.filter((name) => !existsSync(join(paths.distDir, name)));
   if (missing.length > 0) {
     return {
       name: "build",
@@ -1932,11 +1675,11 @@ var STATUS_ICON = {
   fail: "✗"
 };
 function resolveRoot() {
-  const here = dirname2(fileURLToPath(import.meta.url));
+  const here = dirname(fileURLToPath(import.meta.url));
   return basename(here) === "cli" ? join2(here, "..", "..") : join2(here, "..");
 }
 function runDoctorCli() {
-  const db = openDatabase();
+  const db = openMemoryDb();
   try {
     const root = resolveRoot();
     const results = runDiagnostics(db, {
@@ -1971,29 +1714,29 @@ memmem is healthy.`);
 
 // src/cli/mcp.ts
 import { spawn as spawn2 } from "child_process";
-import { existsSync as existsSync4 } from "fs";
-import { dirname as dirname4, join as join4 } from "path";
+import { existsSync as existsSync3 } from "fs";
+import { dirname as dirname3, join as join4 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // scripts/lib/check-dependencies.mjs
-import { existsSync as existsSync3, statSync as statSync2, readdirSync as readdirSync2 } from "fs";
+import { existsSync as existsSync2, statSync as statSync2, readdirSync as readdirSync2 } from "fs";
 import { spawn } from "child_process";
-import { dirname as dirname3, join as join3 } from "path";
+import { dirname as dirname2, join as join3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-var __dirname2 = dirname3(fileURLToPath2(import.meta.url));
+var __dirname2 = dirname2(fileURLToPath2(import.meta.url));
 function findRoot(start) {
   let dir = start;
-  while (dir !== dirname3(dir)) {
-    if (existsSync3(join3(dir, "package.json")))
+  while (dir !== dirname2(dir)) {
+    if (existsSync2(join3(dir, "package.json")))
       return dir;
-    dir = dirname3(dir);
+    dir = dirname2(dir);
   }
   return start;
 }
 var ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname2);
 function checkDependencies() {
   const nodeModulesPath = join3(ROOT, "node_modules");
-  if (!existsSync3(nodeModulesPath)) {
+  if (!existsSync2(nodeModulesPath)) {
     return { installed: false, missing: ["node_modules"] };
   }
   return { installed: true, missing: [] };
@@ -2068,13 +1811,13 @@ function analyzeError(error) {
 }
 
 // src/cli/mcp.ts
-var __dirname3 = dirname4(fileURLToPath3(import.meta.url));
+var __dirname3 = dirname3(fileURLToPath3(import.meta.url));
 function findRoot2(start) {
   let dir = start;
-  while (dir !== dirname4(dir)) {
-    if (existsSync4(join4(dir, "package.json")))
+  while (dir !== dirname3(dir)) {
+    if (existsSync3(join4(dir, "package.json")))
       return dir;
-    dir = dirname4(dir);
+    dir = dirname3(dir);
   }
   return start;
 }
@@ -2097,7 +1840,7 @@ async function runMcpCli() {
     process.exit(1);
   }
   const mcpServerPath = join4(PLUGIN_ROOT, "dist", "mcp-server.mjs");
-  if (!existsSync4(mcpServerPath)) {
+  if (!existsSync3(mcpServerPath)) {
     console.error(`[memmem] ERROR: MCP server not found at ${mcpServerPath}`);
     console.error("Please run: bun run build");
     process.exit(1);
@@ -2116,64 +1859,6 @@ async function runMcpCli() {
     console.error(`[memmem] ERROR: Failed to start MCP server: ${err.message}`);
     process.exit(1);
   });
-}
-
-// src/core/memory/schema.ts
-init_paths();
-import { Database as Database2 } from "bun:sqlite";
-import path3 from "path";
-import fs3 from "fs";
-import * as sqliteVec2 from "sqlite-vec";
-function createMemorySchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memories (
-      id         TEXT PRIMARY KEY,
-      memory     TEXT NOT NULL,
-      hash       TEXT NOT NULL,
-      metadata   TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_hash ON memories(hash)");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS history (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      memory_id  TEXT NOT NULL,
-      old_memory TEXT,
-      new_memory TEXT,
-      event      TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      is_deleted INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_history_memory_id ON history(memory_id)");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS entities (
-      id                TEXT PRIMARY KEY,
-      data              TEXT NOT NULL,
-      entity_type       TEXT,
-      linked_memory_ids TEXT NOT NULL DEFAULT '[]',
-      created_at        INTEGER NOT NULL
-    )
-  `);
-  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
-  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
-  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
-}
-function openMemoryDb() {
-  const dbPath = getDbPath();
-  const dbDir = path3.dirname(dbPath);
-  if (dbPath !== ":memory:" && !fs3.existsSync(dbDir)) {
-    fs3.mkdirSync(dbDir, { recursive: true });
-  }
-  const db = new Database2(dbPath);
-  sqliteVec2.load(db);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA synchronous = NORMAL");
-  createMemorySchema(db);
-  return db;
 }
 
 // src/core/embeddings-model.ts
@@ -2454,8 +2139,8 @@ async function searchMemories(args) {
   const vectorCount = db.query("SELECT COUNT(*) AS c FROM vec_memories").get().c;
   if (vectorCount === 0)
     return { results: [] };
-  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(internalLimit, 1));
-  const semanticRows = db.query(`
+  const maxK = Math.min(vectorCount, MAX_KNN_K);
+  const semanticQuery = db.query(`
     SELECT m.id AS id, m.memory AS memory, m.hash AS hash, m.metadata AS metadata,
            m.created_at AS created_at, m.updated_at AS updated_at,
            m.rowid AS rowid, vec.distance AS distance
@@ -2465,7 +2150,15 @@ async function searchMemories(args) {
       ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `).all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, internalLimit);
+  `);
+  let k = Math.min(maxK, Math.max(internalLimit, 1));
+  let semanticRows;
+  for (;; ) {
+    semanticRows = semanticQuery.all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, internalLimit);
+    if (semanticRows.length >= internalLimit || k >= maxK)
+      break;
+    k = Math.min(maxK, k * 2);
+  }
   const byRowid = new Map(semanticRows.map((r) => [r.rowid, r]));
   const bm25Scores = {};
   if (queryLemmatized) {
@@ -2537,6 +2230,323 @@ async function searchMemories(args) {
 // src/cli/sync.ts
 import { copyFileSync, existsSync as existsSync8, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync4, renameSync as renameSync2, rmSync as rmSync2, statSync as statSync4, unlinkSync as unlinkSync2 } from "fs";
 import path7 from "path";
+
+// src/core/db.ts
+init_paths();
+import { Database as Database2 } from "bun:sqlite";
+import path3 from "path";
+import fs3 from "fs";
+import * as sqliteVec2 from "sqlite-vec";
+
+// src/core/migrations/001-project-columns.ts
+import { readFileSync as readFileSync2 } from "fs";
+
+// src/core/project.ts
+import { execFileSync } from "child_process";
+var UNKNOWN = { project: "unknown", projectName: "unknown" };
+function normalizeRepoRoot(cwd) {
+  const marker = "/.worktrees/";
+  const i = cwd.indexOf(marker);
+  const root = i >= 0 ? cwd.slice(0, i) : cwd;
+  return root.replace(/\/+$/, "");
+}
+function leaf(repoRoot) {
+  const parts = repoRoot.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "unknown";
+}
+function parseOrgRepo(remoteUrl) {
+  let s = remoteUrl.trim();
+  if (!s)
+    return null;
+  const scp = s.match(/^[^@]+@[^:]+:(.+)$/);
+  if (scp) {
+    s = scp[1];
+  } else {
+    const proto = s.match(/^[a-z]+:\/\/[^/]+\/(.+)$/i);
+    if (proto)
+      s = proto[1];
+    else if (s.includes("://") || s.includes("@"))
+      return null;
+    else if (!s.includes("/"))
+      return null;
+  }
+  s = s.replace(/\.git$/, "").replace(/\/+$/, "");
+  const parts = s.split("/").filter(Boolean);
+  if (parts.length < 2)
+    return null;
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+}
+var defaultGitReader = {
+  readRemoteOrgRepo(repoRoot) {
+    try {
+      const url = execFileSync("git", ["-C", repoRoot, "config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (!url)
+        return null;
+      return parseOrgRepo(url);
+    } catch {
+      return null;
+    }
+  }
+};
+function resolveProject(cwd, opts = {}) {
+  if (!cwd)
+    return UNKNOWN;
+  const repoRoot = normalizeRepoRoot(cwd);
+  if (!repoRoot)
+    return UNKNOWN;
+  const reader = opts.gitReader ?? defaultGitReader;
+  const orgRepo = reader.readRemoteOrgRepo(repoRoot);
+  if (orgRepo) {
+    const name2 = orgRepo.split("/").filter(Boolean).pop() ?? orgRepo;
+    return { project: orgRepo, projectName: name2 };
+  }
+  const name = leaf(repoRoot);
+  return { project: name, projectName: name };
+}
+
+// src/core/migrations/001-project-columns.ts
+function hasColumn(db, table, column) {
+  const cols = db.query(`PRAGMA table_info(${table})`).all();
+  return cols.some((c) => c.name === column);
+}
+function readCwdFromArchive(archivePath) {
+  let content;
+  try {
+    content = readFileSync2(archivePath, "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of content.split(`
+`)) {
+    if (!line.trim())
+      continue;
+    try {
+      const obj = JSON.parse(line);
+      const cwd = typeof obj.cwd === "string" ? obj.cwd : typeof obj.payload?.cwd === "string" ? obj.payload.cwd : null;
+      if (cwd)
+        return cwd;
+    } catch {}
+  }
+  return null;
+}
+var projectColumnsMigration = {
+  version: 1,
+  name: "project-columns",
+  up(db) {
+    const run2 = db.transaction(() => {
+      if (!hasColumn(db, "memory_records", "project_name")) {
+        db.exec("ALTER TABLE memory_records ADD COLUMN project_name TEXT");
+      }
+      const paths = db.query(`SELECT DISTINCT archive_path AS p FROM memory_records
+           WHERE status = 'active' AND project IS NULL`).all();
+      const update = db.prepare(`UPDATE memory_records SET project = ?, project_name = ?
+         WHERE archive_path = ? AND project IS NULL`);
+      for (const { p } of paths) {
+        const cwd = readCwdFromArchive(p);
+        const { project, projectName } = resolveProject(cwd);
+        update.run(project, projectName, p);
+      }
+    });
+    run2();
+  }
+};
+
+// src/core/migrations/002-source-kind-rename.ts
+import { existsSync as existsSync5, mkdirSync, renameSync } from "fs";
+import { dirname as dirname4, sep } from "path";
+var RENAMES = [
+  { oldKind: "claude-projects", newKind: "claude-code-projects" },
+  { oldKind: "claude-transcripts", newKind: "claude-code-transcripts" }
+];
+function rewriteArchivePath(archivePath, oldKind, newKind) {
+  const oldSegment = `${sep}${oldKind}${sep}`;
+  const index = archivePath.indexOf(oldSegment);
+  if (index < 0)
+    return archivePath;
+  return `${archivePath.slice(0, index)}${sep}${newKind}${sep}${archivePath.slice(index + oldSegment.length)}`;
+}
+function moveArchiveFile(oldPath, newPath) {
+  if (oldPath === newPath || !existsSync5(oldPath) || existsSync5(newPath)) {
+    return;
+  }
+  mkdirSync(dirname4(newPath), { recursive: true });
+  renameSync(oldPath, newPath);
+}
+function rewriteTableArchivePaths(db, table, oldKind, newKind) {
+  const rows = db.query(`
+    SELECT DISTINCT archive_path AS archivePath
+    FROM ${table}
+    WHERE archive_path LIKE ?
+  `).all(`%${sep}${oldKind}${sep}%`);
+  const update = db.prepare(`UPDATE ${table} SET archive_path = ? WHERE archive_path = ?`);
+  for (const { archivePath } of rows) {
+    const newArchivePath = rewriteArchivePath(archivePath, oldKind, newKind);
+    moveArchiveFile(archivePath, newArchivePath);
+    update.run(newArchivePath, archivePath);
+  }
+}
+function rewriteSourceKind(db, table, oldKind, newKind) {
+  db.query(`UPDATE ${table} SET source_kind = ? WHERE source_kind = ?`).run(newKind, oldKind);
+}
+var sourceKindRenameMigration = {
+  version: 2,
+  name: "source-kind-rename",
+  up(db) {
+    const run2 = db.transaction(() => {
+      for (const { oldKind, newKind } of RENAMES) {
+        rewriteTableArchivePaths(db, "memory_records", oldKind, newKind);
+        rewriteTableArchivePaths(db, "extraction_state", oldKind, newKind);
+        rewriteTableArchivePaths(db, "archive_index_state", oldKind, newKind);
+        rewriteSourceKind(db, "memory_records", oldKind, newKind);
+        rewriteSourceKind(db, "extraction_state", oldKind, newKind);
+      }
+    });
+    run2();
+  }
+};
+
+// src/core/migrations/index.ts
+var MIGRATIONS = [projectColumnsMigration, sourceKindRenameMigration];
+function getUserVersion(db) {
+  return db.query("PRAGMA user_version").get().user_version;
+}
+function runMigrationsWith(db, migrations) {
+  const current = getUserVersion(db);
+  const pending = [...migrations].sort((a, b) => a.version - b.version).filter((m) => m.version > current);
+  for (const m of pending) {
+    m.up(db);
+    db.exec(`PRAGMA user_version = ${m.version}`);
+  }
+}
+function runMigrations(db) {
+  runMigrationsWith(db, MIGRATIONS);
+}
+
+// src/core/db.ts
+var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
+if (process.platform === "darwin" && !isTestEnvironment && true) {
+  try {
+    Database2.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+  } catch {}
+}
+function isWipeAllowed(isTestEnv, nodeEnv) {
+  return isTestEnv || nodeEnv === "test";
+}
+function openDatabase() {
+  return createDatabase(false);
+}
+function createDatabase(wipe) {
+  const dbPath = getDbPath();
+  const dbDir = path3.dirname(dbPath);
+  if (dbPath !== ":memory:" && !fs3.existsSync(dbDir)) {
+    fs3.mkdirSync(dbDir, { recursive: true });
+  }
+  if (wipe && dbPath !== ":memory:") {
+    if (!isWipeAllowed(isTestEnvironment, "development")) {
+      throw new Error("initDatabase() wipes the database and is for tests only. Use openDatabase() in production.");
+    }
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const filePath = `${dbPath}${suffix}`;
+      if (fs3.existsSync(filePath)) {
+        fs3.unlinkSync(filePath);
+      }
+    }
+  }
+  const db = new Database2(dbPath);
+  sqliteVec2.load(db);
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA synchronous = NORMAL");
+  createSchema(db);
+  return db;
+}
+function createSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK (kind IN ('fact', 'event')),
+      text TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      archive_path TEXT NOT NULL,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER NOT NULL,
+      observed_at INTEGER,
+      project TEXT,
+      project_name TEXT,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
+      supersedes_id INTEGER,
+      dedupe_key TEXT NOT NULL,
+      extraction_version INTEGER NOT NULL,
+      embedding_version INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.exec("DROP INDEX IF EXISTS idx_memory_records_dedupe_key");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_records_dedupe_key ON memory_records(dedupe_key, archive_path, line_start, line_end)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_kind ON memory_records(kind)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_archive_path ON memory_records(archive_path)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_records_observed_at ON memory_records(observed_at)");
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_records USING vec0(
+      embedding float[${EMBEDDING_DIM}]
+    )
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS extraction_state (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_kind TEXT NOT NULL,
+      archive_path TEXT NOT NULL,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER NOT NULL,
+      source_hash TEXT NOT NULL,
+      extraction_version INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('done', 'empty', 'errored')),
+      error_message TEXT,
+      retry_after INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(archive_path, line_start, line_end, source_hash, extraction_version)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_archive_path ON extraction_state(archive_path)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_status ON extraction_state(status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_extraction_state_retry_after ON extraction_state(retry_after)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archive_index_state (
+      archive_path TEXT PRIMARY KEY,
+      content_mtime_ms REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  migrateExtractionState(db);
+  runMigrations(db);
+}
+function migrateExtractionState(db) {
+  const cols = db.query("PRAGMA table_info(extraction_state)").all();
+  const hasAttemptCount = cols.some((c) => c.name === "attempt_count");
+  if (!hasAttemptCount) {
+    db.exec("ALTER TABLE extraction_state ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0");
+  }
+}
+function getArchiveIndexMtime(db, archivePath) {
+  const row = db.query("SELECT content_mtime_ms AS mtime FROM archive_index_state WHERE archive_path = ?").get(archivePath);
+  return row ? row.mtime : null;
+}
+function setArchiveIndexMtime(db, archivePath, contentMtimeMs) {
+  const now = Date.now();
+  db.query(`
+    INSERT INTO archive_index_state (archive_path, content_mtime_ms, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(archive_path) DO UPDATE SET
+      content_mtime_ms = excluded.content_mtime_ms,
+      updated_at = excluded.updated_at
+  `).run(archivePath, contentMtimeMs, now);
+}
 
 // src/core/memory/add.ts
 import { randomUUID } from "crypto";
@@ -3196,10 +3206,30 @@ function recordHistory(db, entries) {
       stmt.run(e.memory_id, e.old_memory, e.new_memory, e.event, now);
   })();
 }
+function deleteMemoriesByRunIds(db, runIds) {
+  if (runIds.length === 0)
+    return 0;
+  const placeholders = runIds.map(() => "?").join(",");
+  const rows = db.query(`SELECT rowid AS r FROM memories WHERE json_extract(metadata, '$.run_id') IN (${placeholders})`).all(...runIds);
+  const rowids = rows.map((row) => row.r);
+  if (rowids.length === 0)
+    return 0;
+  const rowidPlaceholders = rowids.map(() => "?").join(",");
+  const deleteVec = db.query(`DELETE FROM vec_memories WHERE rowid IN (${rowidPlaceholders})`);
+  const deleteFts = db.query(`DELETE FROM fts_memories WHERE rowid IN (${rowidPlaceholders})`);
+  const deleteMemories = db.query(`DELETE FROM memories WHERE rowid IN (${rowidPlaceholders})`);
+  db.transaction(() => {
+    deleteVec.run(...rowids);
+    deleteFts.run(...rowids);
+    deleteMemories.run(...rowids);
+  })();
+  return rowids.length;
+}
 
 // src/core/memory/add.ts
 var EXISTING_MEMORY_TOP_K = 10;
 var SESSION_CONTEXT_LIMIT = 10;
+var MAX_KNN_K2 = 4096;
 async function addMemories(args) {
   const { db, provider, messages, filters, metadata = {}, observationDate } = args;
   const lastKMessages = messages.slice(-SESSION_CONTEXT_LIMIT);
@@ -3254,8 +3284,8 @@ async function retrieveExisting(db, messages, filters) {
     return [];
   const { clause, params } = buildFilterSql(filters);
   const filterClause = clause ? `AND ${clause}` : "";
-  const k = Math.min(vectorCount, EXISTING_MEMORY_TOP_K);
-  const rows = db.query(`
+  const maxK = Math.min(vectorCount, MAX_KNN_K2);
+  const existingQuery = db.query(`
     SELECT m.id AS id, m.memory AS text
     FROM vec_memories vec
     INNER JOIN memories m ON m.rowid = vec.rowid
@@ -3263,7 +3293,15 @@ async function retrieveExisting(db, messages, filters) {
       ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `).all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, EXISTING_MEMORY_TOP_K);
+  `);
+  let k = Math.min(maxK, EXISTING_MEMORY_TOP_K);
+  let rows;
+  for (;; ) {
+    rows = existingQuery.all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, EXISTING_MEMORY_TOP_K);
+    if (rows.length >= EXISTING_MEMORY_TOP_K || k >= maxK)
+      break;
+    k = Math.min(maxK, k * 2);
+  }
   return rows;
 }
 
@@ -3700,7 +3738,7 @@ async function syncArchives(db, options = {}) {
       }
       for (const sourceDir of excludedSourceDirs) {
         const archivePathPrefix = path7.join(archiveDir, adapter.kind, path7.relative(root, sourceDir));
-        purgeExcludedArchiveSubtree(archivePathPrefix, archiveFiles);
+        purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles);
       }
     }
     const adapterArchiveRoot = path7.join(archiveDir, adapter.kind);
@@ -3843,15 +3881,37 @@ function findJsonlFiles(root, adapter, excludedDirs = []) {
   }
   return files;
 }
-function purgeExcludedArchiveSubtree(archivePathPrefix, archiveFiles) {
+function purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles) {
   for (const archivePath of archiveFiles.keys()) {
     if (isPathAtOrUnder(archivePath, archivePathPrefix)) {
       archiveFiles.delete(archivePath);
     }
   }
+  const runIds = collectJsonlRunIds(archivePathPrefix);
+  if (runIds.length > 0) {
+    deleteMemoriesByRunIds(db, runIds);
+  }
   if (existsSync8(archivePathPrefix)) {
     rmSync2(archivePathPrefix, { recursive: true, force: true });
   }
+}
+function collectJsonlRunIds(archivePathPrefix) {
+  if (!existsSync8(archivePathPrefix))
+    return [];
+  const stat = statSync4(archivePathPrefix);
+  if (stat.isFile()) {
+    return archivePathPrefix.endsWith(".jsonl") ? [path7.basename(archivePathPrefix, path7.extname(archivePathPrefix))] : [];
+  }
+  const runIds = [];
+  for (const entry of readdirSync4(archivePathPrefix, { withFileTypes: true })) {
+    const entryPath = path7.join(archivePathPrefix, entry.name);
+    if (entry.isDirectory()) {
+      runIds.push(...collectJsonlRunIds(entryPath));
+    } else if (entry.isFile() && entryPath.endsWith(".jsonl")) {
+      runIds.push(path7.basename(entryPath, path7.extname(entryPath)));
+    }
+  }
+  return runIds;
 }
 function isPathAtOrUnder(filePath, parentPath) {
   const relative = path7.relative(parentPath, filePath);

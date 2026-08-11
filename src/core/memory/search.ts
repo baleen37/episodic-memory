@@ -59,9 +59,9 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
 
   const vectorCount = (db.query('SELECT COUNT(*) AS c FROM vec_memories').get() as { c: number }).c;
   if (vectorCount === 0) return { results: [] };
-  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(internalLimit, 1));
+  const maxK = Math.min(vectorCount, MAX_KNN_K);
 
-  const semanticRows = db.query(`
+  const semanticQuery = db.query(`
     SELECT m.id AS id, m.memory AS memory, m.hash AS hash, m.metadata AS metadata,
            m.created_at AS created_at, m.updated_at AS updated_at,
            m.rowid AS rowid, vec.distance AS distance
@@ -71,12 +71,24 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
       ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `).all(
-    Buffer.from(new Float32Array(embedding).buffer), k, ...(params as never[]), internalLimit,
-  ) as Array<{
+  `);
+
+  // A selective metadata filter is applied to the KNN candidate set *after* sqlite-vec
+  // has already chosen its k nearest rows — a narrow filter can otherwise starve the
+  // result set even when far more matching rows exist beyond the initial k. Widen k
+  // and retry until enough post-filter rows are found or the KNN space is exhausted.
+  let k = Math.min(maxK, Math.max(internalLimit, 1));
+  let semanticRows: Array<{
     id: string; memory: string; hash: string; metadata: string;
     created_at: number; updated_at: number; rowid: number; distance: number;
   }>;
+  for (;;) {
+    semanticRows = semanticQuery.all(
+      Buffer.from(new Float32Array(embedding).buffer), k, ...(params as never[]), internalLimit,
+    ) as typeof semanticRows;
+    if (semanticRows.length >= internalLimit || k >= maxK) break;
+    k = Math.min(maxK, k * 2);
+  }
 
   const byRowid = new Map(semanticRows.map(r => [r.rowid, r]));
 

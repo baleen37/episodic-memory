@@ -93,6 +93,41 @@ export function recordHistory(db: Database, entries: HistoryEntry[]): void {
   })();
 }
 
+/**
+ * Deletes every memory whose metadata.run_id is in `runIds`, along with its vector
+ * and FTS rows. Returns the number of memories deleted.
+ *
+ * Ordering matters: SQLite reuses freed rowids, so a stale vec_memories/fts_memories
+ * row left behind after a memories row is deleted would later be silently
+ * misattributed to an unrelated new memory that happens to get the same rowid. To
+ * avoid that, resolve the target rowids first, delete the vec_memories and
+ * fts_memories rows by rowid, and only then delete the memories rows — all inside
+ * one transaction.
+ */
+export function deleteMemoriesByRunIds(db: Database, runIds: string[]): number {
+  if (runIds.length === 0) return 0;
+
+  const placeholders = runIds.map(() => '?').join(',');
+  const rows = db.query(
+    `SELECT rowid AS r FROM memories WHERE json_extract(metadata, '$.run_id') IN (${placeholders})`,
+  ).all(...runIds) as Array<{ r: number }>;
+  const rowids = rows.map(row => row.r);
+  if (rowids.length === 0) return 0;
+
+  const rowidPlaceholders = rowids.map(() => '?').join(',');
+  const deleteVec = db.query(`DELETE FROM vec_memories WHERE rowid IN (${rowidPlaceholders})`);
+  const deleteFts = db.query(`DELETE FROM fts_memories WHERE rowid IN (${rowidPlaceholders})`);
+  const deleteMemories = db.query(`DELETE FROM memories WHERE rowid IN (${rowidPlaceholders})`);
+
+  db.transaction(() => {
+    deleteVec.run(...rowids);
+    deleteFts.run(...rowids);
+    deleteMemories.run(...rowids);
+  })();
+
+  return rowids.length;
+}
+
 export function upsertEntities(db: Database, entities: NewEntity[]): void {
   if (entities.length === 0) return;
   const now = Date.now();

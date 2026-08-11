@@ -17175,8 +17175,8 @@ async function searchMemories(args) {
   const vectorCount = db.query("SELECT COUNT(*) AS c FROM vec_memories").get().c;
   if (vectorCount === 0)
     return { results: [] };
-  const k = Math.min(vectorCount, MAX_KNN_K, Math.max(internalLimit, 1));
-  const semanticRows = db.query(`
+  const maxK = Math.min(vectorCount, MAX_KNN_K);
+  const semanticQuery = db.query(`
     SELECT m.id AS id, m.memory AS memory, m.hash AS hash, m.metadata AS metadata,
            m.created_at AS created_at, m.updated_at AS updated_at,
            m.rowid AS rowid, vec.distance AS distance
@@ -17186,7 +17186,15 @@ async function searchMemories(args) {
       ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `).all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, internalLimit);
+  `);
+  let k = Math.min(maxK, Math.max(internalLimit, 1));
+  let semanticRows;
+  for (;; ) {
+    semanticRows = semanticQuery.all(Buffer.from(new Float32Array(embedding).buffer), k, ...params, internalLimit);
+    if (semanticRows.length >= internalLimit || k >= maxK)
+      break;
+    k = Math.min(maxK, k * 2);
+  }
   const byRowid = new Map(semanticRows.map((r) => [r.rowid, r]));
   const bm25Scores = {};
   if (queryLemmatized) {

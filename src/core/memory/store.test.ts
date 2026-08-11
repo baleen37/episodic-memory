@@ -2,7 +2,10 @@ import { describe, expect, test, beforeEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
 import { createMemorySchema } from './schema.js';
-import { md5, insertMemories, getExistingHashes, recordHistory, upsertEntities, getMemoryRowid } from './store.js';
+import {
+  md5, insertMemories, getExistingHashes, recordHistory, upsertEntities, getMemoryRowid,
+  deleteMemoriesByRunIds,
+} from './store.js';
 
 const EMB = new Array(384).fill(0.1);
 
@@ -87,6 +90,47 @@ describe('recordHistory', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].event).toBe('ADD');
     expect(rows[0].new_memory).toBe('a fact');
+  });
+});
+
+describe('deleteMemoriesByRunIds', () => {
+  test('deletes memories, vectors, and fts rows for the matched run_id, leaving unrelated memories untouched', () => {
+    const db = freshDb();
+    insertMemories(db, [
+      { id: 'u1', memory: 'Secret record from purged run', metadata: { run_id: 'purged-run' }, embedding: EMB },
+      { id: 'u2', memory: 'Unrelated record from another run', metadata: { run_id: 'kept-run' }, embedding: EMB },
+    ]);
+
+    const deleted = deleteMemoriesByRunIds(db, ['purged-run']);
+    expect(deleted).toBe(1);
+
+    expect((db.query('SELECT COUNT(*) c FROM memories').get() as { c: number }).c).toBe(1);
+    expect(db.query('SELECT id FROM memories').get()).toEqual({ id: 'u2' });
+
+    const rowid = getMemoryRowid(db, 'u2')!;
+    expect((db.query('SELECT COUNT(*) c FROM vec_memories').get() as { c: number }).c).toBe(1);
+    expect((db.query('SELECT COUNT(*) c FROM vec_memories WHERE rowid = ?').get(rowid) as { c: number }).c).toBe(1);
+
+    const ftsHits = db.query('SELECT rowid FROM fts_memories WHERE fts_memories MATCH ?').all('unrelated') as Array<{ rowid: number }>;
+    expect(ftsHits).toHaveLength(1);
+    expect(ftsHits[0].rowid).toBe(rowid);
+
+    const purgedFtsHits = db.query('SELECT rowid FROM fts_memories WHERE fts_memories MATCH ?').all('secret') as Array<{ rowid: number }>;
+    expect(purgedFtsHits).toHaveLength(0);
+  });
+
+  test('handles an empty run_id list without touching the store', () => {
+    const db = freshDb();
+    insertMemories(db, [{ id: 'u1', memory: 'kept', metadata: { run_id: 'r' }, embedding: EMB }]);
+    expect(deleteMemoriesByRunIds(db, [])).toBe(0);
+    expect((db.query('SELECT COUNT(*) c FROM memories').get() as { c: number }).c).toBe(1);
+  });
+
+  test('handles run_ids that match nothing', () => {
+    const db = freshDb();
+    insertMemories(db, [{ id: 'u1', memory: 'kept', metadata: { run_id: 'r' }, embedding: EMB }]);
+    expect(deleteMemoriesByRunIds(db, ['no-such-run'])).toBe(0);
+    expect((db.query('SELECT COUNT(*) c FROM memories').get() as { c: number }).c).toBe(1);
   });
 });
 

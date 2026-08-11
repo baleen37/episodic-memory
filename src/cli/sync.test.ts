@@ -325,6 +325,41 @@ describe('syncArchives', () => {
     expect(result.filesIndexed).toBe(0);
     expect(existsSync(archivePath)).toBe(false);
   });
+
+  test('deletes memories extracted from an archive whose source directory becomes excluded, leaving unrelated memories searchable', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const excludedSourceDir = join(claudeDir, 'projects', 'secret-proj');
+    const keptSourceDir = join(claudeDir, 'projects', 'kept-proj');
+    mkdirSync(excludedSourceDir, { recursive: true });
+    mkdirSync(keptSourceDir, { recursive: true });
+    writeClaudeTranscript(join(excludedSourceDir, 'secret-session.jsonl'), 'Secret question', 'Secret answer');
+    writeClaudeTranscript(join(keptSourceDir, 'kept-session.jsonl'), 'Kept question', 'Kept answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    // Distinct fact text per span so md5 dedup does not collapse the two files
+    // into a single memory row.
+    const provider = makeFailingProvider([]);
+
+    await syncArchives(db, { provider });
+    const runIdsBefore = (db.query(
+      "SELECT DISTINCT json_extract(metadata, '$.run_id') AS run_id FROM memories",
+    ).all() as Array<{ run_id: string }>).map(r => r.run_id);
+    expect(runIdsBefore.sort()).toEqual(['kept-session', 'secret-session']);
+
+    writeFileSync(join(excludedSourceDir, '.no-memmem'), '');
+    await syncArchives(db, { provider });
+
+    const runIdsAfter = (db.query(
+      "SELECT DISTINCT json_extract(metadata, '$.run_id') AS run_id FROM memories",
+    ).all() as Array<{ run_id: string }>).map(r => r.run_id);
+    expect(runIdsAfter).toEqual(['kept-session']);
+
+    const vecCount = (db.query('SELECT COUNT(*) AS c FROM vec_memories').get() as { c: number }).c;
+    const memCount = (db.query('SELECT COUNT(*) AS c FROM memories').get() as { c: number }).c;
+    expect(vecCount).toBe(memCount);
+  });
 });
 
 describe('runSyncCli lock', () => {

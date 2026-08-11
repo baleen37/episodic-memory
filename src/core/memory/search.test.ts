@@ -161,4 +161,34 @@ describe('searchMemories', () => {
     expect(results[0]).toHaveProperty('memory');
     expect(results[0]).toHaveProperty('created_at');
   });
+
+  test('widens the KNN k so a selective filter does not starve results below the requested limit', async () => {
+    // internalLimit = max(limit*4, 60) = 60, so the initial k is 60. Seed 2000 rows
+    // semantically CLOSER to the query than a 40-row selective slice that matches
+    // the agent_id filter — a fixed initial k=60 would fill entirely with the closer,
+    // non-matching filler and clip the matching rows before the filter ever runs.
+    const filler = Array.from({ length: 2000 }, (_, i) => ({
+      id: `bulk-${i}`,
+      memory: `Bulk record ${i} about servers and deployments`,
+      metadata: { user_id: 'local', agent_id: 'claude-code-projects' },
+      embedding: vec(3.0 + i * 0.00001),
+    }));
+    const selective = Array.from({ length: 40 }, (_, i) => ({
+      id: `sel-${i}`,
+      memory: `Selective codex record ${i} about servers and deployments`,
+      metadata: { user_id: 'local', agent_id: 'codex-sessions' },
+      embedding: vec(3.0 + 0.02 + i * 0.00001),
+    }));
+    insertMemories(db, [...filler, ...selective]);
+
+    const { results } = await searchMemories({
+      db,
+      query: 'servers and deployments',
+      filters: { user_id: 'local', agent_id: 'codex-sessions' },
+      limit: 20,
+    });
+
+    expect(results).toHaveLength(20);
+    expect(results.every(r => r.metadata.agent_id === 'codex-sessions')).toBe(true);
+  });
 });

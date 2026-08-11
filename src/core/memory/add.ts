@@ -10,6 +10,7 @@ import { buildFilterSql, type Filters } from './filters.js';
 
 const EXISTING_MEMORY_TOP_K = 10;
 const SESSION_CONTEXT_LIMIT = 10;
+const MAX_KNN_K = 4096;
 
 export interface AddArgs {
   db: Database;
@@ -98,9 +99,9 @@ async function retrieveExisting(
 
   const { clause, params } = buildFilterSql(filters);
   const filterClause = clause ? `AND ${clause}` : '';
-  const k = Math.min(vectorCount, EXISTING_MEMORY_TOP_K);
+  const maxK = Math.min(vectorCount, MAX_KNN_K);
 
-  const rows = db.query(`
+  const existingQuery = db.query(`
     SELECT m.id AS id, m.memory AS text
     FROM vec_memories vec
     INNER JOIN memories m ON m.rowid = vec.rowid
@@ -108,9 +109,20 @@ async function retrieveExisting(
       ${filterClause}
     ORDER BY vec.distance ASC
     LIMIT ?
-  `).all(
-    Buffer.from(new Float32Array(embedding).buffer), k, ...(params as never[]), EXISTING_MEMORY_TOP_K,
-  ) as Array<{ id: string; text: string }>;
+  `);
+
+  // Same fix as searchMemories: a selective filter (e.g. run_id) can starve the fixed
+  // KNN candidate set that sqlite-vec picks before SQL filtering runs. Widen k until
+  // enough post-filter rows are found or the KNN space is exhausted.
+  let k = Math.min(maxK, EXISTING_MEMORY_TOP_K);
+  let rows: Array<{ id: string; text: string }>;
+  for (;;) {
+    rows = existingQuery.all(
+      Buffer.from(new Float32Array(embedding).buffer), k, ...(params as never[]), EXISTING_MEMORY_TOP_K,
+    ) as Array<{ id: string; text: string }>;
+    if (rows.length >= EXISTING_MEMORY_TOP_K || k >= maxK) break;
+    k = Math.min(maxK, k * 2);
+  }
 
   return rows;
 }

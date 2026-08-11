@@ -8,6 +8,7 @@ import {
 } from '../core/db.js';
 import { createMemorySchema } from '../core/memory/schema.js';
 import { addMemories } from '../core/memory/add.js';
+import { deleteMemoriesByRunIds } from '../core/memory/store.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { log } from '../core/logger.js';
@@ -87,7 +88,7 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
 
       for (const sourceDir of excludedSourceDirs) {
         const archivePathPrefix = path.join(archiveDir, adapter.kind, path.relative(root, sourceDir));
-        purgeExcludedArchiveSubtree(archivePathPrefix, archiveFiles);
+        purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles);
       }
     }
 
@@ -269,6 +270,7 @@ function findJsonlFiles(root: string, adapter: SourceAdapter, excludedDirs: stri
 }
 
 function purgeExcludedArchiveSubtree(
+  db: Database,
   archivePathPrefix: string,
   archiveFiles: Map<string, ArchiveFile>,
 ): void {
@@ -277,9 +279,41 @@ function purgeExcludedArchiveSubtree(
       archiveFiles.delete(archivePath);
     }
   }
+
+  // The run_id for an archive file is its basename without extension (see
+  // mapSourceToFilters). Resolve run_ids from disk before removing the files, then
+  // delete every memory extracted from them so a .no-memmem opt-out actually makes
+  // those memories unsearchable, not just the archive copy invisible.
+  const runIds = collectJsonlRunIds(archivePathPrefix);
+  if (runIds.length > 0) {
+    deleteMemoriesByRunIds(db, runIds);
+  }
+
   if (existsSync(archivePathPrefix)) {
     rmSync(archivePathPrefix, { recursive: true, force: true });
   }
+}
+
+function collectJsonlRunIds(archivePathPrefix: string): string[] {
+  if (!existsSync(archivePathPrefix)) return [];
+
+  const stat = statSync(archivePathPrefix);
+  if (stat.isFile()) {
+    return archivePathPrefix.endsWith('.jsonl')
+      ? [path.basename(archivePathPrefix, path.extname(archivePathPrefix))]
+      : [];
+  }
+
+  const runIds: string[] = [];
+  for (const entry of readdirSync(archivePathPrefix, { withFileTypes: true })) {
+    const entryPath = path.join(archivePathPrefix, entry.name);
+    if (entry.isDirectory()) {
+      runIds.push(...collectJsonlRunIds(entryPath));
+    } else if (entry.isFile() && entryPath.endsWith('.jsonl')) {
+      runIds.push(path.basename(entryPath, path.extname(entryPath)));
+    }
+  }
+  return runIds;
 }
 
 function isPathAtOrUnder(filePath: string, parentPath: string): boolean {
