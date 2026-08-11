@@ -18,14 +18,15 @@ export interface ExtractedMemory {
 
 function stripFences(text: string): string {
   const trimmed = text.trim();
-  if (!trimmed.startsWith('```')) return trimmed;
   const lines = trimmed.split('\n');
-  const start = lines.findIndex(l => l.trim().startsWith('```')) + 1;
+  const openIdx = lines.findIndex(l => l.trim().startsWith('```'));
+  if (openIdx === -1) return trimmed;
+
   let end = lines.length;
-  for (let i = start; i < lines.length; i++) {
+  for (let i = openIdx + 1; i < lines.length; i++) {
     if (lines[i].trim().startsWith('```')) { end = i; break; }
   }
-  return lines.slice(start, end).join('\n').trim();
+  return lines.slice(openIdx + 1, end).join('\n').trim();
 }
 
 export function parseExtractionResponse(raw: string): ExtractedMemory[] {
