@@ -1669,11 +1669,14 @@ describe('searchMemories', () => {
     // A query term absent from every document yields no BM25 rows at all, so
     // the divisor stays 1.0. (Note: a *small* corpus does NOT zero out BM25 —
     // IDF collapses only when the term appears in nearly every document.)
+    // The fake embedder maps any unrecognized text to vec(3.0), which is m3's
+    // exact direction — so scope to bob (who owns m3) for a surviving candidate.
     seed();
     const { results } = await searchMemories({
-      db, query: 'zzzznomatch', filters: { user_id: 'alice' }, explain: true,
+      db, query: 'zzzznomatch', filters: { user_id: 'bob' }, explain: true,
     });
     expect(results.length).toBeGreaterThan(0);
+    expect(results[0].score_details!.bm25_score).toBe(0);
     expect(results[0].score_details!.max_possible_score).toBe(1.0);
   });
 
