@@ -79,8 +79,8 @@ COMMANDS:
 
 SEARCH OPTIONS:
   --limit <number>        Maximum number of results
-  --after <YYYY-MM-DD>    Only include records after this date
-  --before <YYYY-MM-DD>   Only include records before this date
+  --after <YYYY-MM-DD>    Not yet supported; errors (mem0 v2 surface)
+  --before <YYYY-MM-DD>   Not yet supported; errors (mem0 v2 surface)
   --source-kind <kind>    Filter by transcript source kind
 
 EXAMPLES:

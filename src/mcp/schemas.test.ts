@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SearchInputSchema, FetchInputSchema } from './schemas.js';
+import { SearchInputSchema } from './schemas.js';
 
 describe('MCP schemas', () => {
   test('validates memory search input', () => {
@@ -9,18 +9,33 @@ describe('MCP schemas', () => {
     });
   });
 
-  test('accepts input with no query for time-based recall', () => {
-    expect(SearchInputSchema.parse({ after: '2026-06-16' })).toEqual({
-      after: '2026-06-16',
-      limit: 10,
+  test('requires a query', () => {
+    expect(() => SearchInputSchema.parse({})).toThrow();
+  });
+
+  test('rejects an empty string query', () => {
+    expect(() => SearchInputSchema.parse({ query: '' })).toThrow();
+  });
+
+  test('rejects an array query (multi-query AND search was dropped in the mem0 v2 port)', () => {
+    expect(() => SearchInputSchema.parse({ query: ['alpha', 'beta'] })).toThrow();
+  });
+
+  test('accepts threshold within [0,1]', () => {
+    expect(SearchInputSchema.parse({ query: 'memory search', threshold: 0.5 })).toEqual({
+      query: 'memory search',
+      threshold: 0.5,
     });
   });
 
-  test('accepts source_kind search filter advertised by the MCP tool', () => {
-    expect(SearchInputSchema.parse({ query: 'memory search', source_kind: 'claude-code-projects' })).toEqual({
+  test('rejects threshold outside [0,1]', () => {
+    expect(() => SearchInputSchema.parse({ query: 'memory search', threshold: 1.5 })).toThrow();
+  });
+
+  test('accepts explain flag', () => {
+    expect(SearchInputSchema.parse({ query: 'memory search', explain: true })).toEqual({
       query: 'memory search',
-      limit: 10,
-      source_kind: 'claude-code-projects',
+      explain: true,
     });
   });
 
@@ -28,37 +43,8 @@ describe('MCP schemas', () => {
     expect(() => SearchInputSchema.parse({ query: 'memory search', unknown: 'value' })).toThrow();
   });
 
-  test('accepts array of 2-5 query strings', () => {
-    expect(SearchInputSchema.parse({ query: ['alpha', 'beta'] })).toEqual({
-      query: ['alpha', 'beta'],
-      limit: 10,
-    });
-  });
-
-  test('accepts array of 5 query strings', () => {
-    expect(SearchInputSchema.parse({ query: ['a1', 'b2', 'c3', 'd4', 'e5'] })).toEqual({
-      query: ['a1', 'b2', 'c3', 'd4', 'e5'],
-      limit: 10,
-    });
-  });
-
-  test('rejects array with fewer than 2 strings', () => {
-    expect(() => SearchInputSchema.parse({ query: ['only-one'] })).toThrow();
-  });
-
-  test('rejects array with more than 5 strings', () => {
-    expect(() => SearchInputSchema.parse({ query: ['a1', 'b2', 'c3', 'd4', 'e5', 'f6'] })).toThrow();
-  });
-
-  test('rejects array containing a too-short string', () => {
-    expect(() => SearchInputSchema.parse({ query: ['ok', 'x'] })).toThrow();
-  });
-
-  test('validates fetch input with numeric id', () => {
-    expect(FetchInputSchema.parse({ id: 42 })).toEqual({ id: 42 });
-  });
-
-  test('validates fetch input with string id', () => {
-    expect(FetchInputSchema.parse({ id: '42' })).toEqual({ id: '42' });
+  test('rejects limit outside range', () => {
+    expect(() => SearchInputSchema.parse({ query: 'memory search', limit: 0 })).toThrow();
+    expect(() => SearchInputSchema.parse({ query: 'memory search', limit: 51 })).toThrow();
   });
 });

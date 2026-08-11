@@ -4,26 +4,23 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { openDatabase } from '../core/db.js';
+import { openMemoryDb } from '../core/memory/schema.js';
 import {
   SearchInputSchema,
-  FetchInputSchema,
   type SearchInput,
-  type FetchInput,
 } from './schemas.js';
 import {
   handleSearch,
-  handleFetch,
-  type SearchResult,
 } from './handlers.js';
-import { allTools } from './tools.js';
+import type { SearchResultItem } from '../core/memory/search.js';
+import { TOOLS } from './tools.js';
 
 export function handleError(error: unknown): string {
   return error instanceof Error ? `Error: ${error.message}` : `Error: ${String(error)}`;
 }
 
-export { SearchInputSchema, FetchInputSchema };
-export type { SearchInput, FetchInput, SearchResult };
+export { SearchInputSchema };
+export type { SearchInput, SearchResultItem };
 
 const server = new Server(
   {
@@ -39,7 +36,7 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: allTools,
+    tools: TOOLS,
   };
 });
 
@@ -49,28 +46,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'search') {
       const params = SearchInputSchema.parse(args);
-      const db = openDatabase();
+      const db = openMemoryDb();
       try {
-        const results = await handleSearch(params, db);
+        const result = await handleSearch(params, db);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({ results }, null, 2),
+              text: JSON.stringify(result, null, 2),
             },
           ],
         };
-      } finally {
-        db.close();
-      }
-    }
-
-    if (name === 'fetch') {
-      const params = FetchInputSchema.parse(args);
-      const db = openDatabase();
-      try {
-        const result = handleFetch(params, db);
-        return { content: [{ type: 'text', text: result }] };
       } finally {
         db.close();
       }

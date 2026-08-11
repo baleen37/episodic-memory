@@ -1,16 +1,34 @@
-import { openDatabase } from '../core/db.js';
-import { search } from '../core/search.js';
+import { openMemoryDb } from '../core/memory/schema.js';
+import { searchMemories } from '../core/memory/search.js';
+import { LOCAL_USER_ID } from './sync.js';
 
-export async function runSearchCli(args: { query: string; limit?: number; after?: string; before?: string; sourceKind?: string }): Promise<void> {
-  const db = openDatabase();
+export interface SearchCliArgs {
+  query: string;
+  limit?: number;
+  after?: string;
+  before?: string;
+  sourceKind?: string;
+}
+
+export async function runSearchCli(args: SearchCliArgs): Promise<void> {
+  if (args.after || args.before) {
+    throw new Error('--after/--before are not yet supported in the mem0 v2 surface');
+  }
+
+  const db = openMemoryDb();
   try {
-    const results = await search(args.query, { db, limit: args.limit, after: args.after, before: args.before, sourceKind: args.sourceKind });
+    const filters: Record<string, string> = { user_id: LOCAL_USER_ID };
+    if (args.sourceKind) filters.agent_id = args.sourceKind;
+
+    const { results } = await searchMemories({
+      db,
+      query: args.query,
+      filters,
+      limit: args.limit,
+    });
     for (const result of results) {
-      const date = result.observedAt ? new Date(result.observedAt).toISOString().split('T')[0] : 'unknown-date';
-      console.log(`## [${result.kind}, ${result.sourceKind}, ${date}] ${result.project ?? 'unknown-project'}`);
-      console.log(result.text);
-      console.log(`Source: ${result.archivePath}:${result.lineStart}-${result.lineEnd}`);
-      if (result.score !== undefined) console.log(`Score: ${Math.round(result.score * 100)}%`);
+      console.log(`## ${result.memory}`);
+      console.log(`Score: ${Math.round(result.score * 100)}%`);
       console.log('');
     }
   } finally {

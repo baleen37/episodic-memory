@@ -1,11 +1,12 @@
 /**
  * MCP Server Tests
  *
- * Tests for the public memmem MCP search/fetch tool schemas.
+ * Tests for the public memmem MCP search tool schema (fetch was removed in the
+ * mem0 v2 port — there is no source transcript to read back).
  */
 
 import { describe, test, expect } from 'bun:test';
-import { SearchInputSchema, FetchInputSchema } from './schemas.js';
+import { SearchInputSchema } from './schemas.js';
 
 async function mockToolCall(toolName: string, args: unknown) {
   try {
@@ -13,14 +14,6 @@ async function mockToolCall(toolName: string, args: unknown) {
       SearchInputSchema.parse(args);
       return {
         content: [{ type: 'text', text: JSON.stringify({ results: [] }, null, 2) }],
-        isError: false,
-      };
-    }
-
-    if (toolName === 'fetch') {
-      FetchInputSchema.parse(args);
-      return {
-        content: [{ type: 'text', text: '# Conversation\n\nMock content' }],
         isError: false,
       };
     }
@@ -41,13 +34,13 @@ async function mockToolCall(toolName: string, args: unknown) {
 
 describe('MCP Server - memmem__search tool', () => {
   describe('Query parameter validation', () => {
-    test('rejects query shorter than 2 characters', async () => {
-      const result = await mockToolCall('search', { query: 'a' });
+    test('rejects empty string query', async () => {
+      const result = await mockToolCall('search', { query: '' });
       expect(result.isError).toBe(true);
     });
 
-    test('rejects empty string query', async () => {
-      const result = await mockToolCall('search', { query: '' });
+    test('rejects missing query', async () => {
+      const result = await mockToolCall('search', {});
       expect(result.isError).toBe(true);
     });
 
@@ -55,31 +48,10 @@ describe('MCP Server - memmem__search tool', () => {
       const result = await mockToolCall('search', { query: 'test query' });
       expect(result.isError).toBe(false);
     });
-  });
 
-  describe('Date format validation', () => {
-    test('rejects invalid after date format', async () => {
-      const result = await mockToolCall('search', { query: 'test', after: '2024/01/01' });
+    test('rejects an array query (multi-query AND search was dropped in the mem0 v2 port)', async () => {
+      const result = await mockToolCall('search', { query: ['alpha', 'beta'] });
       expect(result.isError).toBe(true);
-    });
-
-    test('rejects invalid before date format', async () => {
-      const result = await mockToolCall('search', { query: 'test', before: '01-01-2024' });
-      expect(result.isError).toBe(true);
-    });
-
-    test('accepts valid date filters in YYYY-MM-DD format', async () => {
-      const result = await mockToolCall('search', {
-        query: 'test',
-        after: '2024-01-01',
-        before: '2024-12-31',
-      });
-      expect(result.isError).toBe(false);
-    });
-
-    test('accepts date with invalid month because schema only validates format', async () => {
-      const result = await mockToolCall('search', { query: 'test', after: '2024-13-01' });
-      expect(result.isError).toBe(false);
     });
   });
 
@@ -98,11 +70,29 @@ describe('MCP Server - memmem__search tool', () => {
       const result = await mockToolCall('search', { query: 'test', limit: 10.5 });
       expect(result.isError).toBe(true);
     });
+  });
 
-    test('defaults to 10 when not specified', () => {
-      const result = SearchInputSchema.safeParse({ query: 'test' });
-      expect(result.success).toBe(true);
-      if (result.success) expect(result.data.limit).toBe(10);
+  describe('Threshold parameter validation', () => {
+    test('accepts threshold within [0,1]', async () => {
+      const result = await mockToolCall('search', { query: 'test', threshold: 0.3 });
+      expect(result.isError).toBe(false);
+    });
+
+    test('rejects threshold outside [0,1]', async () => {
+      const result = await mockToolCall('search', { query: 'test', threshold: 1.5 });
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('Explain parameter validation', () => {
+    test('accepts explain boolean', async () => {
+      const result = await mockToolCall('search', { query: 'test', explain: true });
+      expect(result.isError).toBe(false);
+    });
+
+    test('rejects non-boolean explain', async () => {
+      const result = await mockToolCall('search', { query: 'test', explain: 'yes' });
+      expect(result.isError).toBe(true);
     });
   });
 
@@ -112,9 +102,14 @@ describe('MCP Server - memmem__search tool', () => {
       expect(result.isError).toBe(true);
     });
 
-    test('accepts source_kind filter advertised by the tool schema', async () => {
+    test('rejects removed date filters (after/before had no mem0 v2 equivalent)', async () => {
+      const result = await mockToolCall('search', { query: 'test', after: '2024-01-01' });
+      expect(result.isError).toBe(true);
+    });
+
+    test('rejects the removed source_kind filter', async () => {
       const result = await mockToolCall('search', { query: 'test', source_kind: 'claude-code-projects' });
-      expect(result.isError).toBe(false);
+      expect(result.isError).toBe(true);
     });
   });
 
@@ -136,42 +131,11 @@ describe('MCP Server - memmem__search tool', () => {
   });
 });
 
-describe('MCP Server - memmem__fetch tool', () => {
-  describe('Id parameter validation', () => {
-    test('accepts numeric id', async () => {
-      const result = await mockToolCall('fetch', { id: 42 });
-      expect(result.isError).toBe(false);
-    });
-
-    test('accepts string id', async () => {
-      const result = await mockToolCall('fetch', { id: '42' });
-      expect(result.isError).toBe(false);
-    });
-
-    test('rejects empty string id', async () => {
-      const result = await mockToolCall('fetch', { id: '' });
-      expect(result.isError).toBe(true);
-    });
-
-    test('rejects missing id', async () => {
-      const result = await mockToolCall('fetch', {});
-      expect(result.isError).toBe(true);
-    });
-  });
-
-  describe('Output formatting', () => {
-    test('returns text content type', async () => {
-      const result = await mockToolCall('fetch', { id: 1 });
-      expect(result.isError).toBe(false);
-      expect(result.content[0].type).toBe('text');
-    });
-  });
-
-  describe('Strict schema validation', () => {
-    test('rejects unknown properties', async () => {
-      const result = await mockToolCall('fetch', { id: 1, unknownParam: 'value' });
-      expect(result.isError).toBe(true);
-    });
+describe('MCP Server - fetch tool removed', () => {
+  test('fetch is not a recognized tool', async () => {
+    const result = await mockToolCall('fetch', { id: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Unknown tool');
   });
 });
 
@@ -183,13 +147,13 @@ describe('MCP Server - Error handling', () => {
   });
 
   test('error responses include isError flag', async () => {
-    const result = await mockToolCall('search', { query: 'x' });
+    const result = await mockToolCall('search', {});
     expect(result.isError).toBe(true);
     expect(result.content).toHaveLength(1);
   });
 
   test('error responses have proper format', async () => {
-    const result = await mockToolCall('fetch', { id: '' });
+    const result = await mockToolCall('search', {});
     expect(result.isError).toBe(true);
     expect(result.content[0].type).toBe('text');
     expect(result.content[0].text).toMatch(/^Error:/);
@@ -201,26 +165,9 @@ describe('SearchInput Schema - Direct validation', () => {
     const result = SearchInputSchema.safeParse({
       query: 'test',
       limit: 10,
-      after: '2024-01-01',
-      before: '2024-12-31',
+      threshold: 0.2,
+      explain: false,
     });
     expect(result.success).toBe(true);
-  });
-});
-
-describe('FetchInput Schema - Direct validation', () => {
-  test('validates numeric id', () => {
-    const result = FetchInputSchema.safeParse({ id: 7 });
-    expect(result.success).toBe(true);
-  });
-
-  test('validates string id', () => {
-    const result = FetchInputSchema.safeParse({ id: '7' });
-    expect(result.success).toBe(true);
-  });
-
-  test('rejects missing id', () => {
-    const result = FetchInputSchema.safeParse({});
-    expect(result.success).toBe(false);
   });
 });

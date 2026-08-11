@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import * as sqliteVec from 'sqlite-vec';
 import { mkdtempSync, rmSync, writeFileSync, utimesSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector } from './db.js';
+import { createMemorySchema } from './memory/schema.js';
 import { runDiagnostics, newestMtime } from './doctor.js';
 
 let db: Database | null = null;
@@ -14,8 +15,26 @@ afterEach(() => {
   db = null;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = null;
-  delete process.env.TEST_DB_PATH;
 });
+
+function newMemoryDb(): Database {
+  const database = new Database(':memory:');
+  sqliteVec.load(database);
+  createMemorySchema(database);
+  return database;
+}
+
+function insertMemory(database: Database, id: string, memory: string): void {
+  database.query(
+    'INSERT INTO memories (id, memory, hash, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+  ).run(id, memory, `hash-${id}`, '{}', Date.now(), Date.now());
+}
+
+function insertVector(database: Database, rowid: number): void {
+  database.query('INSERT INTO vec_memories(rowid, embedding) VALUES (?, ?)').run(
+    rowid, Buffer.from(new Float32Array(Array.from({ length: 384 }, () => 0.01)).buffer),
+  );
+}
 
 function setMtime(path: string, epochSeconds: number): void {
   utimesSync(path, epochSeconds, epochSeconds);
@@ -67,24 +86,10 @@ describe('runDiagnostics', () => {
 
   test('all ok when build fresh and index clean with data', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
-    const archivePath = join(dir, 'archive.jsonl');
-    writeFileSync(archivePath, 'line 1\nline 2\n');
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-    const id = insertMemoryRecord(db, {
-      kind: 'fact',
-      text: 'A clean record.',
-      sourceKind: 'claude-code-projects',
-      archivePath,
-      lineStart: 1,
-      lineEnd: 2,
-      observedAt: null,
-      project: null,
-      projectName: null,
-      dedupeKey: 'fact:clean',
-      extractionVersion: CURRENT_EXTRACTION_VERSION,
-    });
-    insertMemoryRecordVector(db, id, new Array(384).fill(0));
+    db = newMemoryDb();
+    insertMemory(db, 'mem-1', 'A clean record.');
+    const rowid = (db.query('SELECT rowid AS r FROM memories WHERE id = ?').get('mem-1') as { r: number }).r;
+    insertVector(db, rowid);
 
     const results = runDiagnostics(db, freshBuildDirs());
     const byName = Object.fromEntries(results.map((r) => [r.name, r.status]));
@@ -96,8 +101,7 @@ describe('runDiagnostics', () => {
 
   test('build fail when a dist artifact is missing', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+    db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
     mkdirSync(distDir, { recursive: true });
@@ -113,8 +117,7 @@ describe('runDiagnostics', () => {
 
   test('build fail when src newer than dist', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+    db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
     mkdirSync(distDir, { recursive: true });
@@ -132,8 +135,7 @@ describe('runDiagnostics', () => {
 
   test('data warn when no records', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+    db = newMemoryDb();
 
     const results = runDiagnostics(db, freshBuildDirs());
     const data = results.find((r) => r.name === 'data')!;
@@ -141,25 +143,10 @@ describe('runDiagnostics', () => {
     expect(data.suggestion).toBe('memmem sync');
   });
 
-  test('index fail when active record missing its vector', () => {
+  test('index fail when a memory is missing its vector', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
-    const archivePath = join(dir, 'archive.jsonl');
-    writeFileSync(archivePath, 'line 1\nline 2\n');
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
-    insertMemoryRecord(db, {
-      kind: 'fact',
-      text: 'Record without a vector.',
-      sourceKind: 'claude-code-projects',
-      archivePath,
-      lineStart: 1,
-      lineEnd: 2,
-      observedAt: null,
-      project: null,
-      projectName: null,
-      dedupeKey: 'fact:novector',
-      extractionVersion: CURRENT_EXTRACTION_VERSION,
-    });
+    db = newMemoryDb();
+    insertMemory(db, 'mem-1', 'Record without a vector.');
 
     const results = runDiagnostics(db, freshBuildDirs());
     expect(results.find((r) => r.name === 'index')!.status).toBe('fail');

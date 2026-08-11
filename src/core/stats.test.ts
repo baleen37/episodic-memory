@@ -1,45 +1,58 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector } from './db.js';
+import * as sqliteVec from 'sqlite-vec';
+import { createMemorySchema } from './memory/schema.js';
 import { getMemoryStats } from './stats.js';
+
+function newMemoryDb(): Database {
+  const db = new Database(':memory:');
+  sqliteVec.load(db);
+  createMemorySchema(db);
+  return db;
+}
 
 let db: Database | null = null;
 
 afterEach(() => {
   db?.close();
   db = null;
-  delete process.env.TEST_DB_PATH;
 });
 
-describe('getMemoryStats', () => {
-  test('counts memory records and vectors', () => {
-    process.env.TEST_DB_PATH = ':memory:';
-    db = initDatabase();
+function insertMemory(database: Database, id: string, memory: string): void {
+  database.query(
+    'INSERT INTO memories (id, memory, hash, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+  ).run(id, memory, `hash-${id}`, '{}', Date.now(), Date.now());
+}
 
-    const id = insertMemoryRecord(db, {
-      kind: 'fact',
-      text: 'memmem stores atomic fact memory records.',
-      sourceKind: 'claude-code-projects',
-      archivePath: '/archive/a.jsonl',
-      lineStart: 1,
-      lineEnd: 3,
-      observedAt: 1780272000000,
-      project: null,
-      projectName: null,
-      dedupeKey: 'fact:stats-memory-record',
-      extractionVersion: CURRENT_EXTRACTION_VERSION,
-      embeddingVersion: CURRENT_EMBEDDING_VERSION,
-    });
-    insertMemoryRecordVector(db, id, Array.from({ length: 384 }, () => 0.01));
+function insertVector(database: Database, rowid: number): void {
+  database.query('INSERT INTO vec_memories(rowid, embedding) VALUES (?, ?)').run(
+    rowid, Buffer.from(new Float32Array(Array.from({ length: 384 }, () => 0.01)).buffer),
+  );
+}
+
+describe('getMemoryStats', () => {
+  test('counts memories and vectors', () => {
+    db = newMemoryDb();
+
+    insertMemory(db, 'mem-1', 'memmem stores atomic memory records.');
+    const rowid = (db.query('SELECT rowid AS r FROM memories WHERE id = ?').get('mem-1') as { r: number }).r;
+    insertVector(db, rowid);
+    insertMemory(db, 'mem-2', 'A memory without a vector yet.');
 
     const stats = getMemoryStats(db);
 
-    expect(stats.totalMemoryRecords).toBe(1);
-    expect(stats.activeMemoryRecords).toBe(1);
-    expect(stats.factCount).toBe(1);
-    expect(stats.eventCount).toBe(0);
-    expect(stats.vectorizedRecords).toBe(1);
+    expect(stats.totalMemories).toBe(2);
+    expect(stats.vectorizedMemories).toBe(1);
+    expect(stats.missingVectors).toBe(1);
+  });
+
+  test('reports zeros for an empty index', () => {
+    db = newMemoryDb();
+
+    const stats = getMemoryStats(db);
+
+    expect(stats.totalMemories).toBe(0);
+    expect(stats.vectorizedMemories).toBe(0);
     expect(stats.missingVectors).toBe(0);
-    expect(stats.topProjects).toEqual([{ project: '(unknown)', count: 1 }]);
   });
 });
