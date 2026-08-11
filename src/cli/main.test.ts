@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import * as sqliteVec from 'sqlite-vec';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { getHelpText, parseSearchArgs, parseReadArgs } from './main.js';
+import { getHelpText, parseSearchArgs } from './main.js';
 import { runSearchCli } from './search.js';
-import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord } from '../core/db.js';
+import { createMemorySchema } from '../core/memory/schema.js';
+import { getDbPath } from '../core/paths.js';
+import { __setModelForTests } from '../core/embeddings.js';
 
 describe('CLI argument parsing', () => {
   test('parses search args', () => {
@@ -39,92 +43,65 @@ describe('CLI argument parsing', () => {
     expect(() => parseSearchArgs(['search', '--limit', '5'])).toThrow('search requires a query');
   });
 
-  test('parses read args', () => {
-    expect(parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '3', '--end-line', '8'])).toEqual({
-      path: '/archive/session.jsonl',
-      startLine: 3,
-      endLine: 8,
-    });
-  });
-
-  test('rejects missing read path', () => {
-    expect(() => parseReadArgs(['read'])).toThrow('read requires a path');
-  });
-
-  test('rejects flag as read path', () => {
-    expect(() => parseReadArgs(['read', '--start-line', '3'])).toThrow('read requires a path');
-  });
-
-  test('requires both start and end line for read args', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl'])).toThrow('read requires --start-line and --end-line');
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '3'])).toThrow('read requires --start-line and --end-line');
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--end-line', '8'])).toThrow('read requires --start-line and --end-line');
-  });
-
-  test('rejects invalid numeric read option', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '0'])).toThrow('--start-line must be a positive integer');
-  });
-
-  test('rejects start line after end line', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '9', '--end-line', '8'])).toThrow('--start-line must be less than or equal to --end-line');
-  });
-
   test('help text mentions commands, options, and examples', () => {
     const help = getHelpText();
     expect(help).toContain('sync');
     expect(help).toContain('search');
-    expect(help).toContain('read');
     expect(help).toContain('stats');
     expect(help).toContain('verify');
     expect(help).toContain('memmem - Event/fact memory for Claude Code and Codex transcripts');
     expect(help).toContain('sync      Copy transcripts and extract memory records');
     expect(help).toContain('search    Search indexed memory records');
-    expect(help).toContain('read      Read archived transcript lines');
     expect(help).toContain('stats     Print memory index statistics');
     expect(help).toContain('verify    Verify memory index integrity');
     expect(help).toContain('--limit <number>');
-    expect(help).toContain('--after <YYYY-MM-DD>');
-    expect(help).toContain('--before <YYYY-MM-DD>');
     expect(help).toContain('--source-kind <kind>');
-    expect(help).toContain('--start-line <number>');
-    expect(help).toContain('--end-line <number>');
     expect(help).toContain('memmem search "source of truth" --limit 5');
-    expect(help).toContain('memmem read /archive/session.jsonl --start-line 3 --end-line 8');
     expect(help).not.toContain('recall');
+  });
+
+  test('help text flags --after/--before as unsupported rather than silently accepted', () => {
+    const help = getHelpText();
+    expect(help).toContain('--after <YYYY-MM-DD>    Not yet supported; errors (mem0 v2 surface)');
+    expect(help).toContain('--before <YYYY-MM-DD>   Not yet supported; errors (mem0 v2 surface)');
   });
 });
 
-
-describe('CLI search output', () => {
+describe('CLI search behavior', () => {
   let dir: string | null = null;
 
   afterEach(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true });
-    dir = null;
     delete process.env.TEST_DB_PATH;
     delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    __setModelForTests(null, null);
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = null;
   });
 
-  test('prints memory record fields without snippets', async () => {
+  test('--after throws a clear "not yet supported" error rather than silently ignoring the filter', async () => {
+    await expect(runSearchCli({ query: 'anything', after: '2026-05-01' }))
+      .rejects.toThrow('--after/--before are not yet supported in the mem0 v2 surface');
+  });
+
+  test('--before throws a clear "not yet supported" error rather than silently ignoring the filter', async () => {
+    await expect(runSearchCli({ query: 'anything', before: '2026-05-01' }))
+      .rejects.toThrow('--after/--before are not yet supported in the mem0 v2 surface');
+  });
+
+  test('prints matched memory text and score', async () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-cli-search-'));
     process.env.TEST_DB_PATH = join(dir, 'test.db');
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
 
-    const db = initDatabase();
-    insertMemoryRecord(db, {
-      kind: 'fact',
-      text: 'The archive is the source of truth.',
-      sourceKind: 'claude-code-projects',
-      archivePath: '/archive/a.jsonl',
-      lineStart: 4,
-      lineEnd: 8,
-      observedAt: Date.UTC(2026, 5, 1),
-      project: 'memmem',
-      projectName: null,
-      dedupeKey: 'cli-search-memory',
-      extractionVersion: CURRENT_EXTRACTION_VERSION,
-      embeddingVersion: CURRENT_EMBEDDING_VERSION,
-    });
+    const db = new Database(getDbPath());
+    sqliteVec.load(db);
+    createMemorySchema(db);
+    db.query(
+      'INSERT INTO memories (id, memory, hash, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+    ).run('mem-1', 'The archive is the source of truth.', 'hash-1', JSON.stringify({ user_id: 'local' }), Date.now(), Date.now());
+    db.query('INSERT INTO vec_memories(rowid, embedding) VALUES (?, ?)').run(
+      1, Buffer.from(new Float32Array(Array.from({ length: 384 }, () => 0.1)).buffer),
+    );
     db.close();
 
     const lines: string[] = [];
@@ -137,10 +114,7 @@ describe('CLI search output', () => {
     }
 
     const output = lines.join('\n');
-    expect(output).toContain('## [fact, claude-code-projects, 2026-06-01] memmem');
-    expect(output).toContain('The archive is the source of truth.');
-    expect(output).toContain('Source: /archive/a.jsonl:4-8');
-    expect(output).not.toContain('snippet');
-    expect(output).not.toContain('Path:');
+    expect(output).toContain('## The archive is the source of truth.');
+    expect(output).toMatch(/Score: \d+%/);
   });
 });

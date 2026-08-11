@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { openDatabase } from '../core/db.js';
+import { openMemoryDb } from '../core/memory/schema.js';
 import { runDiagnostics, type DiagnosticStatus } from '../core/doctor.js';
 
 const STATUS_ICON: Record<DiagnosticStatus, string> = {
@@ -17,7 +17,7 @@ function resolveRoot(): string {
 }
 
 export function runDoctorCli(): void {
-  const db = openDatabase();
+  const db = openMemoryDb();
   try {
     const root = resolveRoot();
     const results = runDiagnostics(db, {

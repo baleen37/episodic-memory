@@ -1,3 +1,5 @@
+import type { Message } from '../memory/prompts.js';
+
 export interface TranscriptSpan {
   archivePath: string;
   lineStart: number;
@@ -12,6 +14,7 @@ export interface TranscriptSpan {
   metadataJson: string | null;
   observedAt: number | null;
   text: string;
+  messages: Message[];
 }
 
 export interface ParseContext {

@@ -61,7 +61,7 @@ function runToCompletion(
   });
 }
 
-describe('CLI sync then read works under each runtime env (no LLM, no network)', () => {
+describe('CLI sync works under each runtime env (no LLM, no network)', () => {
   /** Write a minimal two-line Claude transcript into an isolated CLAUDE_CONFIG_DIR. */
   function seedClaudeTranscript(claudeConfigDir: string): void {
     const projDir = join(claudeConfigDir, 'projects', 'demo');
@@ -101,7 +101,7 @@ describe('CLI sync then read works under each runtime env (no LLM, no network)',
     return null;
   }
 
-  test.each(RUNTIME_ENVS)('%s env: sync archives and read renders it', async (_label, runtimeEnv) => {
+  test.each(RUNTIME_ENVS)('%s env: sync archives a transcript', async (_label, runtimeEnv) => {
     const tmpHome = makeTmpHome();
     try {
       const claudeConfigDir = join(tmpHome, 'claude');
@@ -122,15 +122,6 @@ describe('CLI sync then read works under each runtime env (no LLM, no network)',
 
       const archiveFile = findArchiveFile(tmpHome);
       expect(archiveFile).not.toBeNull();
-
-      // read: renders the archived transcript lines.
-      const read = await runToCompletion(
-        [BIN, 'read', archiveFile!, '--start-line', '1', '--end-line', '2'],
-        childEnv,
-        20_000,
-      );
-      expect(read.code).toBe(0);
-      expect(read.stdout).toContain('# Conversation');
     } finally {
       cleanup(tmpHome);
     }
@@ -178,7 +169,7 @@ describe('hooks.json command runs under each runtime env', () => {
 });
 
 describe('MCP server starts and lists tools under each runtime env', () => {
-  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and fetch', async (_label, runtimeEnv) => {
+  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search only', async (_label, runtimeEnv) => {
     const tmpHome = makeTmpHome();
     let client: Client | null = null;
     try {
@@ -197,7 +188,7 @@ describe('MCP server starts and lists tools under each runtime env', () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       expect(names).toContain('search');
-      expect(names).toContain('fetch');
+      expect(names).not.toContain('fetch');
     } finally {
       await client?.close();
       cleanup(tmpHome);

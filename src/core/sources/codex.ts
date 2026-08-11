@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { ParseContext, SourceAdapter, TranscriptSpan } from './types.js';
 import { asObject, asString, eachJsonLine, parseTimestamp } from './jsonl.js';
+import type { Message } from '../memory/prompts.js';
 
 interface CodexMeta {
   sessionId: string | null;
@@ -27,8 +28,13 @@ export function parseCodexJsonl(content: string, context: ParseContext): Transcr
   const flushCurrent = () => {
     if (!current) return;
 
-    const text = formatSpanText(current.userText, current.assistantTexts.join('\n'));
+    const assistantText = current.assistantTexts.join('\n');
+    const text = formatSpanText(current.userText, assistantText);
     if (text.trim()) {
+      const messages: Message[] = [];
+      if (current.userText.trim()) messages.push({ role: 'user', content: current.userText.trim() });
+      if (assistantText.trim()) messages.push({ role: 'assistant', content: assistantText.trim() });
+
       spans.push({
         archivePath: context.archivePath,
         lineStart: current.lineStart,
@@ -43,6 +49,7 @@ export function parseCodexJsonl(content: string, context: ParseContext): Transcr
         metadataJson: JSON.stringify({ source: 'codex' }),
         observedAt: current.observedAt,
         text,
+        messages,
       });
     }
     current = null;

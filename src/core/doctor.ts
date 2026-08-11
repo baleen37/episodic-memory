@@ -68,30 +68,15 @@ function checkBuild(paths: DiagnosticPaths): DiagnosticResult {
 
 function checkIndex(db: Database): DiagnosticResult {
   const v = verifyMemoryIndex(db);
-  const hard =
-    v.missingArchives.length +
-    v.invalidProvenance.length +
-    v.missingVectors.length +
-    v.orphanVectors.length;
+  const hard = v.missingVectors.length + v.orphanVectors.length;
 
   if (hard > 0) {
     return {
       name: 'index',
       status: 'fail',
       detail:
-        `Integrity issues: ${v.missingArchives.length} missing archives, ` +
-        `${v.invalidProvenance.length} invalid provenance, ` +
-        `${v.missingVectors.length} missing vectors, ` +
+        `Integrity issues: ${v.missingVectors.length} missing vectors, ` +
         `${v.orphanVectors.length} orphan vectors.`,
-      suggestion: 'memmem sync',
-    };
-  }
-
-  if (v.retryableExtractionErrors.length > 0) {
-    return {
-      name: 'index',
-      status: 'warn',
-      detail: `${v.retryableExtractionErrors.length} retryable extraction error(s).`,
       suggestion: 'memmem sync',
     };
   }
@@ -101,11 +86,11 @@ function checkIndex(db: Database): DiagnosticResult {
 
 function checkData(db: Database): DiagnosticResult {
   const s = getMemoryStats(db);
-  if (s.activeMemoryRecords === 0) {
+  if (s.totalMemories === 0) {
     return {
       name: 'data',
       status: 'warn',
-      detail: 'No active memory records — nothing has been indexed yet.',
+      detail: 'No memories — nothing has been indexed yet.',
       suggestion: 'memmem sync',
     };
   }
@@ -113,14 +98,14 @@ function checkData(db: Database): DiagnosticResult {
     return {
       name: 'data',
       status: 'warn',
-      detail: `${s.missingVectors} active record(s) are not vectorized.`,
+      detail: `${s.missingVectors} record(s) are not vectorized.`,
       suggestion: 'memmem sync',
     };
   }
   return {
     name: 'data',
     status: 'ok',
-    detail: `${s.activeMemoryRecords} active records, all vectorized.`,
+    detail: `${s.totalMemories} memories, all vectorized.`,
   };
 }
 

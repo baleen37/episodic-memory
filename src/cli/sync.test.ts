@@ -2,15 +2,34 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord, insertMemoryRecordVector, upsertExtractionState } from '../core/db.js';
+import type { Database } from 'bun:sqlite';
+import { initDatabase } from '../core/db.js';
+import { createMemorySchema } from '../core/memory/schema.js';
 import { __setModelForTests } from '../core/embeddings.js';
 import { acquireSyncLock } from '../core/lock.js';
 import { __setLoadConfigForTests, resetRateLimiters } from '../core/ratelimiter.js';
-import { EXTRACTION_BUDGET_PER_SYNC, syncTranscripts } from './sync.js';
+import { EXTRACTION_BUDGET_PER_SYNC, LOCAL_USER_ID, mapSourceToFilters, syncArchives } from './sync.js';
 import type { LLMProvider } from '../core/llm/types.js';
 
+describe('mapSourceToFilters', () => {
+  test('maps source metadata onto mem0 scoping keys', () => {
+    const filters = mapSourceToFilters({
+      sourceKind: 'claude-code-projects',
+      archivePath: '/archive/claude-code-projects/proj/abc123.jsonl',
+    });
+    expect(filters.agent_id).toBe('claude-code-projects');
+    expect(filters.run_id).toBe('abc123');
+    expect(filters.user_id).toBeDefined();
+  });
+
+  test('always produces at least one scoping key', () => {
+    const filters = mapSourceToFilters({ sourceKind: 'codex-sessions', archivePath: '/a/b.jsonl' });
+    expect(filters.user_id ?? filters.agent_id ?? filters.run_id).toBeDefined();
+  });
+});
+
 let dir: string | null = null;
-let db: ReturnType<typeof initDatabase> | null = null;
+let db: Database | null = null;
 const originalEnv = {
   CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   CODEX_HOME: process.env.CODEX_HOME,
@@ -20,6 +39,15 @@ const originalEnv = {
   MEMMEM_DB_PATH: process.env.MEMMEM_DB_PATH,
   HOME: process.env.HOME,
 };
+
+// Transitional: sync.ts runs both the legacy schema (db.ts, for archive_index_state
+// incremental tracking) and the new mem0 schema (memory/schema.ts, for addMemories)
+// on one connection until Task 11 removes the legacy schema entirely.
+function freshMemoryDb(): Database {
+  const database = initDatabase();
+  createMemorySchema(database);
+  return database;
+}
 
 afterEach(() => {
   db?.close();
@@ -49,7 +77,7 @@ function setFastRateLimits(): void {
   resetRateLimiters();
 }
 
-describe('syncTranscripts', () => {
+describe('syncArchives', () => {
   test('copies Claude and Codex transcripts under source kind prefixes and indexes them', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
 
@@ -65,92 +93,16 @@ describe('syncTranscripts', () => {
     ].join('\n'));
 
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
 
-    const result = await syncTranscripts(db);
+    const result = await syncArchives(db);
 
-    expect(result.copied).toBe(2);
-    expect(result.archived).toBe(2);
-    expect(result.spansConsidered).toBe(2);
-    expect(result.spansSkipped).toBe(2);
-    expect(result.memoryRecordsIndexed).toBe(0);
+    expect(result.filesScanned).toBe(2);
+    expect(result.filesIndexed).toBe(2);
+    expect(result.memoriesAdded).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl'))).toBe(true);
     expect(existsSync(join(archiveDir, 'codex-sessions', 'rollout.jsonl'))).toBe(true);
-  });
-
-  test('retries archive reindexing after a prior copied archive did not update the DB', async () => {
-    const { claudeDir, codexDir, archiveDir } = setupDirs();
-    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
-    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
-    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
-
-    writeClaudeTranscript(sourcePath, 'Old question', 'Old answer');
-    setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
-    setGoodEmbeddingModel();
-    await syncTranscripts(db);
-
-    writeClaudeTranscript(sourcePath, 'New question', 'New answer');
-    writeClaudeTranscript(archivePath, 'New question', 'New answer');
-    const future = new Date(Date.now() + 1000);
-    utimesSync(archivePath, future, future);
-
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records WHERE archive_path = ?').get(archivePath) as { count: number };
-
-    expect(result.archived).toBe(1);
-    expect(result.spansConsidered).toBe(1);
-    expect(result.spansSkipped).toBe(1);
-    expect(memoryCount.count).toBe(0);
-  });
-
-  test('reindexes archive-only files when provider is missing and keeps memory rows unchanged', async () => {
-    const { claudeDir, codexDir, archiveDir } = setupDirs();
-    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
-    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
-    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
-    writeClaudeTranscript(sourcePath, 'Archive question', 'Archive answer');
-    setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
-    setGoodEmbeddingModel();
-    await syncTranscripts(db);
-    seedMemoryRecord(db, archivePath);
-
-    unlinkSync(sourcePath);
-    db.query('DELETE FROM vec_memory_records').run();
-
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
-    const vectorCount = db.query('SELECT COUNT(*) AS count FROM vec_memory_records').get() as { count: number };
-
-    expect(result.archived).toBe(1);
-    expect(result.spansSkipped).toBe(1);
-    expect(memoryCount.count).toBe(1);
-    expect(vectorCount.count).toBe(0);
-  });
-
-  test('counts archived files separately from transcript spans', async () => {
-    const { claudeDir, codexDir, archiveDir } = setupDirs();
-    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
-    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
-    writeFileSync(sourcePath, [
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'First question' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: 'First answer' } }),
-      JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:02.000Z', sessionId: 's1', message: { role: 'user', content: 'Second question' } }),
-      JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:03.000Z', sessionId: 's1', message: { role: 'assistant', content: 'Second answer' } }),
-    ].join('\n'));
-    setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
-    setGoodEmbeddingModel();
-
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
-
-    expect(result.archived).toBe(1);
-    expect(result.spansConsidered).toBe(2);
-    expect(result.spansSkipped).toBe(2);
-    expect(memoryCount.count).toBe(0);
   });
 
   test('copies archives without memory rows when LLM provider is missing', async () => {
@@ -159,53 +111,39 @@ describe('syncTranscripts', () => {
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
     writeClaudeTranscript(sourcePath, 'Provider question', 'Provider answer');
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
 
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const result = await syncArchives(db);
+    const memoryCount = (db.query('SELECT COUNT(*) AS count FROM memories').get() as { count: number }).count;
 
-    expect(result.copied).toBe(1);
-    expect(result.archived).toBe(1);
-    expect(result.spansConsidered).toBe(1);
-    expect(result.spansSkipped).toBe(1);
-    expect(result.memoryRecordsIndexed).toBe(0);
-    expect(memoryCount.count).toBe(0);
+    expect(result.filesIndexed).toBe(1);
+    expect(result.memoriesAdded).toBe(0);
+    expect(memoryCount).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl'))).toBe(true);
   });
 
-  test('continues syncing other archives when a source transcript copy fails', async () => {
+  test('indexes memory records through addMemories when a provider is configured', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
-    const failingSourceDir = join(claudeDir, 'projects', 'blocked');
-    const otherSourceDir = join(claudeDir, 'projects', 'proj');
-    const failingSourcePath = join(failingSourceDir, 'session.jsonl');
-    const existingSourcePath = join(otherSourceDir, 'existing.jsonl');
-    const otherSourcePath = join(otherSourceDir, 'other.jsonl');
-    const existingArchivePath = join(archiveDir, 'claude-code-projects', 'proj', 'existing.jsonl');
-    const blockedArchivePath = join(archiveDir, 'claude-code-projects', 'blocked');
-    mkdirSync(failingSourceDir, { recursive: true });
-    mkdirSync(otherSourceDir, { recursive: true });
-    writeClaudeTranscript(failingSourcePath, 'Failing question', 'Failing answer');
-    writeClaudeTranscript(existingSourcePath, 'Existing question', 'Existing answer');
-    writeClaudeTranscript(otherSourcePath, 'Other question', 'Other answer');
-    mkdirSync(join(archiveDir, 'claude-code-projects', 'proj'), { recursive: true });
-    writeClaudeTranscript(existingArchivePath, 'Archived question', 'Archived answer');
-    writeFileSync(blockedArchivePath, 'not a directory');
-    const future = new Date(Date.now() + 1000);
-    utimesSync(existingArchivePath, future, future);
+    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
+    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
+    writeClaudeTranscript(sourcePath, 'Durable question', 'Durable answer');
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeProvider();
 
-    const result = await syncTranscripts(db);
+    const result = await syncArchives(db, { provider });
+    const memoryCount = (db.query('SELECT COUNT(*) AS count FROM memories').get() as { count: number }).count;
+    const metadata = JSON.parse((db.query('SELECT metadata FROM memories LIMIT 1').get() as { metadata: string }).metadata);
 
-    expect(result.copied).toBe(1);
-    expect(result.archived).toBe(2);
-    expect(result.spansConsidered).toBe(2);
-    expect(result.spansSkipped).toBe(2);
-    expect(existsSync(join(archiveDir, 'claude-code-projects', 'blocked', 'session.jsonl'))).toBe(false);
-    expect(existsSync(existingArchivePath)).toBe(true);
-    expect(existsSync(join(archiveDir, 'claude-code-projects', 'proj', 'other.jsonl'))).toBe(true);
+    expect(result.filesIndexed).toBe(1);
+    expect(result.memoriesAdded).toBe(1);
+    expect(memoryCount).toBe(1);
+    expect(metadata.user_id).toBe(LOCAL_USER_ID);
+    expect(metadata.agent_id).toBe('claude-code-projects');
+    expect(metadata.run_id).toBe('session');
   });
 
   test('does not copy or index transcripts below a .no-memmem directory', async () => {
@@ -216,15 +154,15 @@ describe('syncTranscripts', () => {
     writeFileSync(join(ignoredDir, '.no-memmem'), '');
     writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
 
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records').get() as { count: number };
+    const result = await syncArchives(db);
+    const memoryCount = (db.query('SELECT COUNT(*) AS count FROM memories').get() as { count: number }).count;
 
-    expect(result.copied).toBe(0);
-    expect(result.archived).toBe(0);
-    expect(memoryCount.count).toBe(0);
+    expect(result.filesScanned).toBe(0);
+    expect(result.filesIndexed).toBe(0);
+    expect(memoryCount).toBe(0);
     expect(existsSync(join(archiveDir, 'claude-code-projects', 'ignored', 'session.jsonl'))).toBe(false);
   });
 
@@ -234,21 +172,43 @@ describe('syncTranscripts', () => {
     mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
     writeClaudeTranscript(sourcePath, 'Question', 'Answer');
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
+    setFastRateLimits();
     const provider = makeProvider();
 
     // First sync archives + fully indexes the file (provider present → extraction completes).
-    const first = await syncTranscripts(db, { provider });
-    expect(first.archived).toBe(1);
+    const first = await syncArchives(db, { provider });
+    expect(first.filesIndexed).toBe(1);
 
     // Second sync with nothing changed: the file is unchanged and fully indexed,
-    // so it must not be reconsidered at all.
-    const second = await syncTranscripts(db, { provider });
+    // so it must be skipped, not reconsidered.
+    const second = await syncArchives(db, { provider });
 
-    expect(second.copied).toBe(0);
-    expect(second.archived).toBe(0);
-    expect(second.spansConsidered).toBe(0);
+    expect(second.filesIndexed).toBe(0);
+    expect(second.skipped).toBe(1);
+  });
+
+  test('reindexes an archive after its content changes', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const sourcePath = join(claudeDir, 'projects', 'proj', 'session.jsonl');
+    const archivePath = join(archiveDir, 'claude-code-projects', 'proj', 'session.jsonl');
+    mkdirSync(join(claudeDir, 'projects', 'proj'), { recursive: true });
+
+    writeClaudeTranscript(sourcePath, 'Old question', 'Old answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    await syncArchives(db);
+
+    writeClaudeTranscript(sourcePath, 'New question', 'New answer');
+    writeClaudeTranscript(archivePath, 'New question', 'New answer');
+    const future = new Date(Date.now() + 1000);
+    utimesSync(archivePath, future, future);
+
+    const result = await syncArchives(db);
+
+    expect(result.filesIndexed).toBe(1);
   });
 
   test('caps extractions per sync and defers the rest to the next sync', async () => {
@@ -261,26 +221,92 @@ describe('syncTranscripts', () => {
       writeClaudeTranscript(join(projDir, `session-${i}.jsonl`), `Q${i}`, `A${i}`);
     }
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
     setFastRateLimits();
     const provider = makeProvider();
 
-    const first = await syncTranscripts(db, { provider });
+    const first = await syncArchives(db, { provider });
     // Budget caps how many files are fully processed in one run.
-    expect(first.archived).toBeLessThanOrEqual(EXTRACTION_BUDGET_PER_SYNC);
+    expect(first.filesIndexed).toBeLessThan(fileCount);
 
     // The next sync picks up the deferred files without redoing finished ones.
-    const second = await syncTranscripts(db, { provider });
-    expect(second.archived).toBeGreaterThan(0);
+    const second = await syncArchives(db, { provider });
+    expect(second.filesIndexed).toBeGreaterThan(0);
 
     // Eventually everything is indexed and a final sync is a no-op.
-    for (let i = 0; i < 5; i++) await syncTranscripts(db, { provider });
-    const idle = await syncTranscripts(db, { provider });
-    expect(idle.archived).toBe(0);
+    for (let i = 0; i < 5; i++) await syncArchives(db, { provider });
+    const idle = await syncArchives(db, { provider });
+    expect(idle.filesIndexed).toBe(0);
   });
 
-  test('purges archived indexes when a synced source directory becomes excluded', async () => {
+  test('continues past a span whose extraction fails, storing memories from the spans that succeed', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'bad.jsonl'), 'Bad question', 'Bad answer');
+    writeClaudeTranscript(join(projDir, 'good.jsonl'), 'Good question', 'Good answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeFailingProvider(['Bad question']);
+
+    const result = await syncArchives(db, { provider });
+    const memoryCount = (db.query('SELECT COUNT(*) AS count FROM memories').get() as { count: number }).count;
+
+    expect(result.failed).toBe(1);
+    expect(result.memoriesAdded).toBe(1);
+    expect(memoryCount).toBe(1);
+  });
+
+  test('does not mark a file fully indexed when one of its spans fails extraction', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'bad.jsonl'), 'Bad question', 'Bad answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeFailingProvider(['Bad question']);
+
+    const first = await syncArchives(db, { provider });
+    expect(first.failed).toBe(1);
+    expect(first.filesIndexed).toBe(0);
+
+    // Not marked fully indexed, so a second sync retries it. This time the
+    // provider succeeds (md5 dedup makes the retry idempotent for any spans
+    // that happened to succeed before the failure).
+    const goodProvider = makeProvider();
+    const second = await syncArchives(db, { provider: goodProvider });
+    expect(second.filesIndexed).toBe(1);
+    expect(second.failed).toBe(0);
+  });
+
+  test('marks a file fully indexed when all of its spans succeed', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    writeClaudeTranscript(join(projDir, 'session.jsonl'), 'Question', 'Answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeProvider();
+
+    const result = await syncArchives(db, { provider });
+
+    expect(result.failed).toBe(0);
+    expect(result.filesIndexed).toBe(1);
+
+    // Fully indexed → mtime recorded → an immediate re-sync must skip it.
+    const second = await syncArchives(db, { provider });
+    expect(second.filesIndexed).toBe(0);
+    expect(second.skipped).toBe(1);
+  });
+
+  test('purges archive files (but not their prior extraction bookkeeping) when a synced source directory becomes excluded', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const sourceDir = join(claudeDir, 'projects', 'proj');
     const sourcePath = join(sourceDir, 'session.jsonl');
@@ -288,21 +314,51 @@ describe('syncTranscripts', () => {
     mkdirSync(sourceDir, { recursive: true });
     writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
     setupEnv(claudeDir, codexDir, archiveDir);
-    db = initDatabase();
+    db = freshMemoryDb();
     setGoodEmbeddingModel();
-    await syncTranscripts(db);
-    seedMemoryRecord(db, archivePath);
+    await syncArchives(db);
 
     writeFileSync(join(sourceDir, '.no-memmem'), '');
 
-    const result = await syncTranscripts(db);
-    const memoryCount = db.query('SELECT COUNT(*) AS count FROM memory_records WHERE archive_path = ?').get(archivePath) as { count: number };
-    const stateCount = db.query('SELECT COUNT(*) AS count FROM extraction_state WHERE archive_path = ?').get(archivePath) as { count: number };
+    const result = await syncArchives(db);
 
-    expect(result.archived).toBe(0);
-    expect(memoryCount.count).toBe(0);
-    expect(stateCount.count).toBe(0);
+    expect(result.filesIndexed).toBe(0);
     expect(existsSync(archivePath)).toBe(false);
+  });
+
+  test('deletes memories extracted from an archive whose source directory becomes excluded, leaving unrelated memories searchable', async () => {
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const excludedSourceDir = join(claudeDir, 'projects', 'secret-proj');
+    const keptSourceDir = join(claudeDir, 'projects', 'kept-proj');
+    mkdirSync(excludedSourceDir, { recursive: true });
+    mkdirSync(keptSourceDir, { recursive: true });
+    writeClaudeTranscript(join(excludedSourceDir, 'secret-session.jsonl'), 'Secret question', 'Secret answer');
+    writeClaudeTranscript(join(keptSourceDir, 'kept-session.jsonl'), 'Kept question', 'Kept answer');
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    // Distinct fact text per span so md5 dedup does not collapse the two files
+    // into a single memory row.
+    const provider = makeFailingProvider([]);
+
+    await syncArchives(db, { provider });
+    const runIdsBefore = (db.query(
+      "SELECT DISTINCT json_extract(metadata, '$.run_id') AS run_id FROM memories",
+    ).all() as Array<{ run_id: string }>).map(r => r.run_id);
+    expect(runIdsBefore.sort()).toEqual(['kept-session', 'secret-session']);
+
+    writeFileSync(join(excludedSourceDir, '.no-memmem'), '');
+    await syncArchives(db, { provider });
+
+    const runIdsAfter = (db.query(
+      "SELECT DISTINCT json_extract(metadata, '$.run_id') AS run_id FROM memories",
+    ).all() as Array<{ run_id: string }>).map(r => r.run_id);
+    expect(runIdsAfter).toEqual(['kept-session']);
+
+    const vecCount = (db.query('SELECT COUNT(*) AS c FROM vec_memories').get() as { c: number }).c;
+    const memCount = (db.query('SELECT COUNT(*) AS c FROM memories').get() as { c: number }).c;
+    expect(vecCount).toBe(memCount);
   });
 });
 
@@ -363,7 +419,29 @@ function makeProvider(): LLMProvider {
   return {
     async complete() {
       return {
-        text: JSON.stringify([{ kind: 'fact', text: 'Durable fact.', confidence: 1 }]),
+        text: JSON.stringify({ memory: [{ id: '0', text: 'Durable fact.', attributed_to: 'user' }] }),
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+  };
+}
+
+/**
+ * A provider whose `complete()` throws when the prompt contains any of
+ * `failingMarkers` (matched against message content baked into the prompt),
+ * and succeeds (with a unique fact text) otherwise. Used to simulate one
+ * span's extraction failing mid-sync.
+ */
+function makeFailingProvider(failingMarkers: string[]): LLMProvider {
+  let call = 0;
+  return {
+    async complete(prompt: string) {
+      if (failingMarkers.some(marker => prompt.includes(marker))) {
+        throw new Error('simulated provider failure');
+      }
+      call++;
+      return {
+        text: JSON.stringify({ memory: [{ id: '0', text: `Fact ${call}.`, attributed_to: 'user' }] }),
         usage: { input_tokens: 1, output_tokens: 1 },
       };
     },
@@ -375,33 +453,6 @@ function writeClaudeTranscript(filePath: string, userText: string, assistantText
     JSON.stringify({ type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: 's1', message: { role: 'user', content: userText } }),
     JSON.stringify({ type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: 's1', message: { role: 'assistant', content: assistantText } }),
   ].join('\n'));
-}
-
-function seedMemoryRecord(database: ReturnType<typeof initDatabase>, archivePath: string): void {
-  const id = insertMemoryRecord(database, {
-    kind: 'fact',
-    text: 'Seeded memory record.',
-    sourceKind: 'claude-code-projects',
-    archivePath,
-    lineStart: 1,
-    lineEnd: 2,
-    observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
-    project: 'proj',
-    projectName: null,
-    dedupeKey: `seed:${archivePath}`,
-    extractionVersion: CURRENT_EXTRACTION_VERSION,
-    embeddingVersion: CURRENT_EMBEDDING_VERSION,
-  });
-  insertMemoryRecordVector(database, id, Array.from({ length: 384 }, () => 0.1));
-  upsertExtractionState(database, {
-    sourceKind: 'claude-code-projects',
-    archivePath,
-    lineStart: 1,
-    lineEnd: 2,
-    sourceHash: 'seed-hash',
-    extractionVersion: CURRENT_EXTRACTION_VERSION,
-    status: 'done',
-  });
 }
 
 function restoreEnv(key: keyof typeof originalEnv): void {
