@@ -111,8 +111,8 @@ describe('scoreAndRank', () => {
     });
     expect(out[0].score_details).toEqual({
       semantic_score: 0.8, bm25_score: 0.6, entity_boost: 0,
-      raw_score: 1.4000000000000001, max_possible_score: 2.0,
-      final_score: 0.7000000000000001, threshold: 0.1,
+      raw_score: 1.4, max_possible_score: 2.0,
+      final_score: 0.7, threshold: 0.1,
     });
   });
 
