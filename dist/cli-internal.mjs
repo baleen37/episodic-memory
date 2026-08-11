@@ -3091,19 +3091,19 @@ class LLMError extends Error {
 }
 function stripFences(text) {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("```"))
-    return trimmed;
   const lines = trimmed.split(`
 `);
-  const start = lines.findIndex((l) => l.trim().startsWith("```")) + 1;
+  const openIdx = lines.findIndex((l) => l.trim().startsWith("```"));
+  if (openIdx === -1)
+    return trimmed;
   let end = lines.length;
-  for (let i = start;i < lines.length; i++) {
+  for (let i = openIdx + 1;i < lines.length; i++) {
     if (lines[i].trim().startsWith("```")) {
       end = i;
       break;
     }
   }
-  return lines.slice(start, end).join(`
+  return lines.slice(openIdx + 1, end).join(`
 `).trim();
 }
 function parseExtractionResponse(raw) {

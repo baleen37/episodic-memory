@@ -33,6 +33,41 @@ describe('parseExtractionResponse', () => {
     expect(out).toHaveLength(1);
   });
 
+  test('strips fences preceded by an English preamble', () => {
+    const out = parseExtractionResponse(
+      'Here is the result:\n```json\n{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}\n```');
+    expect(out).toHaveLength(1);
+  });
+
+  test('strips fences preceded by a Korean preamble', () => {
+    const out = parseExtractionResponse(
+      '다음과 같습니다:\n```json\n{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}\n```');
+    expect(out).toHaveLength(1);
+  });
+
+  test('strips trailing prose after the closing fence', () => {
+    const out = parseExtractionResponse(
+      '```json\n{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}\n```\nHope that helps!');
+    expect(out).toHaveLength(1);
+  });
+
+  test('strips a bare fence with no language tag', () => {
+    const out = parseExtractionResponse(
+      '```\n{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}\n```');
+    expect(out).toHaveLength(1);
+  });
+
+  test('parses unfenced JSON with no fence at all', () => {
+    const out = parseExtractionResponse('{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}');
+    expect(out).toHaveLength(1);
+  });
+
+  test('parses an opening fence with no closing fence', () => {
+    const out = parseExtractionResponse(
+      '```json\n{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}');
+    expect(out).toHaveLength(1);
+  });
+
   test('drops entries missing required fields', () => {
     const out = parseExtractionResponse(JSON.stringify({
       memory: [
