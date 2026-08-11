@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
-import { createMemorySchema } from './schema.js';
+import { createMemorySchema, getArchiveIndexMtime, setArchiveIndexMtime, clearArchiveIndexMtime } from './schema.js';
 
 function freshDb(): Database {
   const db = new Database(':memory:');

@@ -16841,6 +16841,12 @@ import * as sqliteVec from "sqlite-vec";
 var EMBEDDING_DIM = 384;
 
 // src/core/memory/schema.ts
+var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
+if (process.platform === "darwin" && !isTestEnvironment && true) {
+  try {
+    Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+  } catch {}
+}
 function createMemorySchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (
@@ -16877,6 +16883,13 @@ function createMemorySchema(db) {
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archive_index_state (
+      archive_path TEXT PRIMARY KEY,
+      content_mtime_ms REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
 }
 function openMemoryDb() {
   const dbPath = getDbPath();
@@ -17261,17 +17274,6 @@ async function searchMemories(args) {
     results.push(result);
   }
   return { results };
-}
-
-// src/core/db.ts
-import { Database as Database2 } from "bun:sqlite";
-init_paths();
-import * as sqliteVec2 from "sqlite-vec";
-var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
-if (process.platform === "darwin" && !isTestEnvironment && true) {
-  try {
-    Database2.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
-  } catch {}
 }
 
 // src/core/llm/index.ts

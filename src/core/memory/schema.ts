@@ -5,6 +5,18 @@ import * as sqliteVec from 'sqlite-vec';
 import { getDbPath } from '../paths.js';
 import { EMBEDDING_DIM } from '../constants.js';
 
+// Bun's bundled SQLite is built without dynamic extension loading, which
+// sqlite-vec requires. Point at Homebrew's build instead. Skipped under test,
+// where suites open their own in-memory databases.
+// @ts-ignore - import.meta.test is set by bun test
+const isTestEnvironment = typeof import.meta !== 'undefined' && import.meta.test;
+if (process.platform === 'darwin' && !isTestEnvironment && process.env.NODE_ENV !== 'test') {
+  try {
+    Database.setCustomSQLite('/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib');
+  } catch {
+  }
+}
+
 /** mem0 MemoryItem (mem0/configs/base.py:16-26). `score` is runtime-only, never a column. */
 export interface MemoryItem {
   id: string;
@@ -68,6 +80,38 @@ export function createMemorySchema(db: Database): void {
 
   // unicode61 because trigram cannot index 2-character Korean tokens; storage is English.
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS archive_index_state (
+      archive_path TEXT PRIMARY KEY,
+      content_mtime_ms REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+}
+
+/** Returns the content mtime recorded the last time this archive was fully indexed, or null. */
+export function getArchiveIndexMtime(db: Database, archivePath: string): number | null {
+  const row = db.query('SELECT content_mtime_ms AS mtime FROM archive_index_state WHERE archive_path = ?')
+    .get(archivePath) as { mtime: number } | null;
+  return row ? row.mtime : null;
+}
+
+/** Records that this archive is fully indexed at the given content mtime. */
+export function setArchiveIndexMtime(db: Database, archivePath: string, contentMtimeMs: number): void {
+  const now = Date.now();
+  db.query(`
+    INSERT INTO archive_index_state (archive_path, content_mtime_ms, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(archive_path) DO UPDATE SET
+      content_mtime_ms = excluded.content_mtime_ms,
+      updated_at = excluded.updated_at
+  `).run(archivePath, contentMtimeMs, now);
+}
+
+/** Clears the fully-indexed marker so the archive is reconsidered on the next sync. */
+export function clearArchiveIndexMtime(db: Database, archivePath: string): void {
+  db.query('DELETE FROM archive_index_state WHERE archive_path = ?').run(archivePath);
 }
 
 export function openMemoryDb(): Database {

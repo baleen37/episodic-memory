@@ -3,8 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, utimesSync, wri
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Database } from 'bun:sqlite';
-import { initDatabase } from '../core/db.js';
-import { createMemorySchema } from '../core/memory/schema.js';
+import { openMemoryDb } from '../core/memory/schema.js';
 import { __setModelForTests } from '../core/embeddings.js';
 import { acquireSyncLock } from '../core/lock.js';
 import { __setLoadConfigForTests, resetRateLimiters } from '../core/ratelimiter.js';
@@ -40,13 +39,8 @@ const originalEnv = {
   HOME: process.env.HOME,
 };
 
-// Transitional: sync.ts runs both the legacy schema (db.ts, for archive_index_state
-// incremental tracking) and the new mem0 schema (memory/schema.ts, for addMemories)
-// on one connection until Task 11 removes the legacy schema entirely.
 function freshMemoryDb(): Database {
-  const database = initDatabase();
-  createMemorySchema(database);
-  return database;
+  return openMemoryDb();
 }
 
 afterEach(() => {
