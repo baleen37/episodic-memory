@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { ParseContext, SourceAdapter, TranscriptSpan } from './types.js';
 import { asObject, asString, eachJsonLine, parseTimestamp } from './jsonl.js';
+import type { Message } from '../memory/prompts.js';
 
 interface PendingClaudeSpan {
   archivePath: string;
@@ -28,8 +29,13 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
   const flushCurrent = () => {
     if (!current) return;
 
-    const text = formatSpanText(current.userText, current.assistantTexts.join('\n'));
+    const assistantText = current.assistantTexts.join('\n');
+    const text = formatSpanText(current.userText, assistantText);
     if (text.trim()) {
+      const messages: Message[] = [];
+      if (current.userText.trim()) messages.push({ role: 'user', content: current.userText.trim() });
+      if (assistantText.trim()) messages.push({ role: 'assistant', content: assistantText.trim() });
+
       spans.push({
         archivePath: current.archivePath,
         lineStart: current.lineStart,
@@ -44,6 +50,7 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
         metadataJson: current.metadataJson,
         observedAt: current.observedAt,
         text,
+        messages,
       });
     }
     current = null;

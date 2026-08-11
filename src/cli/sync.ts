@@ -1,14 +1,13 @@
 import type { Database } from 'bun:sqlite';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'fs';
 import path from 'path';
 import {
-  clearArchiveIndexMtime,
-  deleteMemoryIndexForArchivePathPrefix,
   getArchiveIndexMtime,
   openDatabase,
   setArchiveIndexMtime,
 } from '../core/db.js';
-import { reindexArchiveFile } from '../core/indexer.js';
+import { createMemorySchema } from '../core/memory/schema.js';
+import { addMemories } from '../core/memory/add.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { log } from '../core/logger.js';
@@ -25,14 +24,14 @@ import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/in
  */
 export const EXTRACTION_BUDGET_PER_SYNC = 20;
 
-export interface SyncResult {
-  copied: number;
-  archived: number;
-  spansConsidered: number;
-  spansSkipped: number;
-  spansEmpty: number;
-  spansErrored: number;
-  memoryRecordsIndexed: number;
+/** Fixed local identifier used as the mem0 user_id scope for all archives synced by this machine. */
+export const LOCAL_USER_ID = 'local';
+
+export interface SyncStats {
+  filesScanned: number;
+  filesIndexed: number;
+  memoriesAdded: number;
+  skipped: number;
 }
 
 interface ArchiveFile {
@@ -45,18 +44,24 @@ export interface SyncOptions {
   provider?: LLMProvider | null;
 }
 
-export async function syncTranscripts(db: Database, options: SyncOptions = {}): Promise<SyncResult> {
+/** Maps archived transcript source metadata onto mem0 scoping keys (user_id/agent_id/run_id). */
+export function mapSourceToFilters(source: { sourceKind: string; archivePath: string }): Record<string, string> {
+  return {
+    user_id: LOCAL_USER_ID,
+    agent_id: source.sourceKind,
+    run_id: path.basename(source.archivePath, path.extname(source.archivePath)),
+  };
+}
+
+export async function syncArchives(db: Database, options: SyncOptions = {}): Promise<SyncStats> {
   const archiveDir = getArchiveDir();
   const archiveFiles = new Map<string, ArchiveFile>();
   const provider = options.provider !== undefined ? options.provider : await loadExtractionProvider();
-  const result: SyncResult = {
-    copied: 0,
-    archived: 0,
-    spansConsidered: 0,
-    spansSkipped: 0,
-    spansEmpty: 0,
-    spansErrored: 0,
-    memoryRecordsIndexed: 0,
+  const stats: SyncStats = {
+    filesScanned: 0,
+    filesIndexed: 0,
+    memoriesAdded: 0,
+    skipped: 0,
   };
 
   for (const adapter of getBuiltInSourceAdapters()) {
@@ -65,9 +70,7 @@ export async function syncTranscripts(db: Database, options: SyncOptions = {}): 
       for (const sourcePath of findJsonlFiles(root, adapter, excludedSourceDirs)) {
         const archivePath = path.join(archiveDir, adapter.kind, path.relative(root, sourcePath));
         try {
-          if (copyIfNewer(sourcePath, archivePath)) {
-            result.copied++;
-          }
+          copyIfNewer(sourcePath, archivePath);
         } catch (error) {
           log.warn('Failed to copy transcript; continuing sync.', {
             sourcePath,
@@ -82,7 +85,7 @@ export async function syncTranscripts(db: Database, options: SyncOptions = {}): 
 
       for (const sourceDir of excludedSourceDirs) {
         const archivePathPrefix = path.join(archiveDir, adapter.kind, path.relative(root, sourceDir));
-        purgeExcludedArchiveSubtree(db, archivePathPrefix, archiveFiles);
+        purgeExcludedArchiveSubtree(archivePathPrefix, archiveFiles);
       }
     }
 
@@ -94,16 +97,22 @@ export async function syncTranscripts(db: Database, options: SyncOptions = {}): 
     }
   }
 
+  stats.filesScanned = archiveFiles.size;
+
   // Skip files we already fully indexed at their current content mtime. This is
   // what keeps a sync bounded: only changed or not-yet-complete files are parsed.
   const pendingFiles: Array<ArchiveFile & { mtimeMs: number }> = [];
   for (const file of archiveFiles.values()) {
     const mtimeMs = statSync(file.archivePath).mtimeMs;
     if (getArchiveIndexMtime(db, file.archivePath) === mtimeMs) {
+      stats.skipped++;
       continue;
     }
     pendingFiles.push({ ...file, mtimeMs });
   }
+
+  // Reindexing is incremental, newest archive first.
+  pendingFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
   const total = pendingFiles.length;
   if (total > 0) {
@@ -111,52 +120,79 @@ export async function syncTranscripts(db: Database, options: SyncOptions = {}): 
   }
 
   // Bound the LLM work per sync so the lock is never held for hours. Remaining
-  // spans are picked up by the next sync.
+  // files are picked up by the next sync.
   let extractionBudget = EXTRACTION_BUDGET_PER_SYNC;
-  let archived = 0;
+  let indexed = 0;
   const progressInterval = Math.max(1, Math.floor(total / 20));
   for (const file of pendingFiles) {
-    const reindexResult = await reindexArchiveFile(
-      db,
-      file.archivePath,
-      file.adapter.kind,
-      file.adapter.parse,
-      provider,
-      { extractionBudget },
-    );
-    result.spansConsidered += reindexResult.spansConsidered;
-    result.spansSkipped += reindexResult.spansSkipped;
-    result.spansEmpty += reindexResult.spansEmpty;
-    result.spansErrored += reindexResult.spansErrored;
-    result.memoryRecordsIndexed += reindexResult.memoryRecordsIndexed;
-    extractionBudget -= reindexResult.extractionsPerformed;
-
-    // Mark the file fully indexed only when extraction actually ran to completion:
-    // a provider was present, nothing was deferred by budget, and no span errored.
-    // Without a provider, spans are merely skipped (not extracted), so we must NOT
-    // mark the file done — otherwise it would never be indexed once a provider is set.
-    if (provider && reindexResult.spansDeferred === 0 && reindexResult.spansErrored === 0) {
-      setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
-    } else {
-      clearArchiveIndexMtime(db, file.archivePath);
-    }
-
-    archived++;
-    if (archived % progressInterval === 0 || archived === total) {
-      log.info(`  ${archived}/${total} indexed`);
-    }
-
-    if (extractionBudget <= 0) {
+    if (provider && extractionBudget <= 0) {
       log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        processed: archived,
-        remaining: total - archived,
+        remaining: total - indexed,
+      });
+      break;
+    }
+
+    const content = readArchiveFile(file.archivePath);
+    if (content === null) {
+      stats.skipped++;
+      continue;
+    }
+
+    const spans = file.adapter.parse(content, { archivePath: file.archivePath, sourceKind: file.adapter.kind });
+
+    if (!provider) {
+      // No provider configured: archives are copied but extraction is skipped entirely.
+      indexed++;
+      if (indexed % progressInterval === 0 || indexed === total) {
+        log.info(`  ${indexed}/${total} indexed`);
+      }
+      continue;
+    }
+
+    const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
+
+    let deferred = false;
+    for (const span of spans) {
+      if (extractionBudget <= 0) {
+        deferred = true;
+        break;
+      }
+      extractionBudget--;
+
+      const result = await addMemories({
+        db,
+        provider,
+        messages: span.messages,
+        filters,
+        sessionKey: filters.run_id ?? file.archivePath,
+        observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined,
+      });
+      stats.memoriesAdded += result.results.length;
+    }
+
+    // Only mark the file fully indexed when every span was processed. If the
+    // budget ran out partway through, leave the mtime marker unset so the next
+    // sync reconsiders this file (and re-runs already-processed spans through
+    // addMemories, whose md5 dedup makes that safe).
+    if (!deferred) {
+      setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
+      indexed++;
+    }
+    if (indexed % progressInterval === 0 || indexed === total) {
+      log.info(`  ${indexed}/${total} indexed`);
+    }
+
+    if (deferred) {
+      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
+        processed: indexed,
+        remaining: total - indexed,
       });
       break;
     }
   }
 
-  result.archived = archived;
-  return result;
+  stats.filesIndexed = indexed;
+  return stats;
 }
 
 export async function runSyncCli(): Promise<void> {
@@ -166,8 +202,15 @@ export async function runSyncCli(): Promise<void> {
     return;
   }
   const db = openDatabase();
+  // Transitional: the mem0 memory tables (`memories`, `vec_memories`, etc.) live in a
+  // separate schema from the legacy `memory_records`/`extraction_state` tables that
+  // `openDatabase()` creates. Both currently coexist on this one connection because
+  // `archive_index_state` (and the migrations that touch it) still live in db.ts's old
+  // schema. Task 11 deletes the old schema and its migrations wholesale, at which point
+  // sync moves onto `openMemoryDb()` alone.
+  createMemorySchema(db);
   try {
-    const result = await syncTranscripts(db);
+    const result = await syncArchives(db);
     log.info(`Done.`, { ...result });
   } finally {
     db.close();
@@ -179,6 +222,14 @@ async function loadExtractionProvider(): Promise<LLMProvider | null> {
   try {
     const config = loadConfig();
     return config ? await createProvider(config) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readArchiveFile(archivePath: string): string | null {
+  try {
+    return readFileSync(archivePath, 'utf-8');
   } catch {
     return null;
   }
@@ -203,11 +254,9 @@ function findJsonlFiles(root: string, adapter: SourceAdapter, excludedDirs: stri
 }
 
 function purgeExcludedArchiveSubtree(
-  db: Database,
   archivePathPrefix: string,
   archiveFiles: Map<string, ArchiveFile>,
 ): void {
-  deleteMemoryIndexForArchivePathPrefix(db, archivePathPrefix);
   for (const archivePath of archiveFiles.keys()) {
     if (isPathAtOrUnder(archivePath, archivePathPrefix)) {
       archiveFiles.delete(archivePath);

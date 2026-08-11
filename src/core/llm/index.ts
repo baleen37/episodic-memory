@@ -28,15 +28,3 @@ export { ZAIProvider } from './zai-provider.js';
 // Types and functions from config.ts
 export type { LLMConfig } from './config.js';
 export { loadConfig, createProvider } from './config.js';
-
-// Types and functions from extractor.ts
-export type {
-  TranscriptSpanForExtraction,
-  ExtractedMemoryRecord,
-  ExtractMemoryOptions,
-} from './extractor.js';
-export {
-  buildMemoryExtractPrompt,
-  parseMemoryExtractResponse,
-  extractMemoryRecordsFromSpan,
-} from './extractor.js';

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { getHelpText, parseSearchArgs, parseReadArgs } from './main.js';
+import { getHelpText, parseSearchArgs } from './main.js';
 import { runSearchCli } from './search.js';
 import { CURRENT_EMBEDDING_VERSION, CURRENT_EXTRACTION_VERSION, initDatabase, insertMemoryRecord } from '../core/db.js';
 
@@ -39,57 +39,22 @@ describe('CLI argument parsing', () => {
     expect(() => parseSearchArgs(['search', '--limit', '5'])).toThrow('search requires a query');
   });
 
-  test('parses read args', () => {
-    expect(parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '3', '--end-line', '8'])).toEqual({
-      path: '/archive/session.jsonl',
-      startLine: 3,
-      endLine: 8,
-    });
-  });
-
-  test('rejects missing read path', () => {
-    expect(() => parseReadArgs(['read'])).toThrow('read requires a path');
-  });
-
-  test('rejects flag as read path', () => {
-    expect(() => parseReadArgs(['read', '--start-line', '3'])).toThrow('read requires a path');
-  });
-
-  test('requires both start and end line for read args', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl'])).toThrow('read requires --start-line and --end-line');
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '3'])).toThrow('read requires --start-line and --end-line');
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--end-line', '8'])).toThrow('read requires --start-line and --end-line');
-  });
-
-  test('rejects invalid numeric read option', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '0'])).toThrow('--start-line must be a positive integer');
-  });
-
-  test('rejects start line after end line', () => {
-    expect(() => parseReadArgs(['read', '/archive/session.jsonl', '--start-line', '9', '--end-line', '8'])).toThrow('--start-line must be less than or equal to --end-line');
-  });
-
   test('help text mentions commands, options, and examples', () => {
     const help = getHelpText();
     expect(help).toContain('sync');
     expect(help).toContain('search');
-    expect(help).toContain('read');
     expect(help).toContain('stats');
     expect(help).toContain('verify');
     expect(help).toContain('memmem - Event/fact memory for Claude Code and Codex transcripts');
     expect(help).toContain('sync      Copy transcripts and extract memory records');
     expect(help).toContain('search    Search indexed memory records');
-    expect(help).toContain('read      Read archived transcript lines');
     expect(help).toContain('stats     Print memory index statistics');
     expect(help).toContain('verify    Verify memory index integrity');
     expect(help).toContain('--limit <number>');
     expect(help).toContain('--after <YYYY-MM-DD>');
     expect(help).toContain('--before <YYYY-MM-DD>');
     expect(help).toContain('--source-kind <kind>');
-    expect(help).toContain('--start-line <number>');
-    expect(help).toContain('--end-line <number>');
     expect(help).toContain('memmem search "source of truth" --limit 5');
-    expect(help).toContain('memmem read /archive/session.jsonl --start-line 3 --end-line 8');
     expect(help).not.toContain('recall');
   });
 });

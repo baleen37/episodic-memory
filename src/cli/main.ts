@@ -1,6 +1,5 @@
 import { runDoctorCli } from './doctor.js';
 import { runMcpCli } from './mcp.js';
-import { runReadCli } from './read.js';
 import { runSearchCli } from './search.js';
 import { runStatsCli } from './stats.js';
 import { runSyncCli } from './sync.js';
@@ -12,12 +11,6 @@ interface SearchCliArgs {
   after?: string;
   before?: string;
   sourceKind?: string;
-}
-
-interface ReadCliArgs {
-  path: string;
-  startLine: number;
-  endLine: number;
 }
 
 function requireOptionValue(args: string[], index: number, flag: string): string {
@@ -69,37 +62,6 @@ export function parseSearchArgs(args: string[]): SearchCliArgs {
   return parsed;
 }
 
-export function parseReadArgs(args: string[]): ReadCliArgs {
-  const path = args[1];
-  if (!path || path.startsWith('--')) {
-    throw new Error('read requires a path');
-  }
-
-  const parsed: Partial<ReadCliArgs> & { path: string } = { path };
-
-  for (let i = 2; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--start-line') {
-      parsed.startLine = parsePositiveInteger(requireOptionValue(args, i, arg), arg);
-      i++;
-    } else if (arg === '--end-line') {
-      parsed.endLine = parsePositiveInteger(requireOptionValue(args, i, arg), arg);
-      i++;
-    } else {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-  }
-
-  if (parsed.startLine === undefined || parsed.endLine === undefined) {
-    throw new Error('read requires --start-line and --end-line');
-  }
-  if (parsed.startLine > parsed.endLine) {
-    throw new Error('--start-line must be less than or equal to --end-line');
-  }
-
-  return { path: parsed.path, startLine: parsed.startLine, endLine: parsed.endLine };
-}
-
 export function getHelpText(): string {
   return `
 memmem - Event/fact memory for Claude Code and Codex transcripts
@@ -110,7 +72,6 @@ USAGE:
 COMMANDS:
   sync      Copy transcripts and extract memory records
   search    Search indexed memory records
-  read      Read archived transcript lines
   stats     Print memory index statistics
   verify    Verify memory index integrity
   doctor    Diagnose build, index, and data health
@@ -122,13 +83,8 @@ SEARCH OPTIONS:
   --before <YYYY-MM-DD>   Only include records before this date
   --source-kind <kind>    Filter by transcript source kind
 
-READ OPTIONS:
-  --start-line <number>   First archive line to read (required)
-  --end-line <number>     Last archive line to read (required)
-
 EXAMPLES:
   memmem search "source of truth" --limit 5
-  memmem read /archive/session.jsonl --start-line 3 --end-line 8
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory
@@ -172,9 +128,6 @@ async function main(): Promise<void> {
       break;
     case 'search':
       await runSearchCli(parseSearchArgs(args));
-      break;
-    case 'read':
-      runReadCli(parseReadArgs(args));
       break;
     case 'stats':
       runStatsCli();

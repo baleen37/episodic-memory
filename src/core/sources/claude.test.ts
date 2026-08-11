@@ -27,6 +27,10 @@ describe('parseClaudeJsonl', () => {
     expect(spans[0].text).toContain('Assistant: Copy transcripts into archive.');
     expect('userText' in spans[0]).toBe(false);
     expect('assistantText' in spans[0]).toBe(false);
+    expect(spans[0].messages).toEqual([
+      { role: 'user', content: 'How do we sync?' },
+      { role: 'assistant', content: 'Copy transcripts into archive.' },
+    ]);
   });
 
   test('keeps tool_result user messages in the current span', () => {

@@ -33,6 +33,10 @@ describe('parseCodexJsonl', () => {
     expect(spans[0].text).toContain('Assistant: Tests passed.');
     expect('userText' in spans[0]).toBe(false);
     expect('assistantText' in spans[0]).toBe(false);
+    expect(spans[0].messages).toEqual([
+      { role: 'user', content: 'Run tests' },
+      { role: 'assistant', content: 'Tests passed.' },
+    ]);
   });
 
   test('parses Codex tool variants without exposing tool calls', () => {

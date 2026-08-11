@@ -1,6 +1,5 @@
 import type { Database } from 'bun:sqlite';
 import { search, searchMulti, listRecent, getMemoryRecordLocation } from '../core/search.js';
-import { readConversation } from '../core/read.js';
 import type { SearchInput, FetchInput } from './schemas.js';
 
 export interface SearchResult {
@@ -37,6 +36,9 @@ export async function handleSearch(params: SearchInput, db: Database): Promise<S
   });
 }
 
+// TODO(Task 10): `readConversation` (src/core/read.ts) was deleted in Task 9 along
+// with the old indexer/extractor pipeline. This handler is temporarily disabled
+// pending Task 10's MCP surface rework; it no longer reads archive transcript text.
 export function handleFetch(params: FetchInput, db: Database): string {
   const id = typeof params.id === 'string' ? Number(params.id) : params.id;
   if (!Number.isInteger(id)) {
@@ -48,9 +50,5 @@ export function handleFetch(params: FetchInput, db: Database): string {
     throw new Error(`Memory record not found: ${id}`);
   }
 
-  const result = readConversation(location.archivePath, location.lineStart, location.lineEnd);
-  if (result === null) {
-    throw new Error(`Archive file not found for memory record ${id}: ${location.archivePath}`);
-  }
-  return result;
+  throw new Error('fetch is temporarily unavailable: archive read path was removed in Task 9 (see Task 10)');
 }
