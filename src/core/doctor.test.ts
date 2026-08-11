@@ -133,6 +133,43 @@ describe('runDiagnostics', () => {
     expect(results.find((r) => r.name === 'build')!.status).toBe('fail');
   });
 
+  test('build ok when src is newer only by bulk-extract mtime noise', () => {
+    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    db = newMemoryDb();
+    const distDir = join(dir, 'dist');
+    const srcDir = join(dir, 'src');
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(join(distDir, 'cli-internal.mjs'), '');
+    writeFileSync(join(distDir, 'mcp-server.mjs'), '');
+    setMtime(join(distDir, 'cli-internal.mjs'), 5000);
+    setMtime(join(distDir, 'mcp-server.mjs'), 5000);
+    // A plugin install writes src a few ms after dist; that is not a stale build.
+    writeFileSync(join(srcDir, 'main.ts'), '');
+    setMtime(join(srcDir, 'main.ts'), 5000.026);
+
+    const results = runDiagnostics(db, { distDir, srcDir });
+    expect(results.find((r) => r.name === 'build')!.status).toBe('ok');
+  });
+
+  test('build fail when src edited past the tolerance window', () => {
+    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    db = newMemoryDb();
+    const distDir = join(dir, 'dist');
+    const srcDir = join(dir, 'src');
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(join(distDir, 'cli-internal.mjs'), '');
+    writeFileSync(join(distDir, 'mcp-server.mjs'), '');
+    setMtime(join(distDir, 'cli-internal.mjs'), 5000);
+    setMtime(join(distDir, 'mcp-server.mjs'), 5000);
+    writeFileSync(join(srcDir, 'main.ts'), '');
+    setMtime(join(srcDir, 'main.ts'), 5003);
+
+    const results = runDiagnostics(db, { distDir, srcDir });
+    expect(results.find((r) => r.name === 'build')!.status).toBe('fail');
+  });
+
   test('data warn when no records', () => {
     dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
     db = newMemoryDb();
