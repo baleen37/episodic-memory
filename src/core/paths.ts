@@ -71,6 +71,17 @@ export function getDbPath(): string {
 }
 
 /**
+ * Get embedding model cache directory
+ *
+ * Must be absolute: transformers.js defaults cacheDir to a cwd-relative
+ * './.cache', which re-downloads the model into every directory memmem runs
+ * from and races when several processes download at once.
+ */
+export function getModelCacheDir(): string {
+  return ensureDir(path.join(getSuperpowersDir(), 'models'));
+}
+
+/**
  * Get log directory
  */
 export function getLogDir(): string {

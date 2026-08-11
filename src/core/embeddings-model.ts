@@ -7,6 +7,7 @@
 import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 import { log } from './logger.js';
 import { EMBEDDING_DIM } from './constants.js';
+import { getModelCacheDir } from './paths.js';
 
 let embeddingPipeline: FeatureExtractionPipeline | null = null;
 let loadingPromise: Promise<FeatureExtractionPipeline> | null = null;
@@ -23,7 +24,7 @@ const MODEL_ID = 'Xenova/multilingual-e5-small';
 async function loadPipeline(): Promise<FeatureExtractionPipeline> {
   const { pipeline, env } = await import('@huggingface/transformers');
   log.info(`Loading embedding model ${MODEL_ID} (first run downloads ~150MB, may take 1-2 min)...`);
-  env.cacheDir = './.cache';
+  env.cacheDir = getModelCacheDir();
   const start = Date.now();
   const result = await pipeline(
     'feature-extraction',
