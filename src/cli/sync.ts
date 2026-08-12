@@ -161,13 +161,13 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
 
     const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
 
-    let deferred = false;
     let hadFailure = false;
     for (const span of spans) {
-      if (extractionBudget <= 0) {
-        deferred = true;
-        break;
-      }
+      // Deliberately not bailing out mid-file. There is no per-span cursor, so
+      // an abandoned file restarts at span 0 next sync and its later spans are
+      // never reached — real archives run to 149 spans, well past the budget.
+      // The budget instead bounds how many files a run *starts*; overshooting
+      // on the last one is bounded by that file's span count.
       extractionBudget--;
 
       try {
@@ -193,24 +193,16 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
     }
 
     // Only mark the file fully indexed when every span was processed without
-    // error. If the budget ran out partway through, or any span's extraction
-    // failed, leave the mtime marker unset so the next sync reconsiders this
-    // file (and re-runs already-processed spans through addMemories, whose
-    // md5 dedup makes that safe).
-    if (!deferred && !hadFailure) {
+    // error. If any span's extraction failed, leave the mtime marker unset so
+    // the next sync reconsiders this file (and re-runs already-processed spans
+    // through addMemories, whose md5 dedup makes that safe). Every file that
+    // gets here ran all of its spans, so partial progress is never recorded.
+    if (!hadFailure) {
       setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
       indexed++;
     }
     if (indexed % progressInterval === 0 || indexed === total) {
       log.info(`  ${indexed}/${total} indexed`);
-    }
-
-    if (deferred) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        processed: indexed,
-        remaining: total - indexed,
-      });
-      break;
     }
   }
 

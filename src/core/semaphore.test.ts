@@ -38,6 +38,15 @@ describe('Semaphore', () => {
     expect(results).toEqual([0, 1, 2]);
   });
 
+  test('treats a non-finite limit as 1 instead of deadlocking', async () => {
+    // NaN would make `available` NaN, and every `NaN > 0` check false, so
+    // acquire() would never resolve.
+    for (const bad of [NaN, Infinity, -Infinity, undefined as unknown as number]) {
+      const sem = new Semaphore(bad);
+      await expect(withSemaphore(sem, async () => 'ok')).resolves.toBe('ok');
+    }
+  });
+
   test('treats a non-positive limit as 1', async () => {
     const sem = new Semaphore(0);
     let active = 0;

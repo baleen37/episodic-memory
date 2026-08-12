@@ -235,6 +235,43 @@ describe('syncArchives', () => {
     expect(idle.filesIndexed).toBe(0);
   });
 
+  test('finishes a file whose span count exceeds the budget instead of restarting it forever', async () => {
+    // Regression: the budget used to break out mid-file. With no per-span
+    // cursor the file restarted at span 0 next sync, so any file with more
+    // spans than the budget never finished — real archives reach 149 spans.
+    const { claudeDir, codexDir, archiveDir } = setupDirs();
+    const projDir = join(claudeDir, 'projects', 'proj');
+    mkdirSync(projDir, { recursive: true });
+    const spanCount = EXTRACTION_BUDGET_PER_SYNC + 5;
+    const lines: string[] = [];
+    for (let i = 0; i < spanCount; i++) {
+      // A distinct sessionId per pair makes the adapter emit a separate span.
+      lines.push(JSON.stringify({
+        type: 'user', timestamp: '2026-05-26T00:00:00.000Z', sessionId: `s${i}`,
+        message: { role: 'user', content: `Q${i}` },
+      }));
+      lines.push(JSON.stringify({
+        type: 'assistant', timestamp: '2026-05-26T00:00:01.000Z', sessionId: `s${i}`,
+        message: { role: 'assistant', content: `A${i}` },
+      }));
+    }
+    writeFileSync(join(projDir, 'big.jsonl'), lines.join('\n'));
+    setupEnv(claudeDir, codexDir, archiveDir);
+    db = freshMemoryDb();
+    setGoodEmbeddingModel();
+    setFastRateLimits();
+    const provider = makeProvider();
+
+    const first = await syncArchives(db, { provider });
+    expect(first.failed).toBe(0);
+    expect(first.filesIndexed).toBe(1);
+
+    // Fully indexed on the first pass, so a re-sync has nothing to do.
+    const second = await syncArchives(db, { provider });
+    expect(second.filesIndexed).toBe(0);
+    expect(second.skipped).toBe(1);
+  });
+
   test('continues past a span whose extraction fails, storing memories from the spans that succeed', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const projDir = join(claudeDir, 'projects', 'proj');

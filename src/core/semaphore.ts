@@ -11,7 +11,10 @@ export class Semaphore {
   private readonly waiters: Array<() => void> = [];
 
   constructor(maxConcurrent: number) {
-    this.available = Math.max(1, Math.floor(maxConcurrent));
+    // A non-finite limit would make `available` NaN, and every `NaN > 0` check
+    // false, so acquire() would wait forever. Fall back to serial instead.
+    const floored = Math.floor(maxConcurrent);
+    this.available = Number.isFinite(floored) ? Math.max(1, floored) : 1;
   }
 
   acquire(): Promise<void> {

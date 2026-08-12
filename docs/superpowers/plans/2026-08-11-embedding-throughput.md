@@ -968,11 +968,21 @@ In `src/cli/sync.ts`, replace lines 18-25 with:
  * Sized against LLM latency alone. Embedding used to dominate this budget (a
  * 0.5rps rate limiter cost ~2s per extracted fact); it is now a concurrency-
  * capped batch call measured at 65ms for 10 facts, so it no longer factors in.
- * Observed LLM latency is ~8-35s per span, so 60 keeps a single sync near the
- * same ~10 minute lock-hold ceiling the previous value of 20 targeted.
+ *
+ * Measured LLM latency over a real sync run: mean 53s per span, max 85s. At that
+ * rate 12 spans is ~10 minutes, which is the lock-hold ceiling the previous
+ * value of 20 was also aiming for (it just mis-estimated the per-span cost at
+ * 25s). Raising this further does not help throughput — it only holds the lock
+ * longer and makes concurrent syncs skip.
  */
-export const EXTRACTION_BUDGET_PER_SYNC = 60;
+export const EXTRACTION_BUDGET_PER_SYNC = 12;
 ```
+
+**Note (written during implementation):** this step originally prescribed **60**, based on an
+estimate of 8-35 s per span. Measurement contradicted it — mean 53.1 s, max 85.2 s — which puts
+60 spans at ~53 min of lock hold. A day's log also showed 43 sync runs against 277
+"sync already running; skipping" events (6:1), so a longer hold worsens the backlog it was meant
+to fix. Implemented as **12**.
 
 - [ ] **Step 3: Run the suite**
 
@@ -983,11 +993,13 @@ Expected: PASS
 
 ```bash
 git add src/cli/sync.ts src/cli/sync.test.ts
-git commit -m "perf(sync): raise extraction budget to 60
+git commit -m "perf(sync): re-derive extraction budget from measured LLM latency
 
 The old value of 20 was derived from rate-limited embedding throughput.
-With embedding batched and the rate limiter gone, LLM latency is the only
-bound. The backlog grew 1892 -> 7214 in one day under 20."
+Embedding is no longer part of that cost, but the LLM half was also
+mis-measured: a real sync run shows mean 53s per span, max 85s. Today's
+log shows sync ran 43 times but was blocked by the lock 277 times, so a
+longer hold makes the backlog worse. 12 spans is ~10 min."
 ```
 
 ---

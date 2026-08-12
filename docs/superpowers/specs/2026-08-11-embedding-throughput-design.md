@@ -193,16 +193,23 @@ Add a batch path so N facts cost one model call rather than N.
 
 `add.ts:97`'s single `embedQuery` stays single — it is one call per span by nature.
 
-### 4. Raise `EXTRACTION_BUDGET_PER_SYNC`
+### 4. Re-derive `EXTRACTION_BUDGET_PER_SYNC`
 
 The budget's stated basis ("~25s/record") no longer holds once the rate limiter is gone; the
-remaining per-record cost is LLM latency (measured 8–35 s per span, provider-bound). The budget
-exists to bound lock hold time, which is still a valid concern, so it stays a budget — it is
-only re-derived.
+remaining per-record cost is LLM latency, provider-bound. The budget exists to bound lock hold
+time, which is still a valid concern, so it stays a budget — it is only re-derived.
 
-Raise it from 20 to **60**, and update the comment to state the new basis: embedding is no
-longer a factor, so the bound is LLM latency alone (~10 s median per span observed today), and
-60 spans keeps a sync near the same ~10 minute lock-hold ceiling the original value targeted.
+**Superseded during implementation.** This section originally prescribed raising 20 to **60**,
+on an estimate of 8–35 s per span. A real sync run measured **mean 53.1 s per span, max 85.2 s**,
+which puts 60 spans at ~53 minutes of lock hold, not ~10. Worse, a day's production log shows
+sync ran 43 times but hit "sync already running; skipping" **277 times** — a 6:1 skip ratio. The
+system is skip-dominated, so lengthening each hold reduces how many sync triggers find an idle
+lock, which is the opposite of the backlog goal cited here.
+
+Implemented value: **12** (~10 minutes at measured latency), down from 20. Backlog throughput is
+bound by provider latency; this constant cannot fix it. A wall-clock bound would adapt better to
+the 8–85 s spread than any fixed count, but that is a new stopping condition rather than a
+constant swap — left as follow-up.
 
 This tightens the loop with change 1: because embedding failures now withhold the mtime marker,
 a systematically broken embedder makes syncs re-process files instead of advancing. That is the

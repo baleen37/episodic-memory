@@ -1196,6 +1196,18 @@ class RateLimiter {
     }
   }
 }
+function getEmbeddingRateLimiter() {
+  if (!embeddingLimiter) {
+    const config = loadConfigFn();
+    const ratelimitConfig = config?.ratelimit?.embedding;
+    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    embeddingLimiter = new RateLimiter({
+      requestsPerSecond: rps,
+      burstSize: ratelimitConfig?.burstSize ?? 1
+    });
+  }
+  return embeddingLimiter;
+}
 function getLLMRateLimiter() {
   if (!llmLimiter) {
     const config = loadConfigFn();
@@ -1208,7 +1220,7 @@ function getLLMRateLimiter() {
   }
   return llmLimiter;
 }
-var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, DEFAULT_LLM_RPS = 0.5, llmLimiter = null;
+var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, DEFAULT_LLM_RPS = 0.5, embeddingLimiter = null, llmLimiter = null;
 var init_ratelimiter = __esm(() => {
   init_config();
   loadConfigFn = loadConfig;
@@ -1958,7 +1970,8 @@ class Semaphore {
   available;
   waiters = [];
   constructor(maxConcurrent) {
-    this.available = Math.max(1, Math.floor(maxConcurrent));
+    const floored = Math.floor(maxConcurrent);
+    this.available = Number.isFinite(floored) ? Math.max(1, floored) : 1;
   }
   acquire() {
     if (this.available > 0) {
@@ -1989,6 +2002,7 @@ async function withSemaphore(sem, fn) {
 
 // src/core/embeddings.ts
 init_config();
+init_ratelimiter();
 
 class EmbeddingError extends Error {
   constructor(message) {
@@ -2003,9 +2017,13 @@ var semaphore = null;
 function getSemaphore() {
   if (!semaphore) {
     const configured = loadConfigFn2()?.embedding?.maxConcurrency;
-    semaphore = new Semaphore(configured ?? DEFAULT_EMBEDDING_MAX_CONCURRENCY);
+    const cap = typeof configured === "number" && Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_EMBEDDING_MAX_CONCURRENCY;
+    semaphore = new Semaphore(cap);
   }
   return semaphore;
+}
+function hasExplicitEmbeddingRateLimit() {
+  return loadConfigFn2()?.ratelimit?.embedding !== undefined;
 }
 function isEmbeddingsDisabled() {
   return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
@@ -2019,6 +2037,8 @@ async function embedPassageBatch(texts) {
   if (texts.length === 0)
     return [];
   return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
     let vectors;
     try {
       vectors = await generateBatchFn("passage", texts);
@@ -2035,6 +2055,8 @@ async function run(kind, text) {
   if (isEmbeddingsDisabled())
     return null;
   return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
     let vector;
     try {
       vector = await generateFn(kind, text);
@@ -3599,13 +3621,8 @@ async function syncArchives(db, options = {}) {
       continue;
     }
     const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
-    let deferred = false;
     let hadFailure = false;
     for (const span of spans) {
-      if (extractionBudget <= 0) {
-        deferred = true;
-        break;
-      }
       extractionBudget--;
       try {
         const result = await addMemories({
@@ -3628,19 +3645,12 @@ async function syncArchives(db, options = {}) {
         });
       }
     }
-    if (!deferred && !hadFailure) {
+    if (!hadFailure) {
       setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
       indexed++;
     }
     if (indexed % progressInterval === 0 || indexed === total) {
       log.info(`  ${indexed}/${total} indexed`);
-    }
-    if (deferred) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        processed: indexed,
-        remaining: total - indexed
-      });
-      break;
     }
   }
   stats.filesIndexed = indexed;

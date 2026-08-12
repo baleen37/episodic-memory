@@ -6700,6 +6700,91 @@ var init_config = __esm(() => {
   };
 });
 
+// src/core/ratelimiter.ts
+class RateLimiter {
+  tokens;
+  maxTokens;
+  refillRate;
+  lastRefill;
+  queue = [];
+  constructor(config2 = {}) {
+    const rps = config2.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    this.maxTokens = config2.burstSize ?? 1;
+    this.tokens = this.maxTokens;
+    this.refillRate = rps / 1000;
+    this.lastRefill = Date.now();
+  }
+  refill() {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    if (elapsed > 0) {
+      const newTokens = elapsed * this.refillRate;
+      this.tokens = Math.min(this.maxTokens, this.tokens + newTokens);
+      this.lastRefill = now;
+    }
+  }
+  acquire() {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.scheduleQueueProcessing();
+    });
+  }
+  scheduleQueueProcessing() {
+    const tokensNeeded = 1 - this.tokens;
+    const waitMs = Math.ceil(tokensNeeded / this.refillRate);
+    setTimeout(() => {
+      this.processQueue();
+    }, waitMs);
+  }
+  tryAcquire() {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+  getAvailableTokens() {
+    this.refill();
+    return Math.floor(this.tokens);
+  }
+  processQueue() {
+    this.refill();
+    while (this.queue.length > 0 && this.tokens >= 1) {
+      const next = this.queue.shift();
+      if (next) {
+        this.tokens -= 1;
+        next();
+      }
+    }
+    if (this.queue.length > 0) {
+      this.scheduleQueueProcessing();
+    }
+  }
+}
+function getEmbeddingRateLimiter() {
+  if (!embeddingLimiter) {
+    const config2 = loadConfigFn();
+    const ratelimitConfig = config2?.ratelimit?.embedding;
+    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    embeddingLimiter = new RateLimiter({
+      requestsPerSecond: rps,
+      burstSize: ratelimitConfig?.burstSize ?? 1
+    });
+  }
+  return embeddingLimiter;
+}
+var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, embeddingLimiter = null;
+var init_ratelimiter = __esm(() => {
+  init_config();
+  loadConfigFn = loadConfig;
+});
+
 // node_modules/@google/generative-ai/dist/index.mjs
 var SchemaType, ExecutableCodeLanguage, Outcome, HarmCategory, HarmBlockThreshold, HarmProbability, BlockReason, FinishReason, TaskType, FunctionCallingMode, DynamicRetrievalMode, Task, badFinishReasons;
 var init_dist = __esm(() => {
@@ -6791,11 +6876,6 @@ var init_dist = __esm(() => {
     FinishReason.SAFETY,
     FinishReason.LANGUAGE
   ];
-});
-
-// src/core/ratelimiter.ts
-var init_ratelimiter = __esm(() => {
-  init_config();
 });
 
 // src/core/llm/gemini-provider.ts
@@ -16885,7 +16965,8 @@ class Semaphore {
   available;
   waiters = [];
   constructor(maxConcurrent) {
-    this.available = Math.max(1, Math.floor(maxConcurrent));
+    const floored = Math.floor(maxConcurrent);
+    this.available = Number.isFinite(floored) ? Math.max(1, floored) : 1;
   }
   acquire() {
     if (this.available > 0) {
@@ -16916,6 +16997,7 @@ async function withSemaphore(sem, fn) {
 
 // src/core/embeddings.ts
 init_config();
+init_ratelimiter();
 
 class EmbeddingError extends Error {
   constructor(message) {
@@ -16924,14 +17006,18 @@ class EmbeddingError extends Error {
   }
 }
 var generateFn = generateEmbeddingFromModel;
-var loadConfigFn = loadConfig;
+var loadConfigFn2 = loadConfig;
 var semaphore = null;
 function getSemaphore() {
   if (!semaphore) {
-    const configured = loadConfigFn()?.embedding?.maxConcurrency;
-    semaphore = new Semaphore(configured ?? DEFAULT_EMBEDDING_MAX_CONCURRENCY);
+    const configured = loadConfigFn2()?.embedding?.maxConcurrency;
+    const cap = typeof configured === "number" && Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_EMBEDDING_MAX_CONCURRENCY;
+    semaphore = new Semaphore(cap);
   }
   return semaphore;
+}
+function hasExplicitEmbeddingRateLimit() {
+  return loadConfigFn2()?.ratelimit?.embedding !== undefined;
 }
 function isEmbeddingsDisabled() {
   return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
@@ -16943,6 +17029,8 @@ async function run(kind, text) {
   if (isEmbeddingsDisabled())
     return null;
   return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
     let vector;
     try {
       vector = await generateFn(kind, text);

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { EMBEDDING_DIM } from './constants.js';
+import { resetRateLimiters } from './ratelimiter.js';
 import {
   __setModelForTests,
   __setBatchModelForTests,
@@ -190,5 +191,45 @@ describe('embedPassageBatch()', () => {
     process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
     expect(await embedPassageBatch(['a'])).toEqual([]);
     expect(calls).toBe(0);
+  });
+
+  test('applies an explicitly configured ratelimit.embedding, but not by default', async () => {
+    // The rps limiter is wrong for a local CPU model so it is off by default,
+    // but a deliberately configured limit must still be honored.
+    // 2rps/burst-1: the second call must wait ~500ms for a token.
+    resetRateLimiters();
+    __setEmbeddingConfigForTests(() => ({
+      provider: 'gemini',
+      apiKey: 'test',
+      ratelimit: { embedding: { requestsPerSecond: 2, burstSize: 1 } },
+    }) as any);
+    let t = Date.now();
+    await embedPassageBatch(['a']);
+    await embedPassageBatch(['b']);
+    const withLimiter = Date.now() - t;
+    expect(withLimiter).toBeGreaterThan(300);
+
+    // Without the key, no limiter is consulted, so the same two calls are fast.
+    resetRateLimiters();
+    __setEmbeddingConfigForTests(() => ({ provider: 'gemini', apiKey: 'test' }) as any);
+    t = Date.now();
+    await embedPassageBatch(['c']);
+    await embedPassageBatch(['d']);
+    expect(Date.now() - t).toBeLessThan(200);
+
+    expect(calls).toBe(4);
+  });
+
+  test('falls back to the default cap when maxConcurrency is not a usable number', async () => {
+    // config.json is untrusted: a string or NaN once made Semaphore.available
+    // NaN, so acquire() waited forever and embedding hung.
+    for (const bad of ['4', NaN, 0, -1, null]) {
+      __setEmbeddingConfigForTests(() => ({
+        provider: 'gemini',
+        apiKey: 'test',
+        embedding: { maxConcurrency: bad },
+      }) as any);
+      expect(await embedPassageBatch(['a'])).toHaveLength(1);
+    }
   });
 });

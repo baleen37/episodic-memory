@@ -10,6 +10,7 @@ import {
 import { log } from './logger.js';
 import { Semaphore, withSemaphore } from './semaphore.js';
 import { loadConfig, DEFAULT_EMBEDDING_MAX_CONCURRENCY } from './llm/config.js';
+import { getEmbeddingRateLimiter } from './ratelimiter.js';
 
 type EmbeddingKind = 'passage' | 'query';
 type GenerateFn = (kind: EmbeddingKind, text: string) => Promise<number[] | null>;
@@ -60,10 +61,26 @@ let semaphore: Semaphore | null = null;
 
 function getSemaphore(): Semaphore {
   if (!semaphore) {
+    // config.json is untrusted input: a non-numeric maxConcurrency must fall
+    // back to the default rather than silently degrading to serial embedding.
     const configured = loadConfigFn()?.embedding?.maxConcurrency;
-    semaphore = new Semaphore(configured ?? DEFAULT_EMBEDDING_MAX_CONCURRENCY);
+    const cap = typeof configured === 'number' && Number.isFinite(configured) && configured >= 1
+      ? configured
+      : DEFAULT_EMBEDDING_MAX_CONCURRENCY;
+    semaphore = new Semaphore(cap);
   }
   return semaphore;
+}
+
+/**
+ * True when the user explicitly configured `ratelimit.embedding`.
+ *
+ * The rps limiter is the wrong instrument for an in-process CPU model, so it is
+ * no longer applied by default. But someone who deliberately set a limit — to
+ * keep a shared machine responsive, say — should not silently lose it.
+ */
+function hasExplicitEmbeddingRateLimit(): boolean {
+  return loadConfigFn()?.ratelimit?.embedding !== undefined;
 }
 
 /** Drop the cached semaphore so a new config takes effect (tests). */
@@ -101,6 +118,7 @@ export async function embedPassageBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
 
   return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit()) await getEmbeddingRateLimiter().acquire();
     let vectors: number[][];
     try {
       vectors = await generateBatchFn('passage', texts);
@@ -120,6 +138,7 @@ async function run(kind: EmbeddingKind, text: string): Promise<number[] | null> 
   if (isEmbeddingsDisabled()) return null;
 
   return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit()) await getEmbeddingRateLimiter().acquire();
     let vector: number[] | null;
     try {
       vector = await generateFn(kind, text);
