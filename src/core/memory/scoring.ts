@@ -42,6 +42,19 @@ export function lemmatizeForBm25(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/**
+ * FTS5 joins bare space-separated terms with an implicit AND, which makes any
+ * multi-word query match only documents containing every term. OR-combine the
+ * terms so partial matches still contribute BM25. Terms are quoted so FTS5
+ * operators (AND/OR/NOT/NEAR) and punctuation in the query are treated as
+ * literals rather than syntax; embedded quotes are doubled to escape them.
+ */
+export function buildFtsMatchQuery(lemmatized: string): string {
+  const terms = lemmatized.split(' ').filter(Boolean);
+  if (terms.length === 0) return '';
+  return terms.map(t => `"${t.replace(/"/g, '""')}"`).join(' OR ');
+}
+
 /** scoring.py:16-40 — longer queries score higher raw, so shift the sigmoid. */
 export function getBm25Params(query: string, lemmatized?: string): [number, number] {
   const lemma = lemmatized ?? lemmatizeForBm25(query);

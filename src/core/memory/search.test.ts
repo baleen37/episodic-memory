@@ -104,6 +104,26 @@ describe('searchMemories', () => {
     expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
   });
 
+  test('BM25 still scores when only some query terms match', async () => {
+    // FTS5 joins bare space-separated terms with an implicit AND, so a
+    // multi-word query used to match nothing unless one document contained
+    // every term. Terms are OR-combined so partial matches still score.
+    seed();
+    const filler = Array.from({ length: 200 }, (_, i) => ({
+      id: `f${i}`,
+      memory: `Filler record ${i} about servers and deployments`,
+      metadata: { user_id: 'alice' },
+      embedding: vec(3.0),
+    }));
+    insertMemories(db, filler);
+
+    const { results } = await searchMemories({
+      db, query: 'pottery zzzznomatch', filters: { user_id: 'alice' }, explain: true,
+    });
+    expect(results[0].id).toBe('m2');
+    expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
+  });
+
   test('degrades to semantic-only when no keyword matches', async () => {
     // A query term absent from every document yields no BM25 rows at all, so
     // the divisor stays 1.0. (Note: a *small* corpus does NOT zero out BM25 —
