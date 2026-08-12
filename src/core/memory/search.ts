@@ -3,7 +3,7 @@ import { EmbeddingError, embedQuery } from '../embeddings.js';
 import { log } from '../logger.js';
 import { assertScoped, buildFilterSql, type Filters } from './filters.js';
 import {
-  getBm25Params, lemmatizeForBm25, normalizeBm25, scoreAndRank,
+  buildFtsMatchQuery, getBm25Params, lemmatizeForBm25, normalizeBm25, scoreAndRank,
   type Candidate, type ScoreDetails,
 } from './scoring.js';
 
@@ -111,7 +111,7 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
         SELECT rowid, bm25(fts_memories) AS raw
         FROM fts_memories WHERE fts_memories MATCH ?
         ORDER BY raw LIMIT ?
-      `).all(queryLemmatized, internalLimit) as Array<{ rowid: number; raw: number }>;
+      `).all(buildFtsMatchQuery(queryLemmatized), internalLimit) as Array<{ rowid: number; raw: number }>;
 
       for (const row of keywordRows) {
         const semantic = byRowid.get(row.rowid);

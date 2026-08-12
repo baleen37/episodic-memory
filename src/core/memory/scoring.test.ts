@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ENTITY_BOOST_WEIGHT, getBm25Params, normalizeBm25, lemmatizeForBm25, scoreAndRank } from './scoring.js';
+import { ENTITY_BOOST_WEIGHT, buildFtsMatchQuery, getBm25Params, normalizeBm25, lemmatizeForBm25, scoreAndRank } from './scoring.js';
 
 describe('getBm25Params', () => {
   test('buckets by lemmatized term count', () => {
@@ -30,6 +30,28 @@ describe('normalizeBm25', () => {
 describe('lemmatizeForBm25', () => {
   test('lowercases and collapses whitespace', () => {
     expect(lemmatizeForBm25('  Search   QUALITY ')).toBe('search quality');
+  });
+});
+
+describe('buildFtsMatchQuery', () => {
+  test('OR-combines terms so partial matches still score', () => {
+    expect(buildFtsMatchQuery('embedding batch sync')).toBe('"embedding" OR "batch" OR "sync"');
+  });
+
+  test('quotes a single term', () => {
+    expect(buildFtsMatchQuery('embedding')).toBe('"embedding"');
+  });
+
+  test('returns empty for an empty query', () => {
+    expect(buildFtsMatchQuery('')).toBe('');
+  });
+
+  test('treats FTS5 operators as literals', () => {
+    expect(buildFtsMatchQuery('cats and dogs')).toBe('"cats" OR "and" OR "dogs"');
+  });
+
+  test('escapes embedded quotes', () => {
+    expect(buildFtsMatchQuery('say "hi"')).toBe('"say" OR """hi"""');
   });
 });
 
