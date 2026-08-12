@@ -6,7 +6,7 @@ import { createMemorySchema } from './schema.js';
 import { addMemories } from './add.js';
 import { LLMError } from './extract.js';
 import { md5 } from './store.js';
-import { __setModelForTests } from '../embeddings.js';
+import { EmbeddingError, __setModelForTests, __setBatchModelForTests } from '../embeddings.js';
 import { resetRateLimiters, __setLoadConfigForTests } from '../ratelimiter.js';
 import type { LLMProvider } from '../llm/types.js';
 
@@ -21,6 +21,7 @@ beforeEach(() => {
   createMemorySchema(db);
   prompts = [];
   __setModelForTests(async () => {}, async () => EMB());
+  __setBatchModelForTests(async (_kind, texts) => texts.map(() => EMB()));
   __setLoadConfigForTests(() => ({
     ratelimit: { embedding: { requestsPerSecond: 100, burstSize: 100 } },
   }) as any);
@@ -28,6 +29,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   __setModelForTests(null, null);
+  __setBatchModelForTests(null);
   __setLoadConfigForTests(null);
   resetRateLimiters();
 });
@@ -45,6 +47,14 @@ const twoMemories = JSON.stringify({
   ],
 });
 
+const threeMemories = JSON.stringify({
+  memory: [
+    { id: '0', text: 'User adopted a beagle puppy named Max', attributed_to: 'user' },
+    { id: '1', text: 'User started pottery classes on Tuesdays', attributed_to: 'user' },
+    { id: '2', text: 'User prefers oat milk in coffee', attributed_to: 'user' },
+  ],
+});
+
 const base = {
   messages: [{ role: 'user' as const, content: 'I adopted a puppy and started pottery' }],
   filters: { user_id: 'alice' },
@@ -52,6 +62,23 @@ const base = {
 };
 
 describe('addMemories', () => {
+  test('rejects when embedding fails, so sync can retry the span', async () => {
+    __setBatchModelForTests(async () => { throw new Error('model down'); });
+    await expect(addMemories({ db, provider: provider(twoMemories), ...base }))
+      .rejects.toThrow(EmbeddingError);
+  });
+
+  test('embeds all extracted facts in one batch call', async () => {
+    let calls = 0;
+    __setBatchModelForTests(async (_kind, texts) => {
+      calls++;
+      return texts.map(() => EMB());
+    });
+    const out = await addMemories({ db, provider: provider(threeMemories), ...base });
+    expect(out.results).toHaveLength(3);
+    expect(calls).toBe(1);
+  });
+
   test('persists every extracted memory as an ADD', async () => {
     const out = await addMemories({ db, provider: provider(twoMemories), ...base });
     expect(out.results).toHaveLength(2);

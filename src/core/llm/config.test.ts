@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { loadConfig, createProvider, __setConfigFileDepsForTests, type LLMConfig } from './config.js';
+import { loadConfig, createProvider, __setConfigFileDepsForTests, DEFAULT_EMBEDDING_MAX_CONCURRENCY, type LLMConfig } from './config.js';
 
 // File-dependency stubs (per-test controlled)
 let mockExistsSyncReturnValue = false;
@@ -319,5 +319,35 @@ describe('createProvider', () => {
 
       await expect(createProvider(config)).rejects.toThrow('requires an apiKey');
     });
+  });
+});
+
+describe('embedding config', () => {
+  afterEach(() => {
+    __setConfigFileDepsForTests(null);
+  });
+
+  it('reads embedding.maxConcurrency from the config file', () => {
+    __setConfigFileDepsForTests({
+      existsSync: () => true,
+      readFileSync: (() => JSON.stringify({
+        provider: 'gemini',
+        apiKey: 'k',
+        embedding: { maxConcurrency: 7 },
+      })) as never,
+    });
+    expect(loadConfig()?.embedding?.maxConcurrency).toBe(7);
+  });
+
+  it('leaves embedding undefined when the config omits it', () => {
+    __setConfigFileDepsForTests({
+      existsSync: () => true,
+      readFileSync: (() => JSON.stringify({ provider: 'gemini', apiKey: 'k' })) as never,
+    });
+    expect(loadConfig()?.embedding).toBeUndefined();
+  });
+
+  it('DEFAULT_EMBEDDING_MAX_CONCURRENCY is 4', () => {
+    expect(DEFAULT_EMBEDDING_MAX_CONCURRENCY).toBe(4);
   });
 });

@@ -6692,7 +6692,7 @@ function loadConfig() {
     return null;
   }
 }
-var configFileDeps;
+var DEFAULT_EMBEDDING_MAX_CONCURRENCY = 4, configFileDeps;
 var init_config = __esm(() => {
   configFileDeps = {
     existsSync,
@@ -16960,10 +16960,65 @@ async function generateEmbeddingFromModel(kind, text) {
   return Array.from(output.data);
 }
 
+// src/core/semaphore.ts
+class Semaphore {
+  available;
+  waiters = [];
+  constructor(maxConcurrent) {
+    const floored = Math.floor(maxConcurrent);
+    this.available = Number.isFinite(floored) ? Math.max(1, floored) : 1;
+  }
+  acquire() {
+    if (this.available > 0) {
+      this.available -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+  release() {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+      return;
+    }
+    this.available += 1;
+  }
+}
+async function withSemaphore(sem, fn) {
+  await sem.acquire();
+  try {
+    return await fn();
+  } finally {
+    sem.release();
+  }
+}
+
 // src/core/embeddings.ts
-init_logger();
+init_config();
 init_ratelimiter();
+
+class EmbeddingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "EmbeddingError";
+  }
+}
 var generateFn = generateEmbeddingFromModel;
+var loadConfigFn2 = loadConfig;
+var semaphore = null;
+function getSemaphore() {
+  if (!semaphore) {
+    const configured = loadConfigFn2()?.embedding?.maxConcurrency;
+    const cap = typeof configured === "number" && Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_EMBEDDING_MAX_CONCURRENCY;
+    semaphore = new Semaphore(cap);
+  }
+  return semaphore;
+}
+function hasExplicitEmbeddingRateLimit() {
+  return loadConfigFn2()?.ratelimit?.embedding !== undefined;
+}
 function isEmbeddingsDisabled() {
   return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
 }
@@ -16973,14 +17028,24 @@ async function embedQuery(text) {
 async function run(kind, text) {
   if (isEmbeddingsDisabled())
     return null;
-  try {
-    await getEmbeddingRateLimiter().acquire();
-    return await generateFn(kind, text);
-  } catch (err) {
-    log.warn(`embedding failed (${kind})`, { error: err.message });
-    return null;
-  }
+  return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
+    let vector;
+    try {
+      vector = await generateFn(kind, text);
+    } catch (err) {
+      throw new EmbeddingError(`embedding failed (${kind}): ${err.message}`);
+    }
+    if (!vector) {
+      throw new EmbeddingError(`embedding failed (${kind}): model returned no vector`);
+    }
+    return vector;
+  });
 }
+
+// src/core/memory/search.ts
+init_logger();
 
 // src/core/memory/filters.ts
 var SCOPING_KEYS = ["user_id", "agent_id", "run_id"];
@@ -17183,7 +17248,15 @@ async function searchMemories(args) {
   validateThreshold(threshold);
   assertScoped(filters);
   const queryLemmatized = lemmatizeForBm25(query);
-  const embedding = await embedQuery(query);
+  let embedding;
+  try {
+    embedding = await embedQuery(query);
+  } catch (err) {
+    if (!(err instanceof EmbeddingError))
+      throw err;
+    log.warn("search embedding failed; returning no results", { error: err.message });
+    return { results: [] };
+  }
   if (!embedding)
     return { results: [] };
   const internalLimit = Math.max(limit * 4, 60);

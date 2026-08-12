@@ -44,6 +44,49 @@ export async function initModel(): Promise<void> {
   embeddingPipeline = await loadingPromise;
 }
 
+/**
+ * Splits a batched feature-extraction tensor into one vector per input.
+ *
+ * transformers.js returns `dims = [rows, EMBEDDING_DIM]` with contiguous rows
+ * in input order, so the flat buffer slices evenly.
+ */
+export function sliceBatchOutput(data: ArrayLike<number>, rows: number): number[][] {
+  if (rows === 0) return [];
+  const expected = rows * EMBEDDING_DIM;
+  if (data.length !== expected) {
+    throw new Error(
+      `batch embedding size mismatch: expected ${rows} texts worth of floats (${expected}), got ${data.length}`,
+    );
+  }
+  const out: number[][] = [];
+  for (let r = 0; r < rows; r++) {
+    const start = r * EMBEDDING_DIM;
+    out.push(Array.from(Array.prototype.slice.call(data, start, start + EMBEDDING_DIM)));
+  }
+  return out;
+}
+
+/** Embed several texts in a single forward pass. */
+export async function generateEmbeddingsFromModel(
+  kind: 'passage' | 'query',
+  texts: string[],
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  if (!embeddingPipeline) {
+    await initModel();
+  }
+  if (!embeddingPipeline) return [];
+
+  const inputs = texts.map(t => PREFIX[kind] + t.substring(0, MAX_CONTENT_CHARS));
+
+  const output = await embeddingPipeline!(inputs, {
+    pooling: 'mean',
+    normalize: true,
+  });
+
+  return sliceBatchOutput(output.data, texts.length);
+}
+
 export async function generateEmbeddingFromModel(
   kind: 'passage' | 'query',
   text: string,

@@ -1129,6 +1129,103 @@ var init_dist = __esm(() => {
   };
 });
 
+// src/core/ratelimiter.ts
+class RateLimiter {
+  tokens;
+  maxTokens;
+  refillRate;
+  lastRefill;
+  queue = [];
+  constructor(config = {}) {
+    const rps = config.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    this.maxTokens = config.burstSize ?? 1;
+    this.tokens = this.maxTokens;
+    this.refillRate = rps / 1000;
+    this.lastRefill = Date.now();
+  }
+  refill() {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    if (elapsed > 0) {
+      const newTokens = elapsed * this.refillRate;
+      this.tokens = Math.min(this.maxTokens, this.tokens + newTokens);
+      this.lastRefill = now;
+    }
+  }
+  acquire() {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.queue.push(resolve);
+      this.scheduleQueueProcessing();
+    });
+  }
+  scheduleQueueProcessing() {
+    const tokensNeeded = 1 - this.tokens;
+    const waitMs = Math.ceil(tokensNeeded / this.refillRate);
+    setTimeout(() => {
+      this.processQueue();
+    }, waitMs);
+  }
+  tryAcquire() {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+  getAvailableTokens() {
+    this.refill();
+    return Math.floor(this.tokens);
+  }
+  processQueue() {
+    this.refill();
+    while (this.queue.length > 0 && this.tokens >= 1) {
+      const next = this.queue.shift();
+      if (next) {
+        this.tokens -= 1;
+        next();
+      }
+    }
+    if (this.queue.length > 0) {
+      this.scheduleQueueProcessing();
+    }
+  }
+}
+function getEmbeddingRateLimiter() {
+  if (!embeddingLimiter) {
+    const config = loadConfigFn();
+    const ratelimitConfig = config?.ratelimit?.embedding;
+    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
+    embeddingLimiter = new RateLimiter({
+      requestsPerSecond: rps,
+      burstSize: ratelimitConfig?.burstSize ?? 1
+    });
+  }
+  return embeddingLimiter;
+}
+function getLLMRateLimiter() {
+  if (!llmLimiter) {
+    const config = loadConfigFn();
+    const ratelimitConfig = config?.ratelimit?.llm;
+    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
+    llmLimiter = new RateLimiter({
+      requestsPerSecond: rps,
+      burstSize: ratelimitConfig?.burstSize ?? 1
+    });
+  }
+  return llmLimiter;
+}
+var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, DEFAULT_LLM_RPS = 0.5, embeddingLimiter = null, llmLimiter = null;
+var init_ratelimiter = __esm(() => {
+  init_config();
+  loadConfigFn = loadConfig;
+});
+
 // src/core/llm/gemini-provider.ts
 var exports_gemini_provider = {};
 __export(exports_gemini_provider, {
@@ -1370,7 +1467,7 @@ async function createProvider(config) {
   }
   throw new Error(`Unknown provider: ${provider}`);
 }
-var DEFAULT_MODELS, configFileDeps;
+var DEFAULT_MODELS, DEFAULT_EMBEDDING_MAX_CONCURRENCY = 4, configFileDeps;
 var init_config = __esm(() => {
   DEFAULT_MODELS = {
     gemini: "gemini-2.0-flash",
@@ -1380,103 +1477,6 @@ var init_config = __esm(() => {
     existsSync: existsSync4,
     readFileSync
   };
-});
-
-// src/core/ratelimiter.ts
-class RateLimiter {
-  tokens;
-  maxTokens;
-  refillRate;
-  lastRefill;
-  queue = [];
-  constructor(config = {}) {
-    const rps = config.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
-    this.maxTokens = config.burstSize ?? 1;
-    this.tokens = this.maxTokens;
-    this.refillRate = rps / 1000;
-    this.lastRefill = Date.now();
-  }
-  refill() {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
-    if (elapsed > 0) {
-      const newTokens = elapsed * this.refillRate;
-      this.tokens = Math.min(this.maxTokens, this.tokens + newTokens);
-      this.lastRefill = now;
-    }
-  }
-  acquire() {
-    this.refill();
-    if (this.tokens >= 1) {
-      this.tokens -= 1;
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      this.queue.push(resolve);
-      this.scheduleQueueProcessing();
-    });
-  }
-  scheduleQueueProcessing() {
-    const tokensNeeded = 1 - this.tokens;
-    const waitMs = Math.ceil(tokensNeeded / this.refillRate);
-    setTimeout(() => {
-      this.processQueue();
-    }, waitMs);
-  }
-  tryAcquire() {
-    this.refill();
-    if (this.tokens >= 1) {
-      this.tokens -= 1;
-      return true;
-    }
-    return false;
-  }
-  getAvailableTokens() {
-    this.refill();
-    return Math.floor(this.tokens);
-  }
-  processQueue() {
-    this.refill();
-    while (this.queue.length > 0 && this.tokens >= 1) {
-      const next = this.queue.shift();
-      if (next) {
-        this.tokens -= 1;
-        next();
-      }
-    }
-    if (this.queue.length > 0) {
-      this.scheduleQueueProcessing();
-    }
-  }
-}
-function getEmbeddingRateLimiter() {
-  if (!embeddingLimiter) {
-    const config = loadConfigFn();
-    const ratelimitConfig = config?.ratelimit?.embedding;
-    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_EMBEDDING_RPS;
-    embeddingLimiter = new RateLimiter({
-      requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? 1
-    });
-  }
-  return embeddingLimiter;
-}
-function getLLMRateLimiter() {
-  if (!llmLimiter) {
-    const config = loadConfigFn();
-    const ratelimitConfig = config?.ratelimit?.llm;
-    const rps = ratelimitConfig?.requestsPerSecond ?? DEFAULT_LLM_RPS;
-    llmLimiter = new RateLimiter({
-      requestsPerSecond: rps,
-      burstSize: ratelimitConfig?.burstSize ?? 1
-    });
-  }
-  return llmLimiter;
-}
-var loadConfigFn, DEFAULT_EMBEDDING_RPS = 0.5, DEFAULT_LLM_RPS = 0.5, embeddingLimiter = null, llmLimiter = null;
-var init_ratelimiter = __esm(() => {
-  init_config();
-  loadConfigFn = loadConfig;
 });
 
 // src/cli/doctor.ts
@@ -1921,6 +1921,35 @@ async function initModel() {
   }
   embeddingPipeline = await loadingPromise;
 }
+function sliceBatchOutput(data, rows) {
+  if (rows === 0)
+    return [];
+  const expected = rows * EMBEDDING_DIM;
+  if (data.length !== expected) {
+    throw new Error(`batch embedding size mismatch: expected ${rows} texts worth of floats (${expected}), got ${data.length}`);
+  }
+  const out = [];
+  for (let r = 0;r < rows; r++) {
+    const start = r * EMBEDDING_DIM;
+    out.push(Array.from(Array.prototype.slice.call(data, start, start + EMBEDDING_DIM)));
+  }
+  return out;
+}
+async function generateEmbeddingsFromModel(kind, texts) {
+  if (texts.length === 0)
+    return [];
+  if (!embeddingPipeline) {
+    await initModel();
+  }
+  if (!embeddingPipeline)
+    return [];
+  const inputs = texts.map((t) => PREFIX[kind] + t.substring(0, MAX_CONTENT_CHARS));
+  const output = await embeddingPipeline(inputs, {
+    pooling: "mean",
+    normalize: true
+  });
+  return sliceBatchOutput(output.data, texts.length);
+}
 async function generateEmbeddingFromModel(kind, text) {
   if (!embeddingPipeline) {
     await initModel();
@@ -1936,30 +1965,113 @@ async function generateEmbeddingFromModel(kind, text) {
   return Array.from(output.data);
 }
 
+// src/core/semaphore.ts
+class Semaphore {
+  available;
+  waiters = [];
+  constructor(maxConcurrent) {
+    const floored = Math.floor(maxConcurrent);
+    this.available = Number.isFinite(floored) ? Math.max(1, floored) : 1;
+  }
+  acquire() {
+    if (this.available > 0) {
+      this.available -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+  release() {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+      return;
+    }
+    this.available += 1;
+  }
+}
+async function withSemaphore(sem, fn) {
+  await sem.acquire();
+  try {
+    return await fn();
+  } finally {
+    sem.release();
+  }
+}
+
 // src/core/embeddings.ts
-init_logger();
+init_config();
 init_ratelimiter();
+
+class EmbeddingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "EmbeddingError";
+  }
+}
 var generateFn = generateEmbeddingFromModel;
+var generateBatchFn = generateEmbeddingsFromModel;
+var loadConfigFn2 = loadConfig;
+var semaphore = null;
+function getSemaphore() {
+  if (!semaphore) {
+    const configured = loadConfigFn2()?.embedding?.maxConcurrency;
+    const cap = typeof configured === "number" && Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_EMBEDDING_MAX_CONCURRENCY;
+    semaphore = new Semaphore(cap);
+  }
+  return semaphore;
+}
+function hasExplicitEmbeddingRateLimit() {
+  return loadConfigFn2()?.ratelimit?.embedding !== undefined;
+}
 function isEmbeddingsDisabled() {
   return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
-}
-async function embedPassage(text) {
-  return run("passage", text);
 }
 async function embedQuery(text) {
   return run("query", text);
 }
+async function embedPassageBatch(texts) {
+  if (isEmbeddingsDisabled())
+    return [];
+  if (texts.length === 0)
+    return [];
+  return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
+    let vectors;
+    try {
+      vectors = await generateBatchFn("passage", texts);
+    } catch (err) {
+      throw new EmbeddingError(`batch embedding failed: ${err.message}`);
+    }
+    if (vectors.length !== texts.length) {
+      throw new EmbeddingError(`batch embedding returned ${vectors.length} vectors for ${texts.length} texts`);
+    }
+    return vectors;
+  });
+}
 async function run(kind, text) {
   if (isEmbeddingsDisabled())
     return null;
-  try {
-    await getEmbeddingRateLimiter().acquire();
-    return await generateFn(kind, text);
-  } catch (err) {
-    log.warn(`embedding failed (${kind})`, { error: err.message });
-    return null;
-  }
+  return withSemaphore(getSemaphore(), async () => {
+    if (hasExplicitEmbeddingRateLimit())
+      await getEmbeddingRateLimiter().acquire();
+    let vector;
+    try {
+      vector = await generateFn(kind, text);
+    } catch (err) {
+      throw new EmbeddingError(`embedding failed (${kind}): ${err.message}`);
+    }
+    if (!vector) {
+      throw new EmbeddingError(`embedding failed (${kind}): model returned no vector`);
+    }
+    return vector;
+  });
 }
+
+// src/core/memory/search.ts
+init_logger();
 
 // src/core/memory/filters.ts
 var SCOPING_KEYS = ["user_id", "agent_id", "run_id"];
@@ -2162,7 +2274,15 @@ async function searchMemories(args) {
   validateThreshold(threshold);
   assertScoped(filters);
   const queryLemmatized = lemmatizeForBm25(query);
-  const embedding = await embedQuery(query);
+  let embedding;
+  try {
+    embedding = await embedQuery(query);
+  } catch (err) {
+    if (!(err instanceof EmbeddingError))
+      throw err;
+    log.warn("search embedding failed; returning no results", { error: err.message });
+    return { results: [] };
+  }
   if (!embedding)
     return { results: [] };
   const internalLimit = Math.max(limit * 4, 60);
@@ -2958,12 +3078,11 @@ async function addMemories(args) {
   });
   if (extracted.length === 0)
     return { results: [] };
-  const embeddings = await Promise.all(extracted.map((m) => embedPassage(m.text)));
+  const embeddings = await embedPassageBatch(extracted.map((m) => m.text));
+  if (embeddings.length === 0)
+    return { results: [] };
   const rows = [];
   for (const [i, m] of extracted.entries()) {
-    const embedding = embeddings[i];
-    if (!embedding)
-      continue;
     rows.push({
       id: randomUUID(),
       memory: m.text,
@@ -2972,7 +3091,7 @@ async function addMemories(args) {
         ...filters,
         attributed_to: m.attributed_to
       },
-      embedding
+      embedding: embeddings[i]
     });
   }
   const { inserted } = insertMemories(db, rows);
@@ -3413,7 +3532,7 @@ function getBuiltInSourceAdapters() {
 }
 
 // src/cli/sync.ts
-var EXTRACTION_BUDGET_PER_SYNC = 20;
+var EXTRACTION_BUDGET_PER_SYNC = 12;
 var LOCAL_USER_ID = "local";
 function mapSourceToFilters(source) {
   return {
@@ -3502,13 +3621,8 @@ async function syncArchives(db, options = {}) {
       continue;
     }
     const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
-    let deferred = false;
     let hadFailure = false;
     for (const span of spans) {
-      if (extractionBudget <= 0) {
-        deferred = true;
-        break;
-      }
       extractionBudget--;
       try {
         const result = await addMemories({
@@ -3531,19 +3645,12 @@ async function syncArchives(db, options = {}) {
         });
       }
     }
-    if (!deferred && !hadFailure) {
+    if (!hadFailure) {
       setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
       indexed++;
     }
     if (indexed % progressInterval === 0 || indexed === total) {
       log.info(`  ${indexed}/${total} indexed`);
-    }
-    if (deferred) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        processed: indexed,
-        remaining: total - indexed
-      });
-      break;
     }
   }
   stats.filesIndexed = indexed;

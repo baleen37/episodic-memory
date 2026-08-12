@@ -17,7 +17,8 @@
  *   "ratelimit": {
  *     "embedding": { "requestsPerSecond": 5, "burstSize": 10 },
  *     "llm": { "requestsPerSecond": 2, "burstSize": 4 }
- *   }
+ *   },
+ *   "embedding": { "maxConcurrency": 4 }
  * }
  * ```
  */
@@ -59,6 +60,20 @@ export interface RateLimitsConfig {
   llm?: RateLimitConfig;
 }
 
+/** Default number of embedding calls allowed to run at once. */
+export const DEFAULT_EMBEDDING_MAX_CONCURRENCY = 4;
+
+/**
+ * Embedding configuration.
+ *
+ * The embedding model runs in-process on CPU, so throughput is bounded by
+ * concurrency rather than by a request rate.
+ */
+export interface EmbeddingConfig {
+  /** Maximum embedding calls allowed to run at once (default 4) */
+  maxConcurrency?: number;
+}
+
 /**
  * LLM configuration interface.
  *
@@ -95,6 +110,8 @@ export interface LLMConfig {
   providers?: ProviderEntry[];
   /** Optional rate limiter configuration */
   ratelimit?: RateLimitsConfig;
+  /** Optional embedding configuration */
+  embedding?: EmbeddingConfig;
 }
 
 let configFileDeps = {

@@ -19,10 +19,18 @@ import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/in
  * Maximum LLM extractions a single sync run may perform. Caps how long the sync
  * lock is held so it always finishes; leftover spans are indexed by later syncs.
  *
- * Sized against measured throughput: extraction runs ~25s/record (LLM latency +
- * rate limiting), so 20 keeps a single sync under ~10 minutes of lock hold.
+ * Sized against LLM latency alone. Embedding used to dominate this budget (a
+ * 0.5rps rate limiter cost ~2s per extracted fact); it is now a concurrency-
+ * capped batch call measured at 65ms for 10 facts, so it no longer factors in.
+ *
+ * Measured LLM latency over a real sync run: mean 53s per span, max 85s. At that
+ * rate 12 spans is ~10 minutes, which is the lock-hold ceiling the previous
+ * value of 20 was also aiming for (it just mis-estimated the per-span cost at
+ * 25s). Raising this further does not help throughput — it only holds the lock
+ * longer and makes concurrent syncs skip. The real cap on catching up with a
+ * backlog is provider latency, not this number.
  */
-export const EXTRACTION_BUDGET_PER_SYNC = 20;
+export const EXTRACTION_BUDGET_PER_SYNC = 12;
 
 /** Fixed local identifier used as the mem0 user_id scope for all archives synced by this machine. */
 export const LOCAL_USER_ID = 'local';
@@ -153,13 +161,13 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
 
     const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
 
-    let deferred = false;
     let hadFailure = false;
     for (const span of spans) {
-      if (extractionBudget <= 0) {
-        deferred = true;
-        break;
-      }
+      // Deliberately not bailing out mid-file. There is no per-span cursor, so
+      // an abandoned file restarts at span 0 next sync and its later spans are
+      // never reached — real archives run to 149 spans, well past the budget.
+      // The budget instead bounds how many files a run *starts*; overshooting
+      // on the last one is bounded by that file's span count.
       extractionBudget--;
 
       try {
@@ -185,24 +193,16 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
     }
 
     // Only mark the file fully indexed when every span was processed without
-    // error. If the budget ran out partway through, or any span's extraction
-    // failed, leave the mtime marker unset so the next sync reconsiders this
-    // file (and re-runs already-processed spans through addMemories, whose
-    // md5 dedup makes that safe).
-    if (!deferred && !hadFailure) {
+    // error. If any span's extraction failed, leave the mtime marker unset so
+    // the next sync reconsiders this file (and re-runs already-processed spans
+    // through addMemories, whose md5 dedup makes that safe). Every file that
+    // gets here ran all of its spans, so partial progress is never recorded.
+    if (!hadFailure) {
       setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
       indexed++;
     }
     if (indexed % progressInterval === 0 || indexed === total) {
       log.info(`  ${indexed}/${total} indexed`);
-    }
-
-    if (deferred) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        processed: indexed,
-        remaining: total - indexed,
-      });
-      break;
     }
   }
 

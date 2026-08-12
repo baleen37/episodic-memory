@@ -76,6 +76,16 @@ describe('searchMemories', () => {
     }
   });
 
+  test('returns empty results when embedding fails', async () => {
+    __setModelForTests(async () => {}, async () => { throw new Error('model down'); });
+    const { results } = await searchMemories({
+      db,
+      query: 'anything',
+      filters: { user_id: 'local' },
+    });
+    expect(results).toEqual([]);
+  });
+
   test('BM25 lifts an exact keyword match above a weaker semantic one', async () => {
     // BM25 IDF collapses on tiny corpora, so pad the store until keyword scores are non-zero.
     seed();

@@ -2,7 +2,7 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'crypto';
 import type { LLMProvider } from '../llm/types.js';
-import { embedPassage, embedQuery } from '../embeddings.js';
+import { embedPassageBatch, embedQuery } from '../embeddings.js';
 import { extractMemories } from './extract.js';
 import type { Message, ExistingMemoryRef } from './prompts.js';
 import { insertMemories, recordHistory, type NewMemory } from './store.js';
@@ -46,14 +46,14 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
   });
   if (extracted.length === 0) return { results: [] };
 
-  // Phase 3: batch embed.
-  const embeddings = await Promise.all(extracted.map(m => embedPassage(m.text)));
+  // Phase 3: batch embed. One forward pass for the whole span's facts.
+  const embeddings = await embedPassageBatch(extracted.map(m => m.text));
+  // Only empty when embeddings are disabled; a real failure throws.
+  if (embeddings.length === 0) return { results: [] };
 
   // Phases 4 and 5: md5 dedup then batch insert.
   const rows: NewMemory[] = [];
   for (const [i, m] of extracted.entries()) {
-    const embedding = embeddings[i];
-    if (!embedding) continue;
     rows.push({
       id: randomUUID(),
       memory: m.text,
@@ -62,7 +62,7 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
         ...filters,
         attributed_to: m.attributed_to,
       },
-      embedding,
+      embedding: embeddings[i],
     });
   }
 
