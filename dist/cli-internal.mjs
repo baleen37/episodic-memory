@@ -2190,6 +2190,12 @@ var ENTITY_BOOST_WEIGHT = 0.5;
 function lemmatizeForBm25(text) {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
+function buildFtsMatchQuery(lemmatized) {
+  const terms = lemmatized.split(" ").filter(Boolean);
+  if (terms.length === 0)
+    return "";
+  return terms.map((t) => `"${t.replace(/"/g, '""')}"`).join(" OR ");
+}
 function getBm25Params(query, lemmatized) {
   const lemma = lemmatized ?? lemmatizeForBm25(query);
   const numTerms = lemma ? lemma.split(" ").length : 1;
@@ -2320,7 +2326,7 @@ async function searchMemories(args) {
         SELECT rowid, bm25(fts_memories) AS raw
         FROM fts_memories WHERE fts_memories MATCH ?
         ORDER BY raw LIMIT ?
-      `).all(queryLemmatized, internalLimit);
+      `).all(buildFtsMatchQuery(queryLemmatized), internalLimit);
       for (const row of keywordRows) {
         const semantic = byRowid.get(row.rowid);
         if (!semantic)
