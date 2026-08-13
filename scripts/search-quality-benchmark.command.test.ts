@@ -4,7 +4,7 @@ import { $ } from 'bun';
 async function runBenchmarkCommand(env: Record<string, string | undefined>): Promise<string> {
   // bun test's custom SQLite preload belongs to the parent worker; apply the
   // same runtime setup to the child so sqlite-vec can load its extension.
-  const command = await $`${process.execPath} --preload ./scripts/preload-sqlite.ts run bench:search-quality`
+  const command = await $`${process.execPath} --preload ./scripts/preload-sqlite.ts scripts/search-quality-benchmark.ts`
     .cwd(new URL('..', import.meta.url).pathname)
     .env({ ...process.env, ...env })
     .quiet();
