@@ -16775,9 +16775,14 @@ function createMemorySchema(db) {
       data              TEXT NOT NULL,
       entity_type       TEXT,
       linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+      metadata          TEXT,
       created_at        INTEGER NOT NULL
     )
   `);
+  const entityCols = db.query("PRAGMA table_info(entities)").all();
+  if (!entityCols.some((c) => c.name === "metadata")) {
+    db.exec("ALTER TABLE entities ADD COLUMN metadata TEXT");
+  }
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);

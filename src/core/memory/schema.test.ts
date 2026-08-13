@@ -37,6 +37,28 @@ describe('createMemorySchema', () => {
     expect(byName.score).toBeUndefined();
   });
 
+  test('entities carries a metadata column for mem0 scoping keys', () => {
+    const cols = (db.query('PRAGMA table_info(entities)').all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('metadata');
+  });
+
+  test('adds the entities metadata column to a pre-existing schema', () => {
+    const old = new Database(':memory:');
+    sqliteVec.load(old);
+    old.exec(`
+      CREATE TABLE entities (
+        id                TEXT PRIMARY KEY,
+        data              TEXT NOT NULL,
+        entity_type       TEXT,
+        linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+        created_at        INTEGER NOT NULL
+      )
+    `);
+    createMemorySchema(old);
+    const cols = (old.query('PRAGMA table_info(entities)').all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('metadata');
+  });
+
   test('hash is unique so md5 dedup is enforced by the DB', () => {
     const ins = 'INSERT INTO memories (id, memory, hash, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?)';
     db.query(ins).run('id-1', 'a fact', 'deadbeef', '{}', 1, 1);

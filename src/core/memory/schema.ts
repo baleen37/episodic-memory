@@ -70,9 +70,17 @@ export function createMemorySchema(db: Database): void {
       data              TEXT NOT NULL,
       entity_type       TEXT,
       linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+      metadata          TEXT,
       created_at        INTEGER NOT NULL
     )
   `);
+  // Upstream stores scoping keys (user_id/agent_id/run_id) in the entity payload;
+  // databases created before the column existed get it added in place. The table
+  // was never populated by any earlier release, so ALTER is sufficient.
+  const entityCols = db.query('PRAGMA table_info(entities)').all() as Array<{ name: string }>;
+  if (!entityCols.some(c => c.name === 'metadata')) {
+    db.exec('ALTER TABLE entities ADD COLUMN metadata TEXT');
+  }
 
   // vec0 rowids are integers, so vectors key off memories.rowid, not memories.id.
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);

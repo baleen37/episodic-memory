@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseExtractionResponse, extractMemories, LLMError } from './extract.js';
+import { ADDITIVE_EXTRACTION_PROMPT, ENTITY_EXTRACTION_SUFFIX } from './prompts.js';
 import type { LLMProvider } from '../llm/types.js';
 
 function provider(text: string): LLMProvider {
@@ -15,7 +16,7 @@ describe('parseExtractionResponse', () => {
       memory: [{ id: '0', text: 'User adopted a puppy', attributed_to: 'user', linked_memory_ids: ['uuid-1'] }],
     }));
     expect(out).toEqual([
-      { id: '0', text: 'User adopted a puppy', attributed_to: 'user', linked_memory_ids: ['uuid-1'] },
+      { id: '0', text: 'User adopted a puppy', attributed_to: 'user', linked_memory_ids: ['uuid-1'], entities: [] },
     ]);
   });
 
@@ -80,6 +81,43 @@ describe('parseExtractionResponse', () => {
     expect(out.map(m => m.text)).toEqual(['keep']);
   });
 
+  test('parses optional entities into typed refs', () => {
+    const out = parseExtractionResponse(JSON.stringify({
+      memory: [{
+        id: '0', text: 'User has a dog named Poppy', attributed_to: 'user',
+        entities: [{ type: 'PROPER', text: 'Poppy' }, { type: 'TOPIC', text: 'dog' }],
+      }],
+    }));
+    expect(out[0].entities).toEqual([
+      { type: 'PROPER', text: 'Poppy' },
+      { type: 'TOPIC', text: 'dog' },
+    ]);
+  });
+
+  test('defaults entities to empty array when omitted', () => {
+    const out = parseExtractionResponse('{"memory":[{"id":"0","text":"t","attributed_to":"user"}]}');
+    expect(out[0].entities).toEqual([]);
+  });
+
+  test('drops malformed entity entries and nulls non-string types', () => {
+    const out = parseExtractionResponse(JSON.stringify({
+      memory: [{
+        id: '0', text: 't', attributed_to: 'user',
+        entities: [
+          { type: 'PROPER', text: 'Kept' },
+          { type: 7, text: 'TypeCoerced' },
+          { type: 'QUOTED', text: '' },
+          { type: 'QUOTED' },
+          'not an object',
+        ],
+      }],
+    }));
+    expect(out[0].entities).toEqual([
+      { type: 'PROPER', text: 'Kept' },
+      { type: null, text: 'TypeCoerced' },
+    ]);
+  });
+
   test('raises LLMError on unparseable output', () => {
     expect(() => parseExtractionResponse('not json at all')).toThrow(LLMError);
   });
@@ -91,6 +129,20 @@ describe('parseExtractionResponse', () => {
 
 describe('extractMemories', () => {
   const args = { newMessages: [{ role: 'user' as const, content: 'hi' }] };
+
+  test('appends the entity extraction suffix to the system prompt', async () => {
+    let seenSystemPrompt = '';
+    const capturing: LLMProvider = {
+      complete: async (_prompt: string, options: { systemPrompt?: string }) => {
+        seenSystemPrompt = options.systemPrompt ?? '';
+        return { text: '{"memory": []}' };
+      },
+    } as unknown as LLMProvider;
+
+    await extractMemories(capturing, args);
+    expect(seenSystemPrompt).toContain(ADDITIVE_EXTRACTION_PROMPT);
+    expect(seenSystemPrompt).toContain(ENTITY_EXTRACTION_SUFFIX);
+  });
 
   test('returns parsed memories on success', async () => {
     const out = await extractMemories(

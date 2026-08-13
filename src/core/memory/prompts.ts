@@ -477,6 +477,33 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - No duplicate IDs. Use double quotes. No trailing commas.
 
 `;
+/**
+ * Appended to ADDITIVE_EXTRACTION_PROMPT at call time, mirroring how upstream
+ * appends AGENT_CONTEXT_SUFFIX. Sanctioned deviation: upstream extracts entities
+ * from stored memory texts with spaCy (extract_entities_batch); this port folds
+ * the same request into the one extraction LLM call instead.
+ */
+export const ENTITY_EXTRACTION_SUFFIX = `
+
+# ENTITY EXTRACTION (ADDITIONAL OUTPUT FIELD)
+
+For each memory object, also include an "entities" array listing the named entities that appear in that memory's "text". Each entity is {"type": "...", "text": "..."}.
+
+Entity types:
+- **PROPER**: proper nouns — person names, places, brands, products, titles (e.g. "Poppy", "Shopify", "Osteria Francescana")
+- **QUOTED**: quoted titles or specific terms (e.g. "The Last Dance")
+- **TOPIC**: specific multi-word noun phrases (e.g. "machine learning", "aerial yoga")
+- **IDENTIFIER**: technical identifiers — dotted or dashed names, ticket keys, file names (e.g. "scoring.py", "SEARCH-14333")
+
+Rules:
+- Extract only entities that literally appear in the memory text.
+- Skip generic single nouns ("user", "dog", "work") and dates/numbers.
+- Omit the field or pass [] when a memory has no entities.
+
+Example memory object with entities:
+{"id": "0", "text": "User has a dog named Poppy and walks her in Woodhaven", "attributed_to": "user", "entities": [{"type": "PROPER", "text": "Poppy"}, {"type": "PROPER", "text": "Woodhaven"}]}
+`;
+
 export const PAST_MESSAGE_TRUNCATION_LIMIT = 300;
 
 export interface Message {

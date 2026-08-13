@@ -164,6 +164,64 @@ describe('addMemories', () => {
     for (const r of rows) expect(r.hash).toBe(md5(r.memory));
   });
 
+  test('links extracted entities to their stored memories (Phase 7)', async () => {
+    const out = await addMemories({ db, provider: provider(JSON.stringify({
+      memory: [{
+        id: '0', text: 'User has a dog named Poppy', attributed_to: 'user',
+        entities: [{ type: 'PROPER', text: 'Poppy' }],
+      }] })), ...base });
+
+    const row = db.query('SELECT data, entity_type, linked_memory_ids, metadata FROM entities').get() as
+      { data: string; entity_type: string; linked_memory_ids: string; metadata: string } | null;
+    expect(row).not.toBeNull();
+    expect(row!.data).toBe('Poppy');
+    expect(row!.entity_type).toBe('PROPER');
+    expect(JSON.parse(row!.linked_memory_ids)).toEqual([out.results[0].id]);
+    expect(JSON.parse(row!.metadata)).toEqual({ user_id: 'alice' });
+  });
+
+  test('deduplicates the same entity across memories in one batch', async () => {
+    const out = await addMemories({ db, provider: provider(JSON.stringify({
+      memory: [
+        { id: '0', text: 'Poppy had a vet checkup', attributed_to: 'user',
+          entities: [{ type: 'PROPER', text: 'Poppy' }] },
+        { id: '1', text: 'Poppy needs to lose weight', attributed_to: 'user',
+          entities: [{ type: 'PROPER', text: 'poppy' }] },
+      ] })), ...base });
+
+    const rows = db.query('SELECT linked_memory_ids FROM entities').all() as Array<{ linked_memory_ids: string }>;
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].linked_memory_ids).sort()).toEqual(out.results.map(r => r.id).sort());
+  });
+
+  test('does not link entities of memories dropped by md5 dedup', async () => {
+    const withEntities = JSON.stringify({
+      memory: [{ id: '0', text: 'User works at Shopify', attributed_to: 'user',
+                 entities: [{ type: 'PROPER', text: 'Shopify' }] }] });
+    const first = await addMemories({ db, provider: provider(withEntities), ...base });
+    await addMemories({ db, provider: provider(withEntities), ...base });
+
+    const rows = db.query('SELECT linked_memory_ids FROM entities').all() as Array<{ linked_memory_ids: string }>;
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual([first.results[0].id]);
+  });
+
+  test('entity linking failure is non-fatal: memories are still stored', async () => {
+    let batchCalls = 0;
+    __setBatchModelForTests(async (_kind, texts) => {
+      batchCalls++;
+      if (batchCalls > 1) throw new Error('entity embed down');
+      return texts.map(() => EMB());
+    });
+    const out = await addMemories({ db, provider: provider(JSON.stringify({
+      memory: [{ id: '0', text: 'A fact that must survive', attributed_to: 'user',
+                 entities: [{ type: 'PROPER', text: 'Something' }] }] })), ...base });
+
+    expect(out.results).toHaveLength(1);
+    expect((db.query('SELECT COUNT(*) c FROM memories').get() as { c: number }).c).toBe(1);
+    expect((db.query('SELECT COUNT(*) c FROM entities').get() as { c: number }).c).toBe(0);
+  });
+
   test('does not persist LLM-invented linked_memory_ids into metadata', async () => {
     const out = await addMemories({ db, provider: provider(JSON.stringify({
       memory: [{ id: '0', text: 'A durable fact', attributed_to: 'user',
