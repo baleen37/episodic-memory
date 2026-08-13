@@ -5,14 +5,7 @@ import type { ParseContext, SourceAdapter, TranscriptSpan } from './types.js';
 import { asObject, asString, eachJsonLine, parseTimestamp } from './jsonl.js';
 import type { Message } from '../memory/prompts.js';
 
-interface CodexMeta {
-  sessionId: string | null;
-  cwd: string | null;
-  gitBranch: string | null;
-  model: string | null;
-}
-
-interface PendingCodexSpan extends CodexMeta {
+interface PendingCodexSpan {
   lineStart: number;
   lineEnd: number;
   observedAt: number | null;
@@ -22,7 +15,6 @@ interface PendingCodexSpan extends CodexMeta {
 
 export function parseCodexJsonl(content: string, context: ParseContext): TranscriptSpan[] {
   const spans: TranscriptSpan[] = [];
-  const meta: CodexMeta = { sessionId: null, cwd: null, gitBranch: null, model: null };
   let current: PendingCodexSpan | null = null;
 
   const flushCurrent = () => {
@@ -40,13 +32,6 @@ export function parseCodexJsonl(content: string, context: ParseContext): Transcr
         lineStart: current.lineStart,
         lineEnd: current.lineEnd,
         sourceKind: context.sourceKind,
-        sessionId: current.sessionId,
-        project: null,
-        cwd: meta.cwd,
-        gitBranch: meta.gitBranch,
-        model: current.model,
-        provider: 'codex',
-        metadataJson: JSON.stringify({ source: 'codex' }),
         observedAt: current.observedAt,
         text,
         messages,
@@ -56,26 +41,6 @@ export function parseCodexJsonl(content: string, context: ParseContext): Transcr
   };
 
   eachJsonLine(content, (item, lineNumber) => {
-    if (item.type === 'session_meta') {
-      const payload = asObject(item.payload);
-      if (payload) {
-        meta.sessionId = asString(payload.id);
-        meta.cwd = asString(payload.cwd);
-        meta.gitBranch = asString(asObject(payload.git)?.branch);
-        meta.model = asString(payload.model);
-      }
-      return;
-    }
-
-    if (item.type === 'turn_context') {
-      const payload = asObject(item.payload);
-      if (payload) {
-        meta.cwd = asString(payload.cwd) ?? meta.cwd;
-        meta.model = asString(payload.model) ?? meta.model;
-      }
-      return;
-    }
-
     if (item.type !== 'response_item') return;
 
     const payload = asObject(item.payload);
@@ -88,10 +53,6 @@ export function parseCodexJsonl(content: string, context: ParseContext): Transcr
         current = {
           lineStart: lineNumber,
           lineEnd: lineNumber,
-          sessionId: meta.sessionId,
-          cwd: meta.cwd,
-          gitBranch: meta.gitBranch,
-          model: meta.model,
           observedAt: parseTimestamp(item.timestamp),
           userText: extractText(payload.content).trim(),
           assistantTexts: [],

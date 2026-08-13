@@ -58,7 +58,6 @@ const threeMemories = JSON.stringify({
 const base = {
   messages: [{ role: 'user' as const, content: 'I adopted a puppy and started pottery' }],
   filters: { user_id: 'alice' },
-  sessionKey: 'session-1',
 };
 
 describe('addMemories', () => {

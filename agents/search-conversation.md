@@ -1,13 +1,13 @@
 ---
 name: search-conversation
 description: |
-  Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
+  Search indexed event/fact memory records and synthesize the returned memory cards.
 
   Use when you need to find relevant past conversations. The agent will:
   1. Search event/fact memory records using the memmem MCP search tool
-  2. Read archived transcript lines for promising results when needed
+  2. Interpret the returned memory text and metadata
   3. Synthesize findings into a concise summary
-  4. Return actionable insights with archive sources
+  4. Return actionable insights with record identifiers
 model: haiku
 ---
 
@@ -28,45 +28,27 @@ Use `mcp__plugin_memmem_memmem__search`:
 }
 ```
 
-Optional filters:
+Optional controls:
 
 ```json
 {
   "query": "authentication patterns",
-  "after": "2026-05-01",
-  "before": "2026-06-01",
-  "source_kind": "claude-code-projects",
+  "threshold": 0.2,
+  "explain": true,
   "limit": 10
 }
 ```
 
-Search results include the transcript location and line range:
+Search results include:
 
-- `archive_path`
-- `line_start`
-- `line_end`
-- `source_kind`
-- `project`
-- `timestamp`
-- `kind`
-- `text`
+- `id`
+- `memory`
+- `metadata`
 - `score`
+- `created_at`
+- `updated_at`
 
-### 2. Read transcript lines when needed
-
-Use `mcp__plugin_memmem_memmem__read` only for promising results that need more context:
-
-```json
-{
-  "path": "/path/from/search/result.jsonl",
-  "startLine": 12,
-  "endLine": 24
-}
-```
-
-Use `archive_path`, `line_start`, and `line_end` from search results. Expand the line range slightly if the memory record needs surrounding context or raw transcript evidence.
-
-### 3. Synthesize findings
+### 2. Synthesize findings
 
 Return a concise summary containing:
 
@@ -74,20 +56,19 @@ Return a concise summary containing:
 - **Relevant patterns**: Approaches used in prior conversations
 - **Gotchas**: Failed approaches or edge cases
 - **Recommendations**: Actionable next steps
-- **Sources**: Archive paths, line ranges, dates, and project names
+- **Sources**: Memory record identifiers and metadata
 
 ## Search Strategy
 
 - Start broad, then narrow with more specific query terms.
 - Use exact terms directly in the query for IDs, error codes, or file names.
-- Use `after` / `before` for date ranges.
-- Use `source_kind` when you need Claude Code or Codex transcripts specifically.
-- Read transcript lines only when the memory record is not enough.
+- Use `threshold` to reduce weak semantic matches.
+- Use `explain` when the score breakdown is relevant.
+- Cite the returned memory record `id` for every source.
 
 ## Important Guidelines
 
-- Search first, read only as needed.
+- Search first, then synthesize only the relevant memory cards.
 - Synthesize; do not dump raw transcript text.
-- Cite `archive_path:line_start-line_end` for every source.
 - Focus on rationale, decisions, gotchas, and reusable patterns.
 - If search returns no results, try broader query terms or remove filters.

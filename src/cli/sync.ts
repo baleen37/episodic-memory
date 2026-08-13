@@ -8,6 +8,8 @@ import {
 } from '../core/memory/schema.js';
 import { addMemories } from '../core/memory/add.js';
 import { deleteMemoriesByRunIds } from '../core/memory/store.js';
+import { LOCAL_USER_ID } from '../core/constants.js';
+import { indexPendingArchives } from '../core/sync-run.js';
 import { loadConfig, createProvider } from '../core/llm/index.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { log } from '../core/logger.js';
@@ -31,9 +33,6 @@ import { getBuiltInSourceAdapters, type SourceAdapter } from '../core/sources/in
  * backlog is provider latency, not this number.
  */
 export const EXTRACTION_BUDGET_PER_SYNC = 12;
-
-/** Fixed local identifier used as the mem0 user_id scope for all archives synced by this machine. */
-export const LOCAL_USER_ID = 'local';
 
 export interface SyncStats {
   filesScanned: number;
@@ -124,89 +123,29 @@ export async function syncArchives(db: Database, options: SyncOptions = {}): Pro
   // Reindexing is incremental, newest archive first.
   pendingFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
-  const total = pendingFiles.length;
-  if (total > 0) {
-    log.info(`Indexing ${total} archive file${total === 1 ? '' : 's'}...`);
-  }
-
-  // Bound the LLM work per sync so the lock is never held for hours. Remaining
-  // files are picked up by the next sync.
-  let extractionBudget = EXTRACTION_BUDGET_PER_SYNC;
-  let indexed = 0;
-  const progressInterval = Math.max(1, Math.floor(total / 20));
-  for (const file of pendingFiles) {
-    if (provider && extractionBudget <= 0) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        remaining: total - indexed,
+  const indexingResult = await indexPendingArchives({
+    files: pendingFiles,
+    provider,
+    extractionBudget: EXTRACTION_BUDGET_PER_SYNC,
+    readArchiveFile,
+    markIndexed: (archivePath, mtimeMs) => setArchiveIndexMtime(db, archivePath, mtimeMs),
+    indexSpan: async (file, span, activeProvider) => {
+      const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
+      const result = await addMemories({
+        db,
+        provider: activeProvider,
+        messages: span.messages,
+        filters,
+        observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined,
       });
-      break;
-    }
+      return result.results.length;
+    },
+  });
 
-    const content = readArchiveFile(file.archivePath);
-    if (content === null) {
-      stats.skipped++;
-      continue;
-    }
-
-    const spans = file.adapter.parse(content, { archivePath: file.archivePath, sourceKind: file.adapter.kind });
-
-    if (!provider) {
-      // No provider configured: archives are copied but extraction is skipped entirely.
-      indexed++;
-      if (indexed % progressInterval === 0 || indexed === total) {
-        log.info(`  ${indexed}/${total} indexed`);
-      }
-      continue;
-    }
-
-    const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
-
-    let hadFailure = false;
-    for (const span of spans) {
-      // Deliberately not bailing out mid-file. There is no per-span cursor, so
-      // an abandoned file restarts at span 0 next sync and its later spans are
-      // never reached — real archives run to 149 spans, well past the budget.
-      // The budget instead bounds how many files a run *starts*; overshooting
-      // on the last one is bounded by that file's span count.
-      extractionBudget--;
-
-      try {
-        const result = await addMemories({
-          db,
-          provider,
-          messages: span.messages,
-          filters,
-          sessionKey: filters.run_id ?? file.archivePath,
-          observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined,
-        });
-        stats.memoriesAdded += result.results.length;
-      } catch (error) {
-        hadFailure = true;
-        stats.failed++;
-        log.warn('Span extraction failed; continuing sync.', {
-          archivePath: file.archivePath,
-          lineStart: span.lineStart,
-          lineEnd: span.lineEnd,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    // Only mark the file fully indexed when every span was processed without
-    // error. If any span's extraction failed, leave the mtime marker unset so
-    // the next sync reconsiders this file (and re-runs already-processed spans
-    // through addMemories, whose md5 dedup makes that safe). Every file that
-    // gets here ran all of its spans, so partial progress is never recorded.
-    if (!hadFailure) {
-      setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
-      indexed++;
-    }
-    if (indexed % progressInterval === 0 || indexed === total) {
-      log.info(`  ${indexed}/${total} indexed`);
-    }
-  }
-
-  stats.filesIndexed = indexed;
+  stats.filesIndexed = indexingResult.filesIndexed;
+  stats.memoriesAdded += indexingResult.memoriesAdded;
+  stats.skipped += indexingResult.skipped;
+  stats.failed += indexingResult.failed;
   return stats;
 }
 

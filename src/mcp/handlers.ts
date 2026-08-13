@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { searchMemories, type SearchResultItem } from '../core/memory/search.js';
-import { LOCAL_USER_ID } from '../cli/sync.js';
+import { LOCAL_USER_ID } from '../core/constants.js';
 
 export interface SearchInput {
   query: string;

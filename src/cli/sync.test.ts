@@ -4,10 +4,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Database } from 'bun:sqlite';
 import { openMemoryDb } from '../core/memory/schema.js';
+import { LOCAL_USER_ID } from '../core/constants.js';
 import { __setModelForTests, __setBatchModelForTests } from '../core/embeddings.js';
 import { acquireSyncLock } from '../core/lock.js';
 import { __setLoadConfigForTests, resetRateLimiters } from '../core/ratelimiter.js';
-import { EXTRACTION_BUDGET_PER_SYNC, LOCAL_USER_ID, mapSourceToFilters, syncArchives } from './sync.js';
+import { EXTRACTION_BUDGET_PER_SYNC, mapSourceToFilters, syncArchives } from './sync.js';
 import type { LLMProvider } from '../core/llm/types.js';
 
 describe('mapSourceToFilters', () => {

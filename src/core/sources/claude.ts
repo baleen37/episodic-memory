@@ -10,13 +10,6 @@ interface PendingClaudeSpan {
   lineStart: number;
   lineEnd: number;
   sourceKind: string;
-  sessionId: string | null;
-  project: string | null;
-  cwd: string | null;
-  gitBranch: string | null;
-  model: string | null;
-  provider: string | null;
-  metadataJson: string | null;
   observedAt: number | null;
   userText: string;
   assistantTexts: string[];
@@ -41,13 +34,6 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
         lineStart: current.lineStart,
         lineEnd: current.lineEnd,
         sourceKind: current.sourceKind,
-        sessionId: current.sessionId,
-        project: current.project,
-        cwd: current.cwd,
-        gitBranch: current.gitBranch,
-        model: current.model,
-        provider: current.provider,
-        metadataJson: current.metadataJson,
         observedAt: current.observedAt,
         text,
         messages,
@@ -74,13 +60,6 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
         lineStart: lineNumber,
         lineEnd: lineNumber,
         sourceKind: context.sourceKind,
-        sessionId: asString(item.sessionId),
-        project: null,
-        cwd: asString(item.cwd),
-        gitBranch: asString(item.gitBranch),
-        model: asString(item.model),
-        provider: asString(item.provider),
-        metadataJson: null,
         observedAt: parseTimestamp(item.timestamp),
         userText,
         assistantTexts: [],
@@ -91,15 +70,9 @@ export function parseClaudeJsonl(content: string, context: ParseContext): Transc
     if (!current) return;
 
     current.lineEnd = lineNumber;
-    current.sessionId ??= asString(item.sessionId);
-    current.cwd ??= asString(item.cwd);
-    current.gitBranch ??= asString(item.gitBranch);
-    current.model ??= asString(item.model);
-    current.provider ??= asString(item.provider);
     current.observedAt ??= parseTimestamp(item.timestamp);
 
     if (role === 'assistant') {
-      current.model ??= asString(message?.model);
       const text = extractText(messageContent).trim();
       if (text) current.assistantTexts.push(text);
     }

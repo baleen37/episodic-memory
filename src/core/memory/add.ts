@@ -18,7 +18,6 @@ export interface AddArgs {
   messages: Message[];
   metadata?: Record<string, unknown>;
   filters: Filters;
-  sessionKey: string;
   observationDate?: string;
 }
 

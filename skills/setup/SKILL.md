@@ -26,14 +26,14 @@ mkdir -p ~/.config/memmem
 
 ## LLM Provider Configuration
 
-Archive sync and `read` do not require an LLM provider configuration.
+Archive sync does not require an LLM provider configuration.
 Memory extraction during indexing does require a configured LLM provider.
 Without one, transcript spans are skipped and no memory rows are created for those spans.
 
 ### Supported Providers
 
 1. **Gemini** (Google AI) - `gemini-2.0-flash` (default)
-2. **Z.AI** (GLM models) - `glm-4.5-air` (default)
+2. **Z.AI** (GLM models) - `glm-4.7` (default)
 
 ### Gemini Configuration
 
@@ -57,7 +57,7 @@ Without one, transcript spans are skipped and no memory rows are created for tho
 {
   "provider": "zai",
   "apiKey": "your-zai-api-key",
-  "model": "glm-4.5-air"
+  "model": "glm-4.7"
 }
 ```
 
@@ -75,7 +75,7 @@ Use top-level `provider` with either a single `apiKey`, or a non-empty `provider
 **Default models:**
 
 - Gemini: `gemini-2.0-flash`
-- Z.AI: `glm-4.5-air`
+- Z.AI: `glm-4.7`
 
 ## Project Exclusions
 
@@ -151,7 +151,7 @@ tail -f ~/.config/memmem/logs/$(date +%Y-%m-%d).log
 
 ### No Memory Records Generated
 
-**Symptoms:** Archive sync/read works, but indexed memory search has no results or logs show skipped spans.
+**Symptoms:** Archive sync works, but indexed memory search has no results or logs show skipped spans.
 
 **Solution:**
 

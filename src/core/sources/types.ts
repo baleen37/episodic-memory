@@ -5,13 +5,6 @@ export interface TranscriptSpan {
   lineStart: number;
   lineEnd: number;
   sourceKind: string;
-  sessionId: string | null;
-  project: string | null;
-  cwd: string | null;
-  gitBranch: string | null;
-  model: string | null;
-  provider: string | null;
-  metadataJson: string | null;
   observedAt: number | null;
   text: string;
   messages: Message[];
