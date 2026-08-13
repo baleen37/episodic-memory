@@ -47,8 +47,8 @@ bun run cli <sync|search|stats|verify>   # Run built CLI (dist/cli-internal.mjs)
 | `src/core/memory/schema.ts` | mem0 v2 schema (`memories`, `history`, `entities`, `vec_memories`, `vec_entities`, `fts_memories`) and `MemoryItem`/`HistoryRow` types — `openMemoryDb()` |
 | `src/core/memory/add.ts` | `addMemories()` — the 8-phase batch ingestion pipeline |
 | `src/core/memory/extract.ts` | Single-LLM-call extraction + response parsing; throws `LLMError` on provider/parse failure |
-| `src/core/memory/prompts.ts` | `ADDITIVE_EXTRACTION_PROMPT` (verbatim mem0 v2 prompt) and message/prompt builders |
-| `src/core/memory/store.ts` | `insertMemories()` (md5 dedup + batch insert into `memories`/`vec_memories`/`fts_memories`), `recordHistory()`, `upsertEntities()` |
+| `src/core/memory/prompts.ts` | `ADDITIVE_EXTRACTION_PROMPT` (verbatim mem0 v2 prompt), `ENTITY_EXTRACTION_SUFFIX` (folds entity extraction into the same call — the spaCy substitute), and message/prompt builders |
+| `src/core/memory/store.ts` | `insertMemories()` (md5 dedup + batch insert into `memories`/`vec_memories`/`fts_memories`), `recordHistory()`, `linkEntities()` (Phase 7 match-or-insert entity linking) |
 | `src/core/memory/scoring.ts` | Port of mem0's `scoring.py` — BM25 sigmoid normalization, additive semantic+BM25+entity scoring with adaptive divisor, `scoreAndRank()` |
 | `src/core/memory/search.ts` | `searchMemories()` — hybrid vector + FTS5 BM25 + entity-boost search over `memories` |
 | `src/core/memory/filters.ts` | Metadata filter operators (`eq`/`ne`/`in`/`nin`/`gt(e)`/`lt(e)`/`contains`/`icontains`, `AND`/`OR`/`NOT`) and scoping-key enforcement |
@@ -99,7 +99,10 @@ sync              → each span's messages go through addMemories() (8-phase bat
                       Phase 5  md5-hash dedup against memories.hash
                       Phase 6  batch insert into memories/vec_memories/fts_memories
                       Phase 7  batch insert into history (event = 'ADD')
-                      entities are folded into the same extraction call, not a separate phase
+                      Phase 8  entity linking (non-fatal): entities come from the same extraction
+                               call (spaCy substitute), are deduped by normalized text, batch-embedded,
+                               then merged into existing entities (exact text or semantic >= 0.95)
+                               or inserted into entities/vec_entities with linked_memory_ids
 sync              → mark the archive file's mtime indexed, bounded by EXTRACTION_BUDGET_PER_SYNC
 CLI/MCP           → searchMemories(): hybrid vector + BM25 + entity-boost search over memories
 ```
@@ -123,7 +126,9 @@ Primary tables in `~/.config/memmem/conversation-index/conversations.db` (`openM
 - **`history`**: append-only log of memory mutations (`memory_id`, `old_memory`, `new_memory`,
   `event`, `created_at`, `is_deleted`). In this port every event is `'ADD'`.
 - **`entities`**: entities folded out of extraction (`id`, `data`, `entity_type`,
-  `linked_memory_ids`, `created_at`).
+  `linked_memory_ids`, `metadata` (scoping keys, mirroring upstream's entity payload), `created_at`).
+  Populated at ingest by `linkEntities()`; memory deletion (`deleteMemoriesByRunIds`) strips the
+  deleted ids from `linked_memory_ids` and drops entities left with no links.
 - **`vec_memories`** / **`vec_entities`**: 384-dimensional float embeddings (`sqlite-vec` virtual
   tables), keyed by `memories.rowid` / `entities.rowid` — not by the UUID `id` column.
 - **`fts_memories`**: FTS5 virtual table (`tokenize='unicode61'`) over lemmatized memory text, used
@@ -146,9 +151,9 @@ three are unused dead schema.
    `getBm25Params`/`normalizeBm25` (query-length-adaptive midpoint/steepness) so raw unbounded BM25
    scores don't swamp the semantic term.
 3. Entity boosts (`ENTITY_BOOST_WEIGHT = 0.5`) are wired into `scoreAndRank()` but always empty in
-   this port — populating them needs query-time entity extraction, which was dropped when entities
-   were folded into the batch extraction call. The `max_possible` divisor still adapts correctly
-   when the boost map is empty.
+   this port — entities are stored at ingest (Phase 8), but query-time entity extraction (upstream:
+   spaCy over the query) has no substitute here, matching upstream's own spaCy-unavailable fallback
+   of an empty boost map. The `max_possible` divisor still adapts correctly when the boost map is empty.
 4. `scoreAndRank()` combines the terms additively (`semantic + bm25 + entityBoost`), gates on the
    raw semantic score against `threshold` *before* combining (a below-threshold candidate is
    dropped even if BM25/entity would have rescued it — this matches upstream behavior), then

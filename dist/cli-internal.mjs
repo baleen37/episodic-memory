@@ -1531,9 +1531,14 @@ function createMemorySchema(db) {
       data              TEXT NOT NULL,
       entity_type       TEXT,
       linked_memory_ids TEXT NOT NULL DEFAULT '[]',
+      metadata          TEXT,
       created_at        INTEGER NOT NULL
     )
   `);
+  const entityCols = db.query("PRAGMA table_info(entities)").all();
+  if (!entityCols.some((c) => c.name === "metadata")) {
+    db.exec("ALTER TABLE entities ADD COLUMN metadata TEXT");
+  }
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_entities USING vec0(embedding float[${EMBEDDING_DIM}])`);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(text_lemmatized, tokenize='unicode61')`);
@@ -2430,7 +2435,7 @@ import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync2, readd
 import path6 from "path";
 
 // src/core/memory/add.ts
-import { randomUUID } from "crypto";
+import { randomUUID as randomUUID2 } from "crypto";
 
 // src/core/memory/prompts.ts
 var ADDITIVE_EXTRACTION_PROMPT = `
@@ -2909,6 +2914,26 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - No duplicate IDs. Use double quotes. No trailing commas.
 
 `;
+var ENTITY_EXTRACTION_SUFFIX = `
+
+# ENTITY EXTRACTION (ADDITIONAL OUTPUT FIELD)
+
+For each memory object, also include an "entities" array listing the named entities that appear in that memory's "text". Each entity is {"type": "...", "text": "..."}.
+
+Entity types:
+- **PROPER**: proper nouns — person names, places, brands, products, titles (e.g. "Poppy", "Shopify", "Osteria Francescana")
+- **QUOTED**: quoted titles or specific terms (e.g. "The Last Dance")
+- **TOPIC**: specific multi-word noun phrases (e.g. "machine learning", "aerial yoga")
+- **IDENTIFIER**: technical identifiers — dotted or dashed names, ticket keys, file names (e.g. "scoring.py", "SEARCH-14333")
+
+Rules:
+- Extract only entities that literally appear in the memory text.
+- Skip generic single nouns ("user", "dog", "work") and dates/numbers.
+- Omit the field or pass [] when a memory has no entities.
+
+Example memory object with entities:
+{"id": "0", "text": "User has a dog named Poppy and walks her in Woodhaven", "attributed_to": "user", "entities": [{"type": "PROPER", "text": "Poppy"}, {"type": "PROPER", "text": "Woodhaven"}]}
+`;
 var PAST_MESSAGE_TRUNCATION_LIMIT = 300;
 function truncate(text, limit = PAST_MESSAGE_TRUNCATION_LIMIT) {
   return text.length <= limit ? text : text.slice(0, limit);
@@ -2970,6 +2995,23 @@ class LLMError extends Error {
     this.name = "LLMError";
   }
 }
+function parseEntities(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null)
+      continue;
+    const row = item;
+    if (typeof row.text !== "string" || row.text.trim() === "")
+      continue;
+    out.push({
+      type: typeof row.type === "string" ? row.type : null,
+      text: row.text.trim()
+    });
+  }
+  return out;
+}
 function stripFences(text) {
   const trimmed = text.trim();
   const lines = trimmed.split(`
@@ -3014,7 +3056,8 @@ function parseExtractionResponse(raw) {
       id: String(row.id ?? out.length),
       text: row.text.trim(),
       attributed_to: row.attributed_to,
-      linked_memory_ids: Array.isArray(row.linked_memory_ids) ? row.linked_memory_ids.filter((v) => typeof v === "string") : []
+      linked_memory_ids: Array.isArray(row.linked_memory_ids) ? row.linked_memory_ids.filter((v) => typeof v === "string") : [],
+      entities: parseEntities(row.entities)
     });
   }
   return out;
@@ -3024,7 +3067,7 @@ async function extractMemories(provider, args) {
   let response;
   try {
     response = await provider.complete(prompt, {
-      systemPrompt: ADDITIVE_EXTRACTION_PROMPT,
+      systemPrompt: ADDITIVE_EXTRACTION_PROMPT + ENTITY_EXTRACTION_SUFFIX,
       maxTokens: 4000
     });
   } catch (error) {
@@ -3034,7 +3077,7 @@ async function extractMemories(provider, args) {
 }
 
 // src/core/memory/store.ts
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 function md5(text) {
   return createHash("md5").update(text).digest("hex");
 }
@@ -3091,10 +3134,11 @@ function deleteMemoriesByRunIds(db, runIds) {
   if (runIds.length === 0)
     return 0;
   const placeholders = runIds.map(() => "?").join(",");
-  const rows = db.query(`SELECT rowid AS r FROM memories WHERE json_extract(metadata, '$.run_id') IN (${placeholders})`).all(...runIds);
+  const rows = db.query(`SELECT rowid AS r, id FROM memories WHERE json_extract(metadata, '$.run_id') IN (${placeholders})`).all(...runIds);
   const rowids = rows.map((row) => row.r);
   if (rowids.length === 0)
     return 0;
+  const deletedIds = new Set(rows.map((row) => row.id));
   const rowidPlaceholders = rowids.map(() => "?").join(",");
   const deleteVec = db.query(`DELETE FROM vec_memories WHERE rowid IN (${rowidPlaceholders})`);
   const deleteFts = db.query(`DELETE FROM fts_memories WHERE rowid IN (${rowidPlaceholders})`);
@@ -3103,11 +3147,101 @@ function deleteMemoriesByRunIds(db, runIds) {
     deleteVec.run(...rowids);
     deleteFts.run(...rowids);
     deleteMemories.run(...rowids);
+    removeMemoriesFromEntities(db, deletedIds);
   })();
   return rowids.length;
 }
+function removeMemoriesFromEntities(db, deletedIds) {
+  const entities = db.query("SELECT rowid AS r, linked_memory_ids AS l FROM entities").all();
+  const update = db.query("UPDATE entities SET linked_memory_ids = ? WHERE rowid = ?");
+  const deleteVec = db.query("DELETE FROM vec_entities WHERE rowid = ?");
+  const deleteEntity = db.query("DELETE FROM entities WHERE rowid = ?");
+  for (const entity of entities) {
+    const linked = JSON.parse(entity.l);
+    const remaining = linked.filter((id) => !deletedIds.has(id));
+    if (remaining.length === linked.length)
+      continue;
+    if (remaining.length === 0) {
+      deleteVec.run(entity.r);
+      deleteEntity.run(entity.r);
+    } else {
+      update.run(JSON.stringify(remaining), entity.r);
+    }
+  }
+}
+function normalizeEntityText(value) {
+  return value.trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+}
+var ENTITY_SEMANTIC_MATCH_THRESHOLD = 0.95;
+function entitySimilarity(a, b) {
+  let sum = 0;
+  for (let i = 0;i < b.length; i++) {
+    const d = a[i] - b[i];
+    sum += d * d;
+  }
+  return 1 - Math.sqrt(sum);
+}
+function linkEntities(db, entities, scope) {
+  if (entities.length === 0)
+    return;
+  const scopeEntries = Object.entries(scope).filter(([, v]) => v !== undefined && v !== null);
+  const scopeClause = scopeEntries.map(() => "json_extract(metadata, ?) = ?").join(" AND ");
+  const scopeParams = scopeEntries.flatMap(([k, v]) => [`$.${k}`, String(v)]);
+  const scoped = db.query(`SELECT rowid AS r, data, linked_memory_ids FROM entities${scopeClause ? ` WHERE ${scopeClause}` : ""}`).all(...scopeParams);
+  const byNormalized = new Map;
+  for (const row of scoped) {
+    const normalized = normalizeEntityText(row.data);
+    if (normalized && !byNormalized.has(normalized))
+      byNormalized.set(normalized, row);
+  }
+  const selectVec = db.query("SELECT embedding FROM vec_entities WHERE rowid = ?");
+  const vectorOf = (rowid) => {
+    const row = selectVec.get(rowid);
+    if (!row)
+      return null;
+    const buf = row.embedding;
+    return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+  };
+  const update = db.query("UPDATE entities SET linked_memory_ids = ? WHERE rowid = ?");
+  const insert = db.query("INSERT INTO entities (id, data, entity_type, linked_memory_ids, metadata, created_at) VALUES (?,?,?,?,?,?)");
+  const selectRowid = db.query("SELECT rowid AS r FROM entities WHERE id = ?");
+  const insertVec = db.query("INSERT INTO vec_entities(rowid, embedding) VALUES (?, ?)");
+  const now = Date.now();
+  const metadataJson = JSON.stringify(Object.fromEntries(scopeEntries));
+  db.transaction(() => {
+    for (const entity of entities) {
+      const normalized = normalizeEntityText(entity.data);
+      if (!normalized)
+        continue;
+      let match = byNormalized.get(normalized) ?? null;
+      if (!match) {
+        for (const row of scoped) {
+          const vec = vectorOf(row.r);
+          if (vec && entitySimilarity(entity.embedding, vec) >= ENTITY_SEMANTIC_MATCH_THRESHOLD) {
+            match = row;
+            break;
+          }
+        }
+      }
+      if (match) {
+        const merged = Array.from(new Set([
+          ...JSON.parse(match.linked_memory_ids),
+          ...entity.memory_ids
+        ])).sort();
+        match.linked_memory_ids = JSON.stringify(merged);
+        update.run(match.linked_memory_ids, match.r);
+        continue;
+      }
+      const id = randomUUID();
+      insert.run(id, entity.data, entity.entity_type, JSON.stringify([...entity.memory_ids].sort()), metadataJson, now);
+      const rowid = selectRowid.get(id).r;
+      insertVec.run(rowid, Buffer.from(new Float32Array(entity.embedding).buffer));
+    }
+  })();
+}
 
 // src/core/memory/add.ts
+init_logger();
 var EXISTING_MEMORY_TOP_K = 10;
 var SESSION_CONTEXT_LIMIT = 10;
 var MAX_KNN_K2 = 4096;
@@ -3130,7 +3264,7 @@ async function addMemories(args) {
   const rows = [];
   for (const [i, m] of extracted.entries()) {
     rows.push({
-      id: randomUUID(),
+      id: randomUUID2(),
       memory: m.text,
       metadata: {
         ...metadata,
@@ -3149,9 +3283,52 @@ async function addMemories(args) {
     new_memory: r.memory,
     event: "ADD"
   })));
+  try {
+    await linkExtractedEntities(db, extracted, rows, insertedSet, filters);
+  } catch (err) {
+    log.warn("entity linking failed; memories were stored without entity links", {
+      error: err.message
+    });
+  }
   return {
     results: stored.map((r) => ({ id: r.id, memory: r.memory, event: "ADD" }))
   };
+}
+async function linkExtractedEntities(db, extracted, rows, insertedSet, filters) {
+  const globalEntities = new Map;
+  for (const [i, m] of extracted.entries()) {
+    const row = rows[i];
+    if (!insertedSet.has(row.id))
+      continue;
+    for (const entity of m.entities) {
+      const key = normalizeEntityText(entity.text);
+      if (!key)
+        continue;
+      const existing = globalEntities.get(key);
+      if (existing)
+        existing.memoryIds.add(row.id);
+      else
+        globalEntities.set(key, { type: entity.type, text: entity.text, memoryIds: new Set([row.id]) });
+    }
+  }
+  if (globalEntities.size === 0)
+    return;
+  const list = Array.from(globalEntities.values());
+  const embeddings = await embedPassageBatch(list.map((e) => e.text));
+  if (embeddings.length === 0)
+    return;
+  const scope = {};
+  for (const key of ["user_id", "agent_id", "run_id"]) {
+    if (filters[key] !== undefined && filters[key] !== null)
+      scope[key] = filters[key];
+  }
+  const links = list.map((e, i) => ({
+    data: e.text,
+    entity_type: e.type,
+    memory_ids: Array.from(e.memoryIds),
+    embedding: embeddings[i]
+  }));
+  linkEntities(db, links, scope);
 }
 async function retrieveExisting(db, messages, filters) {
   const vectorCount = db.query("SELECT COUNT(*) AS c FROM vec_memories").get().c;

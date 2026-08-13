@@ -1,5 +1,8 @@
 import type { LLMProvider } from '../llm/types.js';
-import { ADDITIVE_EXTRACTION_PROMPT, generateAdditiveExtractionPrompt, type PromptArgs } from './prompts.js';
+import {
+  ADDITIVE_EXTRACTION_PROMPT, ENTITY_EXTRACTION_SUFFIX,
+  generateAdditiveExtractionPrompt, type PromptArgs,
+} from './prompts.js';
 
 /** main.py raises rather than returning [] so callers can tell "LLM down" from "no facts". */
 export class LLMError extends Error {
@@ -9,11 +12,32 @@ export class LLMError extends Error {
   }
 }
 
+export interface ExtractedEntity {
+  type: string | null;
+  text: string;
+}
+
 export interface ExtractedMemory {
   id: string;
   text: string;
   attributed_to: 'user' | 'assistant';
   linked_memory_ids: string[];
+  entities: ExtractedEntity[];
+}
+
+function parseEntities(raw: unknown): ExtractedEntity[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ExtractedEntity[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.text !== 'string' || row.text.trim() === '') continue;
+    out.push({
+      type: typeof row.type === 'string' ? row.type : null,
+      text: row.text.trim(),
+    });
+  }
+  return out;
 }
 
 function stripFences(text: string): string {
@@ -60,6 +84,7 @@ export function parseExtractionResponse(raw: string): ExtractedMemory[] {
       linked_memory_ids: Array.isArray(row.linked_memory_ids)
         ? row.linked_memory_ids.filter((v): v is string => typeof v === 'string')
         : [],
+      entities: parseEntities(row.entities),
     });
   }
   return out;
@@ -73,7 +98,7 @@ export async function extractMemories(
   let response: { text: string };
   try {
     response = await provider.complete(prompt, {
-      systemPrompt: ADDITIVE_EXTRACTION_PROMPT,
+      systemPrompt: ADDITIVE_EXTRACTION_PROMPT + ENTITY_EXTRACTION_SUFFIX,
       maxTokens: 4000,
     });
   } catch (error) {

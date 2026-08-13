@@ -3,10 +3,14 @@ import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'crypto';
 import type { LLMProvider } from '../llm/types.js';
 import { embedPassageBatch, embedQuery } from '../embeddings.js';
-import { extractMemories } from './extract.js';
+import { extractMemories, type ExtractedMemory } from './extract.js';
 import type { Message, ExistingMemoryRef } from './prompts.js';
-import { insertMemories, recordHistory, type NewMemory } from './store.js';
+import {
+  insertMemories, recordHistory, linkEntities, normalizeEntityText,
+  type NewMemory, type EntityLink,
+} from './store.js';
 import { buildFilterSql, type Filters } from './filters.js';
+import { log } from '../logger.js';
 
 const EXISTING_MEMORY_TOP_K = 10;
 const SESSION_CONTEXT_LIMIT = 10;
@@ -77,11 +81,60 @@ export async function addMemories(args: AddArgs): Promise<AddResult> {
     event: 'ADD',
   })));
 
-  // Phase 7: entity linking is folded into extraction (sanctioned deviation: no spaCy).
+  // Phase 7: batch entity linking. The entities come from the same extraction
+  // call (sanctioned deviation: no spaCy). Non-fatal like upstream — an entity
+  // failure must not undo the already-persisted memories.
+  try {
+    await linkExtractedEntities(db, extracted, rows, insertedSet, filters);
+  } catch (err) {
+    log.warn('entity linking failed; memories were stored without entity links', {
+      error: (err as Error).message,
+    });
+  }
 
   return {
     results: stored.map(r => ({ id: r.id, memory: r.memory, event: 'ADD' as const })),
   };
+}
+
+/** Phase 7a-7e of main.py: global dedup by normalized text, one batch embed, then match-or-insert. */
+async function linkExtractedEntities(
+  db: Database,
+  extracted: ExtractedMemory[],
+  rows: NewMemory[],
+  insertedSet: Set<string>,
+  filters: Filters,
+): Promise<void> {
+  const globalEntities = new Map<string, { type: string | null; text: string; memoryIds: Set<string> }>();
+  for (const [i, m] of extracted.entries()) {
+    const row = rows[i];
+    if (!insertedSet.has(row.id)) continue;
+    for (const entity of m.entities) {
+      const key = normalizeEntityText(entity.text);
+      if (!key) continue;
+      const existing = globalEntities.get(key);
+      if (existing) existing.memoryIds.add(row.id);
+      else globalEntities.set(key, { type: entity.type, text: entity.text, memoryIds: new Set([row.id]) });
+    }
+  }
+  if (globalEntities.size === 0) return;
+
+  const list = Array.from(globalEntities.values());
+  const embeddings = await embedPassageBatch(list.map(e => e.text));
+  if (embeddings.length === 0) return; // embeddings disabled
+
+  const scope: Record<string, unknown> = {};
+  for (const key of ['user_id', 'agent_id', 'run_id'] as const) {
+    if (filters[key] !== undefined && filters[key] !== null) scope[key] = filters[key];
+  }
+
+  const links: EntityLink[] = list.map((e, i) => ({
+    data: e.text,
+    entity_type: e.type,
+    memory_ids: Array.from(e.memoryIds),
+    embedding: embeddings[i],
+  }));
+  linkEntities(db, links, scope);
 }
 
 async function retrieveExisting(

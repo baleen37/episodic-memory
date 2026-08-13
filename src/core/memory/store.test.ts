@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
 import { createMemorySchema } from './schema.js';
 import {
-  md5, insertMemories, getExistingHashes, recordHistory, upsertEntities, getMemoryRowid,
+  md5, insertMemories, getExistingHashes, recordHistory, linkEntities, getMemoryRowid,
   deleteMemoriesByRunIds,
 } from './store.js';
 
@@ -119,6 +119,32 @@ describe('deleteMemoriesByRunIds', () => {
     expect(purgedFtsHits).toHaveLength(0);
   });
 
+  test('strips deleted memory ids from entity links and drops entities left empty', () => {
+    const db = freshDb();
+    const unitVec = (idx: number): number[] => {
+      const v = new Array(384).fill(0);
+      v[idx] = 1;
+      return v;
+    };
+    insertMemories(db, [
+      { id: 'm1', memory: 'fact from purged run', metadata: { run_id: 'purged-run' }, embedding: EMB },
+      { id: 'm2', memory: 'fact from kept run', metadata: { run_id: 'kept-run' }, embedding: EMB },
+    ]);
+    linkEntities(db, [
+      { data: 'OnlyPurged', entity_type: null, memory_ids: ['m1'], embedding: unitVec(0) },
+      { data: 'Shared', entity_type: null, memory_ids: ['m1', 'm2'], embedding: unitVec(1) },
+    ], { user_id: 'local' });
+
+    deleteMemoriesByRunIds(db, ['purged-run']);
+
+    const rows = db.query('SELECT data, linked_memory_ids FROM entities ORDER BY data').all() as
+      Array<{ data: string; linked_memory_ids: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data).toBe('Shared');
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual(['m2']);
+    expect((db.query('SELECT COUNT(*) c FROM vec_entities').get() as { c: number }).c).toBe(1);
+  });
+
   test('handles an empty run_id list without touching the store', () => {
     const db = freshDb();
     insertMemories(db, [{ id: 'u1', memory: 'kept', metadata: { run_id: 'r' }, embedding: EMB }]);
@@ -134,20 +160,70 @@ describe('deleteMemoriesByRunIds', () => {
   });
 });
 
-describe('upsertEntities', () => {
-  test('stores entities with their linked memory ids', () => {
+describe('linkEntities', () => {
+  const SCOPE = { user_id: 'local', agent_id: 'claude-projects', run_id: 'r1' };
+
+  function unitVec(idx: number): number[] {
+    const v = new Array(384).fill(0);
+    v[idx] = 1;
+    return v;
+  }
+
+  function allEntities(db: Database): Array<Record<string, string>> {
+    return db.query('SELECT * FROM entities ORDER BY data').all() as Array<Record<string, string>>;
+  }
+
+  test('inserts a new entity with scope metadata, links, and a vector row', () => {
     const db = freshDb();
-    upsertEntities(db, [{ id: 'e1', data: 'Max', entity_type: 'PET', linked_memory_ids: ['u1'], embedding: EMB }]);
-    const row = db.query('SELECT * FROM entities WHERE id = ?').get('e1') as Record<string, string>;
-    expect(row.data).toBe('Max');
-    expect(JSON.parse(row.linked_memory_ids)).toEqual(['u1']);
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m1'], embedding: unitVec(0) }], SCOPE);
+
+    const rows = allEntities(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data).toBe('Poppy');
+    expect(rows[0].entity_type).toBe('PROPER');
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual(['m1']);
+    expect(JSON.parse(rows[0].metadata)).toEqual(SCOPE);
+    expect((db.query('SELECT COUNT(*) c FROM vec_entities').get() as { c: number }).c).toBe(1);
   });
 
-  test('merges linked ids when the entity already exists', () => {
+  test('merges linked ids on exact normalized text match', () => {
     const db = freshDb();
-    upsertEntities(db, [{ id: 'e1', data: 'Max', entity_type: 'PET', linked_memory_ids: ['u1'], embedding: EMB }]);
-    upsertEntities(db, [{ id: 'e1', data: 'Max', entity_type: 'PET', linked_memory_ids: ['u2'], embedding: EMB }]);
-    const row = db.query('SELECT linked_memory_ids AS l FROM entities WHERE id = ?').get('e1') as { l: string };
-    expect(JSON.parse(row.l).sort()).toEqual(['u1', 'u2']);
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m1'], embedding: unitVec(0) }], SCOPE);
+    // Different casing/whitespace and a dissimilar embedding: exact match wins first.
+    linkEntities(db, [{ data: '  poppy ', entity_type: 'PROPER', memory_ids: ['m2'], embedding: unitVec(1) }], SCOPE);
+
+    const rows = allEntities(db);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual(['m1', 'm2']);
+  });
+
+  test('merges linked ids on semantic match at or above 0.95', () => {
+    const db = freshDb();
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m1'], embedding: unitVec(0) }], SCOPE);
+    linkEntities(db, [{ data: 'Poppy the dog', entity_type: 'PROPER', memory_ids: ['m2'], embedding: unitVec(0) }], SCOPE);
+
+    const rows = allEntities(db);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual(['m1', 'm2']);
+  });
+
+  test('inserts a separate entity when text differs and similarity is below 0.95', () => {
+    const db = freshDb();
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m1'], embedding: unitVec(0) }], SCOPE);
+    linkEntities(db, [{ data: 'Shopify', entity_type: 'PROPER', memory_ids: ['m2'], embedding: unitVec(1) }], SCOPE);
+
+    expect(allEntities(db)).toHaveLength(2);
+  });
+
+  test('does not match entities from a different scope', () => {
+    const db = freshDb();
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m1'], embedding: unitVec(0) }], SCOPE);
+    linkEntities(db, [{ data: 'Poppy', entity_type: 'PROPER', memory_ids: ['m2'], embedding: unitVec(0) }],
+      { ...SCOPE, run_id: 'r2' });
+
+    const rows = allEntities(db);
+    expect(rows).toHaveLength(2);
+    expect(JSON.parse(rows[0].linked_memory_ids)).toEqual(['m1']);
+    expect(JSON.parse(rows[1].linked_memory_ids)).toEqual(['m2']);
   });
 });
