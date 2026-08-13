@@ -15,6 +15,7 @@ import {
   type SearchQualityFixture,
   type SearchQualityQuery,
 } from './search-quality-fixture.js';
+import type { InsertResult } from '../src/core/memory/store.js';
 
 export interface BenchmarkSearchResult {
   id: string;
@@ -48,6 +49,15 @@ function nearestRankP95(durations: number[]): number {
 
 function formatMetric(name: string, value: number): string {
   return `METRIC ${name}=${value.toFixed(6)}`;
+}
+
+export function assertFixtureInserted(result: InsertResult, expectedCount: number): void {
+  if (result.inserted.length !== expectedCount || result.skipped.length !== 0) {
+    throw new Error(
+      `search quality fixture insertion mismatch: expected ${expectedCount} inserted and 0 skipped, `
+      + `got ${result.inserted.length} inserted and ${result.skipped.length} skipped`,
+    );
+  }
 }
 
 export async function runSearchQualityBenchmark(
@@ -96,11 +106,14 @@ async function runBenchmarkCommand(): Promise<void> {
   const fixture = await loadSearchQualityFixture();
   const db = new Database(':memory:');
   const queryEmbeddings = new Map(fixture.queries.map((query) => [query.query, query.queryEmbedding]));
+  const previousEmbeddingsDisabled = process.env.MEMMEM_DISABLE_EMBEDDINGS;
+  delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
 
   try {
     sqliteVec.load(db);
     createMemorySchema(db);
-    insertMemories(db, fixture.corpus);
+    const insertResult = insertMemories(db, fixture.corpus);
+    assertFixtureInserted(insertResult, fixture.corpus.length);
     __setEmbeddingConfigForTests(() => null);
     __setModelForTests(async () => {}, async (_kind, query) => queryEmbeddings.get(query) ?? null);
 
@@ -117,6 +130,11 @@ async function runBenchmarkCommand(): Promise<void> {
   } finally {
     __setModelForTests(null, null);
     __setEmbeddingConfigForTests(null);
+    if (previousEmbeddingsDisabled === undefined) {
+      delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    } else {
+      process.env.MEMMEM_DISABLE_EMBEDDINGS = previousEmbeddingsDisabled;
+    }
     db.close();
   }
 }

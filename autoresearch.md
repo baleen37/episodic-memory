@@ -22,6 +22,8 @@ the locked benchmark, the test suite, typecheck, and build in that order.
 - `src/core/memory/quality-metrics.test.ts`
 - `scripts/search-quality-fixture.ts`
 - `scripts/search-quality-fixture.test.ts`
+- `tests/fixtures/search-quality-corpus.json`
+- `tests/fixtures/search-quality-queries.json`
 
 ## Five-run baseline
 
@@ -30,8 +32,8 @@ deviation across five runs.
 
 | Metric | Mean | Std. dev. |
 | --- | ---: | ---: |
-| `ndcg_at_10` | 0.623323 | 0.000000 |
-| `recall_at_5` | 0.550000 | 0.000000 |
-| `mrr_at_10` | 0.625000 | 0.000000 |
+| `ndcg_at_10` | 0.660586 | 0.000000 |
+| `recall_at_5` | 0.575000 | 0.000000 |
+| `mrr_at_10` | 0.675000 | 0.000000 |
 | `empty_rate` | 0.000000 | 0.000000 |
-| `p95_ms` | 0.460175 | 0.030795 |
+| `p95_ms` | 0.522725 | 0.087884 |

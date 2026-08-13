@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { runSearchQualityBenchmark } from './search-quality-benchmark.js';
+import { Database } from 'bun:sqlite';
+import * as sqliteVec from 'sqlite-vec';
+import { createMemorySchema } from '../src/core/memory/schema.js';
+import { insertMemories } from '../src/core/memory/store.js';
+import { assertFixtureInserted, runSearchQualityBenchmark } from './search-quality-benchmark.js';
+import { loadSearchQualityFixture } from './search-quality-fixture.js';
 
 describe('search quality benchmark', () => {
   test('aggregates one metric value per query and emits the locked names', async () => {
@@ -69,5 +74,20 @@ describe('search quality benchmark', () => {
       'METRIC empty_rate=0.000000',
       'METRIC p95_ms=12.000000',
     ]);
+  });
+
+  test('inserts every locked corpus row without deduplication', async () => {
+    const fixture = await loadSearchQualityFixture();
+    const db = new Database(':memory:');
+    try {
+      sqliteVec.load(db);
+      createMemorySchema(db);
+      const result = insertMemories(db, fixture.corpus);
+      expect(() => assertFixtureInserted(result, fixture.corpus.length)).not.toThrow();
+      expect(result.inserted).toHaveLength(fixture.corpus.length);
+      expect(result.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
   });
 });

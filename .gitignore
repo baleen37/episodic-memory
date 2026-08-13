@@ -32,6 +32,6 @@ logs/
 .claude/settings.local.json
 
 # Autoresearch runtime state
-autoresearch.jsonl
-.autoresearch-off
-autoresearch.ideas.md
+/autoresearch.jsonl
+/.autoresearch-off
+/autoresearch.ideas.md
