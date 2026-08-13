@@ -30,3 +30,8 @@ logs/
 
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# Autoresearch runtime state
+/autoresearch.jsonl
+/.autoresearch-off
+/autoresearch.ideas.md

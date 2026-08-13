@@ -21,6 +21,7 @@
     "postinstall": "bash scripts/conditional-build.sh",
     "build": "bun scripts/build.mjs",
     "typecheck": "tsc --noEmit",
+    "bench:search-quality": "bun scripts/search-quality-benchmark.ts",
     "compat:check": "bash scripts/verify-runtime-compatibility.test.sh",
     "compat:preflight": "bash scripts/preflight-runtime-compatibility.sh",
     "test": "bun test",
