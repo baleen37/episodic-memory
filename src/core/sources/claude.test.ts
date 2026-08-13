@@ -16,10 +16,6 @@ describe('parseClaudeJsonl', () => {
       sourceKind: 'claude-code-projects',
       lineStart: 1,
       lineEnd: 2,
-      sessionId: 's1',
-      project: null,
-      cwd: '/repo',
-      gitBranch: 'main',
       observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
       text: 'User: How do we sync?\nAssistant: Copy transcripts into archive.',
     });
@@ -45,7 +41,7 @@ describe('parseClaudeJsonl', () => {
 
     expect(spans).toHaveLength(1);
     expect(spans[0].text).toBe('User: Inspect the file\nAssistant: I will read it.\nThe file defines the parser.');
-    expect(spans[0].model).toBe('claude-sonnet');
+    expect('model' in spans[0]).toBe(false);
     expect(spans[0].lineEnd).toBe(4);
   });
 

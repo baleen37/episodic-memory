@@ -1,6 +1,6 @@
 import { openMemoryDb } from '../core/memory/schema.js';
 import { searchMemories } from '../core/memory/search.js';
-import { LOCAL_USER_ID } from './sync.js';
+import { LOCAL_USER_ID } from '../core/constants.js';
 
 export interface SearchCliArgs {
   query: string;

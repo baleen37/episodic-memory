@@ -4,7 +4,7 @@ Memmem - Persistent conversation memory across Claude Code and Codex sessions.
 
 ## Purpose
 
-memmem syncs local Claude Code and Codex transcripts into an archive, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through CLI and MCP. It is based on [@obra/episodic-memory](https://github.com/obra/episodic-memory),
+memmem syncs local Claude Code and Codex transcripts into an archive, extracts event/fact memory records, and exposes scoped memory search through CLI and MCP. It is based on [@obra/episodic-memory](https://github.com/obra/episodic-memory),
 integrated into the Claude Code and Codex plugin ecosystems.
 
 ## Features
@@ -13,8 +13,7 @@ integrated into the Claude Code and Codex plugin ecosystems.
 - **Memory Search**: Searches indexed event/fact memory records
 - **Semantic Search**: Vector embeddings for intelligent similarity matching
 - **Text Search**: Fast exact-text matching for specific terms
-- **Source Filtering**: Filter by source kind and date range
-- **Archive Reading**: Archived transcript retrieval with line ranges
+- **Local Scope**: Keeps CLI and MCP search scoped to this machine's memory
 - **Inline Exclusion Markers**: Exclude sensitive conversations with `DO NOT INDEX THIS CHAT`
 - **CLI Interface**: Direct CLI access for manual operations
 
@@ -22,15 +21,14 @@ integrated into the Claude Code and Codex plugin ecosystems.
 
 ### `search-conversation`
 
-Search indexed event/fact memory records. Returns compact candidates with `id`, `kind`, `project`, `description`, and optional `score`. Use `fetch` with a returned `id` only when raw transcript evidence is needed.
-Saves context by searching first and reading archive lines only when needed.
+Search indexed event/fact memory records. The MCP surface exposes one read-only `search` tool that returns stored memory text, metadata, timestamps, and relevance scores.
 
 **The agent automatically:**
 
 1. Searches event/fact memory records
-2. Reads raw transcript lines only if needed
+2. Interprets the returned memory text and metadata
 3. Synthesizes findings into a concise summary
-4. Returns actionable insights with sources
+4. Returns actionable insights with record identifiers
 
 **Always use the agent instead of MCP tools directly** to avoid wasting context.
 
@@ -65,31 +63,20 @@ These tools are exposed for advanced usage.
 
 ### `memmem__search`
 
-Search indexed event/fact memory records. Use `read` with the returned archive path and line range when raw transcript evidence is needed.
+Search indexed event/fact memory records.
 
 **Parameters:**
 
 - `query` (string, required): Search query
-- `limit` (number, optional): Maximum results to return (1-50, default: 10)
-- `before` (string, optional): Only memories before this date (YYYY-MM-DD)
-- `after` (string, optional): Only memories after this date (YYYY-MM-DD)
-- `source_kind` (string, optional): Filter to a source kind such as `claude-code-projects` or `codex-sessions`
+- `limit` (number, optional): Maximum results to return (1-50, default: 20)
+- `threshold` (number, optional): Minimum semantic score from 0 to 1
+- `explain` (boolean, optional): Include the score breakdown
 
 **Example:**
 
 ```javascript
-{ query: "React Router authentication errors", after: "2026-05-01" }
+{ query: "React Router authentication errors", limit: 10, threshold: 0.2 }
 ```
-
-### `memmem__read`
-
-Reads archived transcript lines.
-
-**Parameters:**
-
-- `path` (string, required): Archive path from search results
-- `startLine` (number, optional): Starting line number (1-indexed)
-- `endLine` (number, optional): Ending line number (1-indexed)
 
 ## Installation
 
@@ -106,7 +93,7 @@ The plugin automatically:
 
 1. Creates `~/.config/memmem/` directory
 2. Syncs and indexes transcripts via the SessionStart hook
-3. Provides MCP tools for memory search and archive reading
+3. Provides the MCP memory search tool
 
 ## Runtime compatibility
 
@@ -143,7 +130,7 @@ memmem sync
 This:
 
 1. Copies Claude Code and Codex transcripts into `~/.config/memmem/conversation-archive/`
-2. Extracts source-linked event/fact memory records from changed archive files
+2. Extracts event/fact memory records from changed archive files
 3. Generates embeddings using Transformers.js
 4. Stores memory record metadata and vectors in SQLite
 5. Runs in background
@@ -193,7 +180,7 @@ Create `~/.config/memmem/config.json` to customize rate limits:
 }
 ```
 
-Archive sync and `read` do not require an LLM provider configuration. Memory extraction during indexing does require a configured LLM provider; without one, spans are skipped and no memory rows are created for those spans.
+Archive sync does not require an LLM provider configuration. Memory extraction during indexing does require a configured LLM provider; without one, archives are copied but no memory rows are created.
 
 ## Development
 
@@ -232,16 +219,12 @@ memmem search "what did we decide about memory records?"
 
 Expected output example:
 
-```md
-## [event, claude-code-projects, 2026-06-01] memmem
-The user decided to remove exchange as the primary concept and use event/fact memory records.
-Source: /path/to/archive.jsonl:120-124
+```text
+1. [0.82] The user decided to use event/fact memory records.
+   id: memory-id
 ```
 
 ```bash
-# Read archived transcript lines
-memmem read /path/to/archive.jsonl --start-line 1 --end-line 20
-
 # Print memory index statistics
 memmem stats
 
@@ -263,20 +246,20 @@ plugins/memmem/
 │   └── hooks.json               # Auto-sync on session start (startup|resume)
 ├── src/
 │   ├── core/                    # Core library
-│   │   ├── indexer.ts           # Archive file indexing
-│   │   ├── search.ts            # Semantic + text search
-│   │   ├── db.ts                # SQLite + vector schema
+│   │   ├── sync-run.ts          # Archive indexing policy
+│   │   ├── memory/              # Memory extraction, storage, and search
+│   │   ├── constants.ts         # Shared scope and embedding constants
 │   │   └── sources/             # Claude Code and Codex adapters
 │   ├── cli/                     # CLI commands
 │   │   ├── sync.ts              # Sync command
 │   │   ├── search.ts            # Search command
-│   │   ├── read.ts              # Read command
 │   │   ├── stats.ts             # Stats command
 │   │   ├── verify.ts            # Verify command
 │   │   ├── doctor.ts            # Doctor command
 │   │   └── mcp.ts               # MCP subcommand (spawns MCP server)
 │   └── mcp/
-│       └── server.ts            # MCP server (search, read tools)
+│       ├── handlers.ts          # MCP search handler
+│       └── server.ts            # MCP server (search tool)
 ├── bin/
 │   └── memmem                   # Graceful wrapper executable (entrypoint)
 ├── dist/

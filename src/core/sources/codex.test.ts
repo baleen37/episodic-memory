@@ -19,13 +19,6 @@ describe('parseCodexJsonl', () => {
       sourceKind: 'codex-sessions',
       lineStart: 2,
       lineEnd: 5,
-      sessionId: 'codex-session',
-      project: null,
-      cwd: '/repo',
-      gitBranch: 'main',
-      model: 'gpt-5.1',
-      provider: 'codex',
-      metadataJson: JSON.stringify({ source: 'codex' }),
       observedAt: Date.parse('2026-05-26T00:00:00.000Z'),
       text: 'User: Run tests\nAssistant: Tests passed.',
     });
@@ -56,12 +49,12 @@ describe('parseCodexJsonl', () => {
     const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
 
     expect(spans).toHaveLength(1);
-    expect(spans[0]).toMatchObject({ model: 'gpt-5.2', provider: 'codex', observedAt: Date.parse('2026-05-26T00:00:00.000Z') });
+    expect(spans[0]).toMatchObject({ observedAt: Date.parse('2026-05-26T00:00:00.000Z') });
     expect(spans[0].text).toBe('User: Search and run\nAssistant: Done.');
     expect('toolCalls' in spans[0]).toBe(false);
   });
 
-  test('snapshots turn context metadata per span', () => {
+  test('skips turn context records while parsing spans', () => {
     const jsonl = [
       JSON.stringify({ type: 'session_meta', payload: { id: 'codex-session', model_provider: 'openai' } }),
       JSON.stringify({ type: 'turn_context', payload: { cwd: '/repo-a', model: 'model-a' } }),
@@ -75,17 +68,17 @@ describe('parseCodexJsonl', () => {
     const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/rollout.jsonl', sourceKind: 'codex-sessions' });
 
     expect(spans).toHaveLength(2);
-    expect(spans[0]).toMatchObject({ model: 'model-a', observedAt: Date.parse('2026-05-26T00:00:00.000Z'), text: 'User: First\nAssistant: First done.' });
-    expect(spans[1]).toMatchObject({ model: 'model-b', observedAt: Date.parse('2026-05-26T00:00:02.000Z'), text: 'User: Second\nAssistant: Second done.' });
+    expect(spans[0]).toMatchObject({ observedAt: Date.parse('2026-05-26T00:00:00.000Z'), text: 'User: First\nAssistant: First done.' });
+    expect(spans[1]).toMatchObject({ observedAt: Date.parse('2026-05-26T00:00:02.000Z'), text: 'User: Second\nAssistant: Second done.' });
   });
 
-  test('codex span carries cwd from session_meta payload', () => {
+  test('codex span ignores source metadata outside the indexing contract', () => {
     const jsonl = [
       JSON.stringify({ type: 'session_meta', payload: { id: 's1', cwd: '/Users/me/dev/acme/gadget' } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] } }),
       JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'yo' }] } }),
     ].join('\n');
     const spans = parseCodexJsonl(jsonl, { archivePath: '/archive/codex-sessions/s1.jsonl', sourceKind: 'codex-sessions' });
-    expect(spans[0]?.cwd).toBe('/Users/me/dev/acme/gadget');
+    expect('cwd' in spans[0]).toBe(false);
   });
 });

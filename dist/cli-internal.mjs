@@ -1492,6 +1492,7 @@ import * as sqliteVec from "sqlite-vec";
 
 // src/core/constants.ts
 var EMBEDDING_DIM = 384;
+var LOCAL_USER_ID = "local";
 
 // src/core/memory/schema.ts
 var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
@@ -2385,6 +2386,45 @@ async function searchMemories(args) {
   return { results };
 }
 
+// src/cli/search.ts
+async function runSearchCli(args) {
+  if (args.after || args.before) {
+    throw new Error("--after/--before are not yet supported in the mem0 v2 surface");
+  }
+  const db = openMemoryDb();
+  try {
+    const filters = { user_id: LOCAL_USER_ID };
+    if (args.sourceKind)
+      filters.agent_id = args.sourceKind;
+    const { results } = await searchMemories({
+      db,
+      query: args.query,
+      filters,
+      limit: args.limit
+    });
+    for (const result of results) {
+      console.log(`## ${result.memory}`);
+      console.log(`Score: ${Math.round(result.score * 100)}%`);
+      console.log("");
+    }
+  } finally {
+    db.close();
+  }
+}
+
+// src/cli/stats.ts
+function runStatsCli() {
+  const db = openMemoryDb();
+  try {
+    const stats = getMemoryStats(db);
+    console.log(`Total memories: ${stats.totalMemories}`);
+    console.log(`Vectorized: ${stats.vectorizedMemories}`);
+    console.log(`Missing vectors: ${stats.missingVectors}`);
+  } finally {
+    db.close();
+  }
+}
+
 // src/cli/sync.ts
 import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync2, readdirSync as readdirSync4, readFileSync as readFileSync3, renameSync, rmSync as rmSync2, statSync as statSync4, unlinkSync as unlinkSync2 } from "fs";
 import path6 from "path";
@@ -3145,6 +3185,73 @@ async function retrieveExisting(db, messages, filters) {
   return rows;
 }
 
+// src/core/sync-run.ts
+init_logger();
+async function indexPendingArchives(args) {
+  const { files, provider, extractionBudget, readArchiveFile, markIndexed, indexSpan } = args;
+  const result = {
+    filesIndexed: 0,
+    memoriesAdded: 0,
+    skipped: 0,
+    failed: 0
+  };
+  const total = files.length;
+  if (total > 0) {
+    log.info(`Indexing ${total} archive file${total === 1 ? "" : "s"}...`);
+  }
+  let remainingBudget = extractionBudget;
+  const progressInterval = Math.max(1, Math.floor(total / 20));
+  for (const file of files) {
+    if (provider && remainingBudget <= 0) {
+      log.info("Extraction budget exhausted; deferring remaining files to next sync", {
+        remaining: total - result.filesIndexed
+      });
+      break;
+    }
+    const content = readArchiveFile(file.archivePath);
+    if (content === null) {
+      result.skipped++;
+      continue;
+    }
+    const spans = file.adapter.parse(content, {
+      archivePath: file.archivePath,
+      sourceKind: file.adapter.kind
+    });
+    if (!provider) {
+      result.filesIndexed++;
+      logProgress(result.filesIndexed, total, progressInterval);
+      continue;
+    }
+    let hadFailure = false;
+    for (const span of spans) {
+      remainingBudget--;
+      try {
+        result.memoriesAdded += await indexSpan(file, span, provider);
+      } catch (error) {
+        hadFailure = true;
+        result.failed++;
+        log.warn("Span extraction failed; continuing sync.", {
+          archivePath: file.archivePath,
+          lineStart: span.lineStart,
+          lineEnd: span.lineEnd,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    if (!hadFailure) {
+      markIndexed(file.archivePath, file.mtimeMs);
+      result.filesIndexed++;
+    }
+    logProgress(result.filesIndexed, total, progressInterval);
+  }
+  return result;
+}
+function logProgress(indexed, total, interval) {
+  if (indexed % interval === 0 || indexed === total) {
+    log.info(`  ${indexed}/${total} indexed`);
+  }
+}
+
 // src/core/llm/index.ts
 init_gemini_provider();
 init_zai_provider();
@@ -3283,13 +3390,6 @@ function parseClaudeJsonl(content, context) {
         lineStart: current.lineStart,
         lineEnd: current.lineEnd,
         sourceKind: current.sourceKind,
-        sessionId: current.sessionId,
-        project: current.project,
-        cwd: current.cwd,
-        gitBranch: current.gitBranch,
-        model: current.model,
-        provider: current.provider,
-        metadataJson: current.metadataJson,
         observedAt: current.observedAt,
         text,
         messages
@@ -3314,13 +3414,6 @@ function parseClaudeJsonl(content, context) {
         lineStart: lineNumber,
         lineEnd: lineNumber,
         sourceKind: context.sourceKind,
-        sessionId: asString(item.sessionId),
-        project: null,
-        cwd: asString(item.cwd),
-        gitBranch: asString(item.gitBranch),
-        model: asString(item.model),
-        provider: asString(item.provider),
-        metadataJson: null,
         observedAt: parseTimestamp(item.timestamp),
         userText,
         assistantTexts: []
@@ -3330,14 +3423,8 @@ function parseClaudeJsonl(content, context) {
     if (!current)
       return;
     current.lineEnd = lineNumber;
-    current.sessionId ??= asString(item.sessionId);
-    current.cwd ??= asString(item.cwd);
-    current.gitBranch ??= asString(item.gitBranch);
-    current.model ??= asString(item.model);
-    current.provider ??= asString(item.provider);
     current.observedAt ??= parseTimestamp(item.timestamp);
     if (role === "assistant") {
-      current.model ??= asString(message?.model);
       const text = extractText(messageContent).trim();
       if (text)
         current.assistantTexts.push(text);
@@ -3403,7 +3490,6 @@ import os3 from "os";
 import path5 from "path";
 function parseCodexJsonl(content, context) {
   const spans = [];
-  const meta = { sessionId: null, cwd: null, gitBranch: null, model: null };
   let current = null;
   const flushCurrent = () => {
     if (!current)
@@ -3422,13 +3508,6 @@ function parseCodexJsonl(content, context) {
         lineStart: current.lineStart,
         lineEnd: current.lineEnd,
         sourceKind: context.sourceKind,
-        sessionId: current.sessionId,
-        project: null,
-        cwd: meta.cwd,
-        gitBranch: meta.gitBranch,
-        model: current.model,
-        provider: "codex",
-        metadataJson: JSON.stringify({ source: "codex" }),
         observedAt: current.observedAt,
         text,
         messages
@@ -3437,24 +3516,6 @@ function parseCodexJsonl(content, context) {
     current = null;
   };
   eachJsonLine(content, (item, lineNumber) => {
-    if (item.type === "session_meta") {
-      const payload2 = asObject(item.payload);
-      if (payload2) {
-        meta.sessionId = asString(payload2.id);
-        meta.cwd = asString(payload2.cwd);
-        meta.gitBranch = asString(asObject(payload2.git)?.branch);
-        meta.model = asString(payload2.model);
-      }
-      return;
-    }
-    if (item.type === "turn_context") {
-      const payload2 = asObject(item.payload);
-      if (payload2) {
-        meta.cwd = asString(payload2.cwd) ?? meta.cwd;
-        meta.model = asString(payload2.model) ?? meta.model;
-      }
-      return;
-    }
     if (item.type !== "response_item")
       return;
     const payload = asObject(item.payload);
@@ -3467,10 +3528,6 @@ function parseCodexJsonl(content, context) {
         current = {
           lineStart: lineNumber,
           lineEnd: lineNumber,
-          sessionId: meta.sessionId,
-          cwd: meta.cwd,
-          gitBranch: meta.gitBranch,
-          model: meta.model,
           observedAt: parseTimestamp(item.timestamp),
           userText: extractText2(payload.content).trim(),
           assistantTexts: []
@@ -3539,7 +3596,6 @@ function getBuiltInSourceAdapters() {
 
 // src/cli/sync.ts
 var EXTRACTION_BUDGET_PER_SYNC = 12;
-var LOCAL_USER_ID = "local";
 function mapSourceToFilters(source) {
   return {
     user_id: LOCAL_USER_ID,
@@ -3599,67 +3655,28 @@ async function syncArchives(db, options = {}) {
     pendingFiles.push({ ...file, mtimeMs });
   }
   pendingFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const total = pendingFiles.length;
-  if (total > 0) {
-    log.info(`Indexing ${total} archive file${total === 1 ? "" : "s"}...`);
-  }
-  let extractionBudget = EXTRACTION_BUDGET_PER_SYNC;
-  let indexed = 0;
-  const progressInterval = Math.max(1, Math.floor(total / 20));
-  for (const file of pendingFiles) {
-    if (provider && extractionBudget <= 0) {
-      log.info(`Extraction budget exhausted; deferring remaining files to next sync`, {
-        remaining: total - indexed
+  const indexingResult = await indexPendingArchives({
+    files: pendingFiles,
+    provider,
+    extractionBudget: EXTRACTION_BUDGET_PER_SYNC,
+    readArchiveFile,
+    markIndexed: (archivePath, mtimeMs) => setArchiveIndexMtime(db, archivePath, mtimeMs),
+    indexSpan: async (file, span, activeProvider) => {
+      const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
+      const result = await addMemories({
+        db,
+        provider: activeProvider,
+        messages: span.messages,
+        filters,
+        observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined
       });
-      break;
+      return result.results.length;
     }
-    const content = readArchiveFile(file.archivePath);
-    if (content === null) {
-      stats.skipped++;
-      continue;
-    }
-    const spans = file.adapter.parse(content, { archivePath: file.archivePath, sourceKind: file.adapter.kind });
-    if (!provider) {
-      indexed++;
-      if (indexed % progressInterval === 0 || indexed === total) {
-        log.info(`  ${indexed}/${total} indexed`);
-      }
-      continue;
-    }
-    const filters = mapSourceToFilters({ sourceKind: file.adapter.kind, archivePath: file.archivePath });
-    let hadFailure = false;
-    for (const span of spans) {
-      extractionBudget--;
-      try {
-        const result = await addMemories({
-          db,
-          provider,
-          messages: span.messages,
-          filters,
-          sessionKey: filters.run_id ?? file.archivePath,
-          observationDate: span.observedAt ? new Date(span.observedAt).toISOString().slice(0, 10) : undefined
-        });
-        stats.memoriesAdded += result.results.length;
-      } catch (error) {
-        hadFailure = true;
-        stats.failed++;
-        log.warn("Span extraction failed; continuing sync.", {
-          archivePath: file.archivePath,
-          lineStart: span.lineStart,
-          lineEnd: span.lineEnd,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-    if (!hadFailure) {
-      setArchiveIndexMtime(db, file.archivePath, file.mtimeMs);
-      indexed++;
-    }
-    if (indexed % progressInterval === 0 || indexed === total) {
-      log.info(`  ${indexed}/${total} indexed`);
-    }
-  }
-  stats.filesIndexed = indexed;
+  });
+  stats.filesIndexed = indexingResult.filesIndexed;
+  stats.memoriesAdded += indexingResult.memoriesAdded;
+  stats.skipped += indexingResult.skipped;
+  stats.failed += indexingResult.failed;
   return stats;
 }
 async function runSyncCli() {
@@ -3763,45 +3780,6 @@ function copyIfNewer(sourcePath, destinationPath) {
 function unlinkIfExists(filePath) {
   if (existsSync7(filePath)) {
     unlinkSync2(filePath);
-  }
-}
-
-// src/cli/search.ts
-async function runSearchCli(args) {
-  if (args.after || args.before) {
-    throw new Error("--after/--before are not yet supported in the mem0 v2 surface");
-  }
-  const db = openMemoryDb();
-  try {
-    const filters = { user_id: LOCAL_USER_ID };
-    if (args.sourceKind)
-      filters.agent_id = args.sourceKind;
-    const { results } = await searchMemories({
-      db,
-      query: args.query,
-      filters,
-      limit: args.limit
-    });
-    for (const result of results) {
-      console.log(`## ${result.memory}`);
-      console.log(`Score: ${Math.round(result.score * 100)}%`);
-      console.log("");
-    }
-  } finally {
-    db.close();
-  }
-}
-
-// src/cli/stats.ts
-function runStatsCli() {
-  const db = openMemoryDb();
-  try {
-    const stats = getMemoryStats(db);
-    console.log(`Total memories: ${stats.totalMemories}`);
-    console.log(`Vectorized: ${stats.vectorizedMemories}`);
-    console.log(`Missing vectors: ${stats.missingVectors}`);
-  } finally {
-    db.close();
   }
 }
 

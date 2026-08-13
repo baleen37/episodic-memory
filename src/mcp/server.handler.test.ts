@@ -5,7 +5,7 @@ import { handleSearch } from './handlers.js';
 import { SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
 import { createMemorySchema } from '../core/memory/schema.js';
 import { insertMemories } from '../core/memory/store.js';
-import { LOCAL_USER_ID } from '../cli/sync.js';
+import { LOCAL_USER_ID } from '../core/constants.js';
 import { __setModelForTests } from '../core/embeddings.js';
 
 function vec(seed: number): number[] {

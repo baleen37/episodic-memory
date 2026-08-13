@@ -25,10 +25,9 @@ Task tool:
 
 The agent will:
 
-1. Search indexed event/fact memory records with `search`. Each result is a compact card with `id`, `kind`, `text`, and `score`. Use `fetch` with a result `id` when raw transcript evidence is needed.
-2. Fetch the source transcript for a record with `fetch` only when the memory card text is not enough.
-3. Synthesize concise findings.
-4. Return actionable insights, citing the record `id` (and the source transcript via `fetch`) for each claim.
+1. Search indexed event/fact memory records with `search`.
+2. Synthesize concise findings from the returned memory records.
+3. Return actionable insights, citing the record `id` for each claim.
 
 ## When to Use
 
@@ -39,27 +38,6 @@ Search memory after you understand the task in these situations:
 - You're stuck after investigating a problem
 - You need to follow an unfamiliar workflow or process
 - User references past work: "last time", "before", "we discussed", "do you remember"
-- User asks a time-based recall question with no specific topic: "오늘 한 일이 뭐야", "what did I do today", "어제 뭐 했지", "this week's work" — see below.
-
-## Time-Based Recall (No Query)
-
-For "what did I do today / yesterday / this week" questions there is no search term —
-the answer is "the most recent records in a date range", not a semantic match.
-
-Call `search` with **no `query`** and a date filter. The tool then lists active
-memory records in reverse chronological order (newest first).
-
-- "오늘 한 일" → `{ after: "<today>", before: "<today>" }`
-- "어제" → `{ after: "<yesterday>", before: "<yesterday>" }`
-- "이번 주" → `{ after: "<monday>" }`
-- "최근에 뭐 했지" (no date) → `{}` — just the newest records.
-
-Use the current date from context for `<today>`. Then group the returned records by
-project/time and summarize what was worked on; cite sources as usual.
-
-When dispatching the search agent for these, say so explicitly:
-"Search recent records since <date> with no query and summarize the day's work."
-
 ## Don't Search First
 
 - For current codebase structure; use file search/read tools first.
@@ -76,37 +54,8 @@ Prefer the search-conversation agent. If direct MCP access is necessary:
 {
   query: "React Router authentication errors",
   limit: 10,
-  after: "2026-05-01",
-  source_kind: "claude-code-projects"
-}
-```
-
-Omit `query` for time-based recall ("오늘 한 일") — returns newest records first:
-
-```typescript
-{
-  after: "2026-06-16",
-  before: "2026-06-16",
-  limit: 20
-}
-```
-
-Pass an array of 2-5 strings for multi-query AND search — returns only records matching every query, ranked by mean similarity:
-
-```typescript
-{
-  query: ["authentication", "rate limiting"],
-  limit: 10
-}
-```
-
-### Fetch
-
-`search` cards contain only `id`, `kind`, `text`, and `score` — no archive path or line numbers. To read the full source transcript for a record, pass its `id` to `fetch`:
-
-```typescript
-{
-  id: "16447"
+  threshold: 0.2,
+  explain: false
 }
 ```
 
@@ -114,16 +63,15 @@ Pass an array of 2-5 strings for multi-query AND search — returns only records
 
 1. Start broad, then narrow with additional query terms.
 2. Put exact IDs, error codes, and file names directly in the query.
-3. Use `after` / `before` for date ranges.
-4. Use `source_kind` to limit results to a transcript source.
-5. `fetch` only the most promising record `id`s for full transcript context.
-6. Synthesize decisions, gotchas, and reusable patterns.
+3. Use `threshold` to reduce weak semantic matches.
+4. Use `explain` when the score breakdown is relevant.
+5. Synthesize decisions, gotchas, and reusable patterns.
 
 ## Important Notes
 
-- Always cite the record `id` you relied on; use `fetch` to surface the source transcript when evidence matters.
+- Always cite the record `id` you relied on.
 - Past decisions may not apply directly; explain context before recommending reuse.
-- Search cards are usually enough; use `fetch` for missing rationale or surrounding context.
+- Search cards contain the memory text and metadata used for synthesis.
 
 ## Further Reading
 

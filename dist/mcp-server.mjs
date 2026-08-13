@@ -6785,112 +6785,6 @@ var init_ratelimiter = __esm(() => {
   loadConfigFn = loadConfig;
 });
 
-// node_modules/@google/generative-ai/dist/index.mjs
-var SchemaType, ExecutableCodeLanguage, Outcome, HarmCategory, HarmBlockThreshold, HarmProbability, BlockReason, FinishReason, TaskType, FunctionCallingMode, DynamicRetrievalMode, Task, badFinishReasons;
-var init_dist = __esm(() => {
-  (function(SchemaType2) {
-    SchemaType2["STRING"] = "string";
-    SchemaType2["NUMBER"] = "number";
-    SchemaType2["INTEGER"] = "integer";
-    SchemaType2["BOOLEAN"] = "boolean";
-    SchemaType2["ARRAY"] = "array";
-    SchemaType2["OBJECT"] = "object";
-  })(SchemaType || (SchemaType = {}));
-  (function(ExecutableCodeLanguage2) {
-    ExecutableCodeLanguage2["LANGUAGE_UNSPECIFIED"] = "language_unspecified";
-    ExecutableCodeLanguage2["PYTHON"] = "python";
-  })(ExecutableCodeLanguage || (ExecutableCodeLanguage = {}));
-  (function(Outcome2) {
-    Outcome2["OUTCOME_UNSPECIFIED"] = "outcome_unspecified";
-    Outcome2["OUTCOME_OK"] = "outcome_ok";
-    Outcome2["OUTCOME_FAILED"] = "outcome_failed";
-    Outcome2["OUTCOME_DEADLINE_EXCEEDED"] = "outcome_deadline_exceeded";
-  })(Outcome || (Outcome = {}));
-  (function(HarmCategory2) {
-    HarmCategory2["HARM_CATEGORY_UNSPECIFIED"] = "HARM_CATEGORY_UNSPECIFIED";
-    HarmCategory2["HARM_CATEGORY_HATE_SPEECH"] = "HARM_CATEGORY_HATE_SPEECH";
-    HarmCategory2["HARM_CATEGORY_SEXUALLY_EXPLICIT"] = "HARM_CATEGORY_SEXUALLY_EXPLICIT";
-    HarmCategory2["HARM_CATEGORY_HARASSMENT"] = "HARM_CATEGORY_HARASSMENT";
-    HarmCategory2["HARM_CATEGORY_DANGEROUS_CONTENT"] = "HARM_CATEGORY_DANGEROUS_CONTENT";
-    HarmCategory2["HARM_CATEGORY_CIVIC_INTEGRITY"] = "HARM_CATEGORY_CIVIC_INTEGRITY";
-  })(HarmCategory || (HarmCategory = {}));
-  (function(HarmBlockThreshold2) {
-    HarmBlockThreshold2["HARM_BLOCK_THRESHOLD_UNSPECIFIED"] = "HARM_BLOCK_THRESHOLD_UNSPECIFIED";
-    HarmBlockThreshold2["BLOCK_LOW_AND_ABOVE"] = "BLOCK_LOW_AND_ABOVE";
-    HarmBlockThreshold2["BLOCK_MEDIUM_AND_ABOVE"] = "BLOCK_MEDIUM_AND_ABOVE";
-    HarmBlockThreshold2["BLOCK_ONLY_HIGH"] = "BLOCK_ONLY_HIGH";
-    HarmBlockThreshold2["BLOCK_NONE"] = "BLOCK_NONE";
-  })(HarmBlockThreshold || (HarmBlockThreshold = {}));
-  (function(HarmProbability2) {
-    HarmProbability2["HARM_PROBABILITY_UNSPECIFIED"] = "HARM_PROBABILITY_UNSPECIFIED";
-    HarmProbability2["NEGLIGIBLE"] = "NEGLIGIBLE";
-    HarmProbability2["LOW"] = "LOW";
-    HarmProbability2["MEDIUM"] = "MEDIUM";
-    HarmProbability2["HIGH"] = "HIGH";
-  })(HarmProbability || (HarmProbability = {}));
-  (function(BlockReason2) {
-    BlockReason2["BLOCKED_REASON_UNSPECIFIED"] = "BLOCKED_REASON_UNSPECIFIED";
-    BlockReason2["SAFETY"] = "SAFETY";
-    BlockReason2["OTHER"] = "OTHER";
-  })(BlockReason || (BlockReason = {}));
-  (function(FinishReason2) {
-    FinishReason2["FINISH_REASON_UNSPECIFIED"] = "FINISH_REASON_UNSPECIFIED";
-    FinishReason2["STOP"] = "STOP";
-    FinishReason2["MAX_TOKENS"] = "MAX_TOKENS";
-    FinishReason2["SAFETY"] = "SAFETY";
-    FinishReason2["RECITATION"] = "RECITATION";
-    FinishReason2["LANGUAGE"] = "LANGUAGE";
-    FinishReason2["BLOCKLIST"] = "BLOCKLIST";
-    FinishReason2["PROHIBITED_CONTENT"] = "PROHIBITED_CONTENT";
-    FinishReason2["SPII"] = "SPII";
-    FinishReason2["MALFORMED_FUNCTION_CALL"] = "MALFORMED_FUNCTION_CALL";
-    FinishReason2["OTHER"] = "OTHER";
-  })(FinishReason || (FinishReason = {}));
-  (function(TaskType2) {
-    TaskType2["TASK_TYPE_UNSPECIFIED"] = "TASK_TYPE_UNSPECIFIED";
-    TaskType2["RETRIEVAL_QUERY"] = "RETRIEVAL_QUERY";
-    TaskType2["RETRIEVAL_DOCUMENT"] = "RETRIEVAL_DOCUMENT";
-    TaskType2["SEMANTIC_SIMILARITY"] = "SEMANTIC_SIMILARITY";
-    TaskType2["CLASSIFICATION"] = "CLASSIFICATION";
-    TaskType2["CLUSTERING"] = "CLUSTERING";
-  })(TaskType || (TaskType = {}));
-  (function(FunctionCallingMode2) {
-    FunctionCallingMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
-    FunctionCallingMode2["AUTO"] = "AUTO";
-    FunctionCallingMode2["ANY"] = "ANY";
-    FunctionCallingMode2["NONE"] = "NONE";
-  })(FunctionCallingMode || (FunctionCallingMode = {}));
-  (function(DynamicRetrievalMode2) {
-    DynamicRetrievalMode2["MODE_UNSPECIFIED"] = "MODE_UNSPECIFIED";
-    DynamicRetrievalMode2["MODE_DYNAMIC"] = "MODE_DYNAMIC";
-  })(DynamicRetrievalMode || (DynamicRetrievalMode = {}));
-  (function(Task2) {
-    Task2["GENERATE_CONTENT"] = "generateContent";
-    Task2["STREAM_GENERATE_CONTENT"] = "streamGenerateContent";
-    Task2["COUNT_TOKENS"] = "countTokens";
-    Task2["EMBED_CONTENT"] = "embedContent";
-    Task2["BATCH_EMBED_CONTENTS"] = "batchEmbedContents";
-  })(Task || (Task = {}));
-  badFinishReasons = [
-    FinishReason.RECITATION,
-    FinishReason.SAFETY,
-    FinishReason.LANGUAGE
-  ];
-});
-
-// src/core/llm/gemini-provider.ts
-var init_gemini_provider = __esm(() => {
-  init_dist();
-  init_logger();
-  init_ratelimiter();
-});
-
-// src/core/llm/zai-provider.ts
-var init_zai_provider = __esm(() => {
-  init_logger();
-  init_ratelimiter();
-});
-
 // node_modules/zod/v3/external.js
 var exports_external = {};
 __export(exports_external, {
@@ -16842,6 +16736,7 @@ import * as sqliteVec from "sqlite-vec";
 
 // src/core/constants.ts
 var EMBEDDING_DIM = 384;
+var LOCAL_USER_ID = "local";
 
 // src/core/memory/schema.ts
 var isTestEnvironment = typeof import.meta !== "undefined" && import.meta.test;
@@ -17358,23 +17253,6 @@ async function searchMemories(args) {
   }
   return { results };
 }
-
-// src/core/llm/index.ts
-init_gemini_provider();
-init_zai_provider();
-init_config();
-
-// src/cli/sync.ts
-init_logger();
-
-// src/core/lock.ts
-init_paths();
-init_logger();
-var STALE_MS = 30 * 60 * 1000;
-
-// src/cli/sync.ts
-init_paths();
-var LOCAL_USER_ID = "local";
 
 // src/mcp/handlers.ts
 async function handleSearch(params, db) {
