@@ -5,7 +5,6 @@ export const ENTITY_BOOST_WEIGHT = 0.5;
 export interface Candidate {
   id: string;
   score: number;
-  hasSemanticScore?: boolean;
   payload: Record<string, unknown> | null;
 }
 
@@ -90,13 +89,12 @@ export function scoreAndRank(args: ScoreAndRankArgs): ScoredResult[] {
     if (result.id === null || result.id === undefined) continue;
 
     const semanticScore = result.score || 0.0;
-    const memIdStr = String(result.id);
-    const bm25Score = bm25Scores[memIdStr] ?? 0.0;
-    const hasSemanticScore = result.hasSemanticScore ?? true;
     // Gates the raw semantic score before combining. Upstream behavior: a
     // candidate below threshold is dropped even if BM25/entity would rescue it.
-    if (hasSemanticScore && semanticScore < threshold) continue;
-    if (!hasSemanticScore && bm25Score <= 0) continue;
+    if (semanticScore < threshold) continue;
+
+    const memIdStr = String(result.id);
+    const bm25Score = bm25Scores[memIdStr] ?? 0.0;
     const entityBoost = entityBoosts[memIdStr] ?? 0.0;
 
     const rawCombined = semanticScore + bm25Score + entityBoost;

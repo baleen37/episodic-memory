@@ -57,12 +57,7 @@ describe('buildFtsMatchQuery', () => {
 
 describe('scoreAndRank', () => {
   const cand = (id: string, score: number): Candidate => ({ id, score, payload: { data: id } });
-  type Candidate = {
-    id: string;
-    score: number;
-    hasSemanticScore?: boolean;
-    payload: Record<string, unknown> | null;
-  };
+  type Candidate = { id: string; score: number; payload: Record<string, unknown> | null };
 
   test('semantic only uses divisor 1.0', () => {
     const out = scoreAndRank({
@@ -113,14 +108,6 @@ describe('scoreAndRank', () => {
       threshold: 0.1, topK: 10,
     });
     expect(out).toHaveLength(0);
-  });
-
-  test('allows a positive BM25-only candidate through the semantic threshold gate', () => {
-    const out = scoreAndRank({
-      semanticResults: [{ id: 'lexical', score: 0, hasSemanticScore: false, payload: { data: 'lexical' } }],
-      bm25Scores: { lexical: 0.9 }, entityBoosts: {}, threshold: 0.1, topK: 10,
-    });
-    expect(out.map(result => result.id)).toEqual(['lexical']);
   });
 
   test('combined score clamps at 1.0', () => {
