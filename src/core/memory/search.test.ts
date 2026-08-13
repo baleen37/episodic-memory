@@ -124,6 +124,50 @@ describe('searchMemories', () => {
     expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
   });
 
+  test('ranks a scoped lexical candidate outside semantic KNN', async () => {
+    __setModelForTests(async () => {}, async (_kind, text) => {
+      if (text.includes('rareorchidtoken')) return vec(0);
+      return vec(3.0);
+    });
+    const distractors = Array.from({ length: 80 }, (_, i) => ({
+      id: `closer-${i}`,
+      memory: `Closer semantic distractor ${i} about deployments`,
+      metadata: { user_id: 'local' },
+      embedding: vec(1.0),
+    }));
+    const filler = Array.from({ length: 200 }, (_, i) => ({
+      id: `filler-${i}`,
+      memory: `Filler record ${i} about servers and deployments`,
+      metadata: { user_id: 'local' },
+      embedding: vec(1.5),
+    }));
+    insertMemories(db, [
+      ...distractors,
+      ...filler,
+      {
+        id: 'lexical-target',
+        memory: 'The Orchid deployment uses rareorchidtoken for lexical retrieval',
+        metadata: { user_id: 'local' },
+        embedding: vec(3.0),
+      },
+      {
+        id: 'other-user-lexical-target',
+        memory: 'The Orchid deployment uses rareorchidtoken for lexical retrieval',
+        metadata: { user_id: 'someone-else' },
+        embedding: vec(3.0),
+      },
+    ]);
+
+    const { results } = await searchMemories({
+      db, query: 'rareorchidtoken', filters: { user_id: 'local' }, limit: 1, explain: true,
+    });
+
+    expect(results[0].id).toBe('lexical-target');
+    expect(results[0].score_details!.semantic_score).toBe(0);
+    expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
+    expect(results.map(result => result.id)).not.toContain('other-user-lexical-target');
+  });
+
   test('degrades to semantic-only when no keyword matches', async () => {
     // A query term absent from every document yields no BM25 rows at all, so
     // the divisor stays 1.0. (Note: a *small* corpus does NOT zero out BM25 —

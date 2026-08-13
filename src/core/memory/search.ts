@@ -101,6 +101,18 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
   }
 
   const byRowid = new Map(semanticRows.map(r => [r.rowid, r]));
+  const candidatesByRowid = new Map<number, Candidate>(semanticRows.map(row => [row.rowid, {
+    id: row.id,
+    score: 1 - row.distance,
+    hasSemanticScore: true,
+    payload: {
+      data: row.memory,
+      hash: row.hash,
+      metadata: row.metadata,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    },
+  }]));
 
   // FTS5 bm25() returns negative values where more negative is better; flip the sign.
   const bm25Scores: Record<string, number> = {};
@@ -108,17 +120,39 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
     const [midpoint, steepness] = getBm25Params(query, queryLemmatized);
     try {
       const keywordRows = db.query(`
-        SELECT rowid, bm25(fts_memories) AS raw
-        FROM fts_memories WHERE fts_memories MATCH ?
+        SELECT m.id AS id, m.memory AS memory, m.hash AS hash, m.metadata AS metadata,
+               m.created_at AS created_at, m.updated_at AS updated_at,
+               m.rowid AS rowid, bm25(fts_memories) AS raw
+        FROM fts_memories
+        INNER JOIN memories m ON m.rowid = fts_memories.rowid
+        WHERE fts_memories MATCH ?
+          ${filterClause}
         ORDER BY raw LIMIT ?
-      `).all(buildFtsMatchQuery(queryLemmatized), internalLimit) as Array<{ rowid: number; raw: number }>;
+      `).all(
+        buildFtsMatchQuery(queryLemmatized), ...(params as never[]), internalLimit,
+      ) as Array<{
+        id: string; memory: string; hash: string; metadata: string;
+        created_at: number; updated_at: number; rowid: number; raw: number;
+      }>;
 
       for (const row of keywordRows) {
-        const semantic = byRowid.get(row.rowid);
-        if (!semantic) continue;
         const rawScore = -row.raw;
         if (rawScore > 0) {
-          bm25Scores[semantic.id] = normalizeBm25(rawScore, midpoint, steepness);
+          bm25Scores[row.id] = normalizeBm25(rawScore, midpoint, steepness);
+          if (!byRowid.has(row.rowid)) {
+            candidatesByRowid.set(row.rowid, {
+              id: row.id,
+              score: 0,
+              hasSemanticScore: false,
+              payload: {
+                data: row.memory,
+                hash: row.hash,
+                metadata: row.metadata,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+              },
+            });
+          }
         }
       }
     } catch {
@@ -129,17 +163,7 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
   // Entity boosts are computed from entities linked to matched memories.
   const entityBoosts: Record<string, number> = {};
 
-  const candidates: Candidate[] = semanticRows.map(row => ({
-    id: row.id,
-    score: 1 - row.distance,
-    payload: {
-      data: row.memory,
-      hash: row.hash,
-      metadata: row.metadata,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    },
-  }));
+  const candidates = [...candidatesByRowid.values()];
 
   const scored = scoreAndRank({
     semanticResults: candidates,
