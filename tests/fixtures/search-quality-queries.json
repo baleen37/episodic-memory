@@ -1,6 +1,6 @@
 [
   {
-    "query": "multilingual retrieval benchmark query 1",
+    "query": "영어 기록에서 두 언어 검색 안내를 찾아줘",
     "case": "cross-lingual",
     "filters": {
       "user_id": "team-alpha"
@@ -398,7 +398,7 @@
     }
   },
   {
-    "query": "multilingual retrieval benchmark query 2",
+    "query": "¿Cómo encuentro una guía de búsqueda entre idiomas?",
     "case": "cross-lingual",
     "filters": {
       "user_id": "team-beta"
@@ -796,7 +796,7 @@
     }
   },
   {
-    "query": "multilingual retrieval benchmark query 3",
+    "query": "서로 다른 언어의 문서를 연결하는 방법",
     "case": "cross-lingual",
     "filters": {
       "user_id": "team-alpha"
@@ -1194,7 +1194,7 @@
     }
   },
   {
-    "query": "multilingual retrieval benchmark query 4",
+    "query": "¿Dónde está la guía para consultar notas en dos idiomas?",
     "case": "cross-lingual",
     "filters": {
       "user_id": "team-beta"
@@ -1592,7 +1592,7 @@
     }
   },
   {
-    "query": "multilingual retrieval benchmark query 5",
+    "query": "다국어 문서 탐색 예시를 보여줘",
     "case": "cross-lingual",
     "filters": {
       "user_id": "team-alpha"
@@ -1990,7 +1990,7 @@
     }
   },
   {
-    "query": "rare token benchmark query 1",
+    "query": "ZXQ-ORCHID exact token lookup 6",
     "case": "rare-token",
     "filters": {
       "user_id": "local"
@@ -2388,7 +2388,7 @@
     }
   },
   {
-    "query": "rare token benchmark query 2",
+    "query": "ZXQ-CEDAR exact token lookup 7",
     "case": "rare-token",
     "filters": {
       "user_id": "team-alpha"
@@ -2786,7 +2786,7 @@
     }
   },
   {
-    "query": "rare token benchmark query 3",
+    "query": "ZXQ-ORCHID exact token lookup 8",
     "case": "rare-token",
     "filters": {
       "user_id": "local"
@@ -3184,7 +3184,7 @@
     }
   },
   {
-    "query": "rare token benchmark query 4",
+    "query": "ZXQ-CEDAR exact token lookup 9",
     "case": "rare-token",
     "filters": {
       "user_id": "team-alpha"
@@ -3582,7 +3582,7 @@
     }
   },
   {
-    "query": "rare token benchmark query 5",
+    "query": "ZXQ-ORCHID exact token lookup 10",
     "case": "rare-token",
     "filters": {
       "user_id": "local"
@@ -11920,7 +11920,7 @@
     }
   },
   {
-    "query": "semantic concept benchmark query 1",
+    "query": "find a meaning-based quality assessment",
     "case": "semantic-only",
     "filters": {
       "user_id": "team-beta"
@@ -12318,7 +12318,7 @@
     }
   },
   {
-    "query": "semantic concept benchmark query 2",
+    "query": "locate a conceptual navigation sketch",
     "case": "semantic-only",
     "filters": {
       "user_id": "local"
@@ -12716,7 +12716,7 @@
     }
   },
   {
-    "query": "semantic concept benchmark query 3",
+    "query": "show an intent-driven discovery check",
     "case": "semantic-only",
     "filters": {
       "user_id": "team-beta"
@@ -13114,7 +13114,7 @@
     }
   },
   {
-    "query": "semantic concept benchmark query 4",
+    "query": "retrieve a topic relationship outline",
     "case": "semantic-only",
     "filters": {
       "user_id": "local"
@@ -13512,7 +13512,7 @@
     }
   },
   {
-    "query": "semantic concept benchmark query 5",
+    "query": "find a similarity-based inspection",
     "case": "semantic-only",
     "filters": {
       "user_id": "team-beta"
@@ -13910,7 +13910,7 @@
     }
   },
   {
-    "query": "lexical token benchmark query 1",
+    "query": "ZXQ-ORCHID exact token lookup 36",
     "case": "lexical-only",
     "filters": {
       "user_id": "local"
@@ -14308,7 +14308,7 @@
     }
   },
   {
-    "query": "lexical token benchmark query 2",
+    "query": "ZXQ-CEDAR exact token lookup 37",
     "case": "lexical-only",
     "filters": {
       "user_id": "team-alpha"
@@ -14706,7 +14706,7 @@
     }
   },
   {
-    "query": "lexical token benchmark query 3",
+    "query": "ZXQ-ORCHID exact token lookup 38",
     "case": "lexical-only",
     "filters": {
       "user_id": "local"
@@ -15104,7 +15104,7 @@
     }
   },
   {
-    "query": "lexical token benchmark query 4",
+    "query": "ZXQ-CEDAR exact token lookup 39",
     "case": "lexical-only",
     "filters": {
       "user_id": "team-alpha"
@@ -15502,7 +15502,7 @@
     }
   },
   {
-    "query": "lexical token benchmark query 5",
+    "query": "ZXQ-ORCHID exact token lookup 40",
     "case": "lexical-only",
     "filters": {
       "user_id": "local"

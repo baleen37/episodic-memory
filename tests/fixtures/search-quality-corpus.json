@@ -6305,7 +6305,7 @@
   },
   {
     "id": "memory-017",
-    "memory": "Orchid multilingual Korean retrieval example.",
+    "memory": "Orchid bilingual retrieval guide.",
     "metadata": {
       "user_id": "team-alpha",
       "updated_at": 220
@@ -6699,7 +6699,7 @@
   },
   {
     "id": "memory-018",
-    "memory": "Northstar multilingual Spanish retrieval example.",
+    "memory": "Northstar bilingual retrieval guide.",
     "metadata": {
       "user_id": "team-beta",
       "updated_at": 230
