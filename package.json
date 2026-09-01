@@ -1,6 +1,6 @@
 {
   "name": "@baleen/episodic-memory",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "private": false,
   "type": "module",
   "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
