@@ -36,7 +36,7 @@ const originalEnv = {
   TEST_ARCHIVE_DIR: process.env.TEST_ARCHIVE_DIR,
   TEST_DB_PATH: process.env.TEST_DB_PATH,
   CONVERSATION_MEMORY_DB_PATH: process.env.CONVERSATION_MEMORY_DB_PATH,
-  MEMMEM_DB_PATH: process.env.MEMMEM_DB_PATH,
+  EPISODIC_MEMORY_DB_PATH: process.env.EPISODIC_MEMORY_DB_PATH,
   HOME: process.env.HOME,
 };
 
@@ -54,7 +54,7 @@ afterEach(() => {
   restoreEnv('TEST_ARCHIVE_DIR');
   restoreEnv('TEST_DB_PATH');
   restoreEnv('CONVERSATION_MEMORY_DB_PATH');
-  restoreEnv('MEMMEM_DB_PATH');
+  restoreEnv('EPISODIC_MEMORY_DB_PATH');
   restoreEnv('HOME');
   __setModelForTests(null, null);
   __setBatchModelForTests(null);
@@ -142,12 +142,12 @@ describe('syncArchives', () => {
     expect(metadata.run_id).toBe('session');
   });
 
-  test('does not copy or index transcripts below a .no-memmem directory', async () => {
+    test('does not copy or index transcripts below a .no-episodic-memory directory', async () => {
     const { claudeDir, codexDir, archiveDir } = setupDirs();
     const ignoredDir = join(claudeDir, 'projects', 'ignored');
     const sourcePath = join(ignoredDir, 'session.jsonl');
     mkdirSync(ignoredDir, { recursive: true });
-    writeFileSync(join(ignoredDir, '.no-memmem'), '');
+    writeFileSync(join(ignoredDir, '.no-episodic-memory'), '');
     writeClaudeTranscript(sourcePath, 'Secret question', 'Secret answer');
     setupEnv(claudeDir, codexDir, archiveDir);
     db = freshMemoryDb();
@@ -351,7 +351,7 @@ describe('syncArchives', () => {
     setGoodEmbeddingModel();
     await syncArchives(db);
 
-    writeFileSync(join(sourceDir, '.no-memmem'), '');
+    writeFileSync(join(sourceDir, '.no-episodic-memory'), '');
 
     const result = await syncArchives(db);
 
@@ -381,7 +381,7 @@ describe('syncArchives', () => {
     ).all() as Array<{ run_id: string }>).map(r => r.run_id);
     expect(runIdsBefore.sort()).toEqual(['kept-session', 'secret-session']);
 
-    writeFileSync(join(excludedSourceDir, '.no-memmem'), '');
+    writeFileSync(join(excludedSourceDir, '.no-episodic-memory'), '');
     await syncArchives(db, { provider });
 
     const runIdsAfter = (db.query(
@@ -398,7 +398,7 @@ describe('syncArchives', () => {
 describe('runSyncCli lock', () => {
   let lockDir: string;
   beforeEach(() => {
-    lockDir = mkdtempSync(join(tmpdir(), 'memmem-synclock-'));
+    lockDir = mkdtempSync(join(tmpdir(), 'episodic-memory-synclock-'));
     process.env.CONVERSATION_MEMORY_CONFIG_DIR = lockDir;
     process.env.CLAUDE_CONFIG_DIR = join(lockDir, 'claude');
     process.env.CODEX_HOME = join(lockDir, 'codex');
@@ -426,7 +426,7 @@ describe('runSyncCli lock', () => {
 });
 
 function setupDirs(): { claudeDir: string; codexDir: string; archiveDir: string } {
-  dir = mkdtempSync(join(tmpdir(), 'memmem-sync-'));
+  dir = mkdtempSync(join(tmpdir(), 'episodic-memory-sync-'));
   return {
     claudeDir: join(dir, '.claude'),
     codexDir: join(dir, '.codex'),
@@ -441,7 +441,7 @@ function setupEnv(claudeDir: string, codexDir: string, archiveDir: string): void
   process.env.TEST_DB_PATH = ':memory:';
   process.env.CONVERSATION_MEMORY_DB_PATH = ':memory:';
   process.env.HOME = dir ?? claudeDir;
-  delete process.env.MEMMEM_DB_PATH;
+  delete process.env.EPISODIC_MEMORY_DB_PATH;
 }
 
 function setGoodEmbeddingModel(): void {

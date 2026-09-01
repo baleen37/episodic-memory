@@ -31,22 +31,22 @@ const mockGenerate = async (kind: 'passage' | 'query', text: string) => {
 
 describe('isEmbeddingsDisabled()', () => {
   afterEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
   });
 
   test('returns false by default', () => {
     expect(isEmbeddingsDisabled()).toBe(false);
   });
 
-  test('returns true when MEMMEM_DISABLE_EMBEDDINGS=true', () => {
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+  test('returns true when EPISODIC_MEMORY_DISABLE_EMBEDDINGS=true', () => {
+    process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = 'true';
     expect(isEmbeddingsDisabled()).toBe(true);
   });
 });
 
 describe('embedPassage() and embedQuery()', () => {
   beforeEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     shouldFail = false;
     lastKind = null;
     lastText = null;
@@ -54,18 +54,18 @@ describe('embedPassage() and embedQuery()', () => {
   });
 
   afterEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     shouldFail = false;
     __setModelForTests(null, null);
   });
 
   test('embedPassage returns null when disabled', async () => {
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = 'true';
     expect(await embedPassage('test')).toBeNull();
   });
 
   test('embedQuery returns null when disabled', async () => {
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = 'true';
     expect(await embedQuery('test')).toBeNull();
   });
 
@@ -111,19 +111,19 @@ describe('embedPassage() and embedQuery()', () => {
 
 describe('initEmbeddings()', () => {
   beforeEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     shouldFail = false;
     __setModelForTests(mockInit, mockGenerate);
   });
 
   afterEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     shouldFail = false;
     __setModelForTests(null, null);
   });
 
   test('no-ops when disabled', async () => {
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = 'true';
     await expect(initEmbeddings()).resolves.toBeUndefined();
   });
 
@@ -138,7 +138,7 @@ describe('embedPassageBatch()', () => {
   let active: number;
 
   beforeEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     calls = 0;
     peak = 0;
     active = 0;
@@ -159,7 +159,7 @@ describe('embedPassageBatch()', () => {
   });
 
   afterEach(() => {
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     __setBatchModelForTests(null);
     __setEmbeddingConfigForTests(null);
     __resetEmbeddingConcurrencyForTests();
@@ -188,7 +188,7 @@ describe('embedPassageBatch()', () => {
   });
 
   test('returns empty when embeddings are disabled', async () => {
-    process.env.MEMMEM_DISABLE_EMBEDDINGS = 'true';
+    process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = 'true';
     expect(await embedPassageBatch(['a'])).toEqual([]);
     expect(calls).toBe(0);
   });

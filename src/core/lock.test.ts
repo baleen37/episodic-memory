@@ -7,7 +7,7 @@ import { acquireSyncLock } from './lock.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'memmem-lock-'));
+  dir = mkdtempSync(path.join(tmpdir(), 'episodic-memory-lock-'));
   // getIndexDir() reads from the config dir; CONVERSATION_MEMORY_CONFIG_DIR
   // overrides it. Point it at our temp dir so the lock lands there.
   process.env.CONVERSATION_MEMORY_CONFIG_DIR = dir;

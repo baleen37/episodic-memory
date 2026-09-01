@@ -1,7 +1,7 @@
 /**
  * MCP Server Tests
  *
- * Tests for the public memmem MCP search tool schema (fetch was removed in the
+ * Tests for the public episodic-memory MCP search tool schema (fetch was removed in the
  * mem0 v2 port — there is no source transcript to read back).
  */
 
@@ -32,7 +32,7 @@ async function mockToolCall(toolName: string, args: unknown) {
   }
 }
 
-describe('MCP Server - memmem__search tool', () => {
+describe('MCP Server - episodic-memory__search tool', () => {
   describe('Query parameter validation', () => {
     test('rejects empty string query', async () => {
       const result = await mockToolCall('search', { query: '' });

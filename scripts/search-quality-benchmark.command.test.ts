@@ -15,8 +15,8 @@ async function runBenchmarkCommand(env: Record<string, string | undefined>): Pro
 }
 
 test('benchmark is deterministic when embeddings are disabled in the command environment', async () => {
-  const normal = await runBenchmarkCommand({ MEMMEM_DISABLE_EMBEDDINGS: undefined });
-  const disabled = await runBenchmarkCommand({ MEMMEM_DISABLE_EMBEDDINGS: 'true' });
+  const normal = await runBenchmarkCommand({ EPISODIC_MEMORY_DISABLE_EMBEDDINGS: undefined });
+  const disabled = await runBenchmarkCommand({ EPISODIC_MEMORY_DISABLE_EMBEDDINGS: 'true' });
   const stableMetrics = (output: string) => output
     .match(/^METRIC (ndcg_at_10|recall_at_5|mrr_at_10|empty_rate)=.*$/gm);
   const normalMetrics = stableMetrics(normal);

@@ -184,7 +184,7 @@ function readArchiveFile(archivePath: string): string | null {
 
 function findJsonlFiles(root: string, adapter: SourceAdapter, excludedDirs: string[] = []): string[] {
   const files: string[] = [];
-  if (existsSync(path.join(root, '.no-memmem'))) {
+  if (existsSync(path.join(root, '.no-episodic-memory'))) {
     excludedDirs.push(root);
     return files;
   }
@@ -213,7 +213,7 @@ function purgeExcludedArchiveSubtree(
 
   // The run_id for an archive file is its basename without extension (see
   // mapSourceToFilters). Resolve run_ids from disk before removing the files, then
-  // delete every memory extracted from them so a .no-memmem opt-out actually makes
+  // delete every memory extracted from them so a .no-episodic-memory opt-out actually makes
   // those memories unsearchable, not just the archive copy invisible.
   const runIds = collectJsonlRunIds(archivePathPrefix);
   if (runIds.length > 0) {

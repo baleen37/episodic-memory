@@ -1,12 +1,12 @@
 # Scripts Directory
 
-Build and dependency-check helpers for the memmem plugin.
+Build and dependency-check helpers for the episodic-memory plugin.
 
 ## Files
 
 ### build.mjs
 
-Main Bun build script that bundles the CLI and MCP server, and produces the `bin/memmem` entrypoint executable.
+Main Bun build script that bundles the CLI and MCP server, and produces the `bin/episodic-memory` entrypoint executable.
 
 **Usage:**
 
@@ -20,7 +20,7 @@ bun scripts/build.mjs
 
 - `dist/cli-internal.mjs` — Bundled CLI implementation
 - `dist/mcp-server.mjs` — Bundled MCP server
-- `bin/memmem` — Graceful wrapper executable (bun shebang, chmod 0755), copied from `src/cli-graceful.mjs`
+- `bin/episodic-memory` — Graceful wrapper executable (bun shebang, chmod 0755), copied from `src/cli-graceful.mjs`
 
 **External Dependencies (not bundled):**
 
@@ -34,7 +34,7 @@ These packages/runtime modules are marked external and must be available at runt
 
 ### lib/check-dependencies.mjs
 
-Shared dependency-checking logic imported at runtime by `bin/memmem` (built from `src/cli-graceful.mjs`) and by the `memmem mcp` subcommand (`src/cli/mcp.ts`).
+Shared dependency-checking logic imported at runtime by `bin/episodic-memory` (built from `src/cli-graceful.mjs`) and by the `episodic-memory mcp` subcommand (`src/cli/mcp.ts`).
 
 **Exports:**
 
@@ -81,10 +81,10 @@ Future runtimes should be added as adapter checks rather than by duplicating the
 
 ## Single Entrypoint
 
-`bin/memmem` is the single entrypoint for the plugin. It is a graceful wrapper executable (built from `src/cli-graceful.mjs`) that checks dependencies, then dispatches into the bundled CLI (`dist/cli-internal.mjs`).
+`bin/episodic-memory` is the single entrypoint for the plugin. It is a graceful wrapper executable (built from `src/cli-graceful.mjs`) that checks dependencies, then dispatches into the bundled CLI (`dist/cli-internal.mjs`).
 
-- **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/memmem sync`.
-- **MCP** calls `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/memmem mcp` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
+- **Hooks** call `${CLAUDE_PLUGIN_ROOT}/bin/episodic-memory sync`.
+- **MCP** calls `${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/episodic-memory mcp` from `.mcp.json`. The `mcp` subcommand (`src/cli/mcp.ts`) ensures dependencies are installed and the build is current, then spawns the MCP server bundle (`dist/mcp-server.mjs`) with Bun and forwards termination signals to it.
 
 The runtime respects `PLUGIN_ROOT` first, then `CLAUDE_PLUGIN_ROOT` when a host provides it, and otherwise falls back to the executable's own location.
 

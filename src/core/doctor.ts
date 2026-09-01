@@ -81,7 +81,7 @@ function checkIndex(db: Database): DiagnosticResult {
       detail:
         `Integrity issues: ${v.missingVectors.length} missing vectors, ` +
         `${v.orphanVectors.length} orphan vectors.`,
-      suggestion: 'memmem sync',
+      suggestion: 'episodic-memory sync',
     };
   }
 
@@ -95,7 +95,7 @@ function checkData(db: Database): DiagnosticResult {
       name: 'data',
       status: 'warn',
       detail: 'No memories — nothing has been indexed yet.',
-      suggestion: 'memmem sync',
+      suggestion: 'episodic-memory sync',
     };
   }
   if (s.missingVectors > 0) {
@@ -103,7 +103,7 @@ function checkData(db: Database): DiagnosticResult {
       name: 'data',
       status: 'warn',
       detail: `${s.missingVectors} record(s) are not vectorized.`,
-      suggestion: 'memmem sync',
+      suggestion: 'episodic-memory sync',
     };
   }
   return {

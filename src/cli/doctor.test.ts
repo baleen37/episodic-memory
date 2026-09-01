@@ -8,14 +8,14 @@ describe('runDoctorCli', () => {
   let dir: string | null = null;
 
   afterEach(() => {
-    delete process.env.MEMMEM_DB_PATH;
+    delete process.env.EPISODIC_MEMORY_DB_PATH;
     if (dir) rmSync(dir, { recursive: true, force: true });
     dir = null;
   });
 
   test('runs against a fresh, nonexistent database path without a "no such table" error', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-cli-'));
-    process.env.MEMMEM_DB_PATH = join(dir, 'fresh.db');
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-cli-'));
+    process.env.EPISODIC_MEMORY_DB_PATH = join(dir, 'fresh.db');
 
     const originalLog = console.log;
     const lines: string[] = [];

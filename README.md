@@ -1,10 +1,10 @@
-# Memmem
+# Episodic Memory
 
-Memmem - Persistent conversation memory across Claude Code and Codex sessions.
+Episodic Memory - Persistent conversation memory across Claude Code and Codex sessions.
 
 ## Purpose
 
-memmem syncs local Claude Code and Codex transcripts into an archive, extracts event/fact memory records, and exposes scoped memory search through CLI and MCP. It is based on [@obra/episodic-memory](https://github.com/obra/episodic-memory),
+Episodic Memory syncs local Claude Code and Codex transcripts into an archive, extracts event/fact memory records, and exposes scoped memory search through CLI and MCP. It is based on [@obra/episodic-memory](https://github.com/obra/episodic-memory),
 integrated into the Claude Code and Codex plugin ecosystems.
 
 ## Features
@@ -61,7 +61,7 @@ See `skills/remembering-conversations/SKILL.md` for complete usage guide.
 
 These tools are exposed for advanced usage.
 
-### `memmem__search`
+### `episodic-memory__search`
 
 Search indexed event/fact memory records.
 
@@ -82,7 +82,7 @@ Search indexed event/fact memory records.
 
 ```bash
 # Install dependencies
-cd plugins/memmem
+cd plugins/episodic-memory
 bun install
 
 # Build the plugin
@@ -91,17 +91,17 @@ bun run build
 
 The plugin automatically:
 
-1. Creates `~/.config/memmem/` directory
+1. Creates `~/.config/episodic-memory/` directory
 2. Syncs and indexes transcripts via the SessionStart hook
 3. Provides the MCP memory search tool
 
 ## Runtime compatibility
 
-memmem ships one shared runtime payload for Claude Code and Codex:
+Episodic Memory ships one shared runtime payload for Claude Code and Codex:
 
 - `skills/`, `agents/`, and `hooks/`
 - `.mcp.json`
-- `bin/memmem`
+- `bin/episodic-memory`
 - `dist/`
 
 Runtime-specific metadata stays separate:
@@ -124,12 +124,12 @@ bun run compat:preflight
 When each Claude Code session starts (startup or resume), the hook (`hooks/hooks.json`) runs:
 
 ```bash
-memmem sync
+episodic-memory sync
 ```
 
 This:
 
-1. Copies Claude Code and Codex transcripts into `~/.config/memmem/conversation-archive/`
+1. Copies Claude Code and Codex transcripts into `~/.config/episodic-memory/conversation-archive/`
 2. Extracts event/fact memory records from changed archive files
 3. Generates embeddings using Transformers.js
 4. Stores memory record metadata and vectors in SQLite
@@ -138,7 +138,7 @@ This:
 ### Storage Structure
 
 ```text
-~/.config/memmem/
+~/.config/episodic-memory/
 ├── conversation-archive/     # Copied source transcripts
 ├── conversation-index/
 │   └── conversations.db      # SQLite database with memory record embeddings
@@ -151,10 +151,10 @@ There are two ways to exclude conversations from indexing:
 
 **1. Directory-level exclusion:**
 
-Create a `.no-memmem` marker file in the conversation directory:
+Create a `.no-episodic-memory` marker file in the conversation directory:
 
 ```bash
-touch /path/to/conversation/dir/.no-memmem
+touch /path/to/conversation/dir/.no-episodic-memory
 ```
 
 **2. Inline content exclusion:**
@@ -170,7 +170,7 @@ The entire conversation will be excluded from indexing when any of these markers
 
 ### Configuration
 
-Create `~/.config/memmem/config.json` to customize rate limits:
+Create `~/.config/episodic-memory/config.json` to customize rate limits:
 
 ```json
 {
@@ -194,7 +194,7 @@ Bundles:
 
 - `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI implementation)
 - `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server)
-- `src/cli-graceful.mjs` → `bin/memmem` (graceful wrapper executable; routes `mcp`/`sync`/etc. into the CLI bundle)
+- `src/cli-graceful.mjs` → `bin/episodic-memory` (graceful wrapper executable; routes `mcp`/`sync`/etc. into the CLI bundle)
 
 ### Type Check
 
@@ -208,13 +208,13 @@ The plugin provides a CLI interface for manual operations:
 
 ```bash
 # Show help
-memmem --help
+episodic-memory --help
 
 # Copy and index transcripts
-memmem sync
+episodic-memory sync
 
 # Search indexed event/fact memory records
-memmem search "what did we decide about memory records?"
+episodic-memory search "what did we decide about memory records?"
 ```
 
 Expected output example:
@@ -226,16 +226,16 @@ Expected output example:
 
 ```bash
 # Print memory index statistics
-memmem stats
+episodic-memory stats
 
 # Verify memory index integrity
-memmem verify
+episodic-memory verify
 ```
 
 ### Project Structure
 
 ```text
-plugins/memmem/
+plugins/episodic-memory/
 ├── .claude-plugin/
 │   ├── marketplace.json         # Marketplace release metadata
 │   └── plugin.json              # Claude Code plugin metadata
@@ -261,7 +261,7 @@ plugins/memmem/
 │       ├── handlers.ts          # MCP search handler
 │       └── server.ts            # MCP server (search tool)
 ├── bin/
-│   └── memmem                   # Graceful wrapper executable (entrypoint)
+│   └── episodic-memory          # Graceful wrapper executable (entrypoint)
 ├── dist/
 │   ├── cli-internal.mjs         # Bundled CLI implementation
 │   └── mcp-server.mjs           # Bundled MCP server
@@ -299,21 +299,21 @@ with the memory record schema. Delete the old database before rebuilding the ind
 
 ```bash
 # 1. Backup existing database (optional)
-cp ~/.config/memmem/conversation-index/conversations.db \
-   ~/.config/memmem/conversation-index/conversations.db.backup
+cp ~/.config/episodic-memory/conversation-index/conversations.db \
+   ~/.config/episodic-memory/conversation-index/conversations.db.backup
 
 # 2. Remove old database
-rm ~/.config/memmem/conversation-index/conversations.db
+rm ~/.config/episodic-memory/conversation-index/conversations.db
 
 # 3. Reinstall plugin dependencies
-cd plugins/memmem
+cd plugins/episodic-memory
 bun install
 
 # 4. Rebuild plugin
 bun run build
 
 # 5. Rebuild the local transcript index
-memmem sync
+episodic-memory sync
 ```
 
 **First sync timing**:
@@ -335,7 +335,7 @@ The plugin automatically installs dependencies on first run using Bun. If you en
 **Fix:** Check permissions for the project directory and Bun cache, then retry:
 
 ```bash
-cd plugins/memmem
+cd plugins/episodic-memory
 bun install
 ```
 
@@ -352,7 +352,7 @@ Then restart Claude Code.
 3. Try installing manually:
 
    ```bash
-   cd plugins/memmem
+   cd plugins/episodic-memory
    bun install
    ```
 
@@ -367,7 +367,7 @@ Then restart Claude Code.
 3. Reinstall dependencies:
 
    ```bash
-   cd plugins/memmem
+   cd plugins/episodic-memory
    rm -rf node_modules
    bun install
    ```
@@ -377,7 +377,7 @@ Then restart Claude Code.
 If automatic installation fails repeatedly, install dependencies manually:
 
 ```bash
-cd plugins/memmem
+cd plugins/episodic-memory
 bun install
 bun run build
 ```
@@ -386,8 +386,8 @@ bun run build
 
 - **Standalone Plugin**: Complete implementation (not a wrapper)
 - **Based on @obra/episodic-memory**: Forked and integrated into Claude Code plugin ecosystem
-- **Storage Location**: `~/.config/memmem/` (not `.claude/`)
-- **Naming**: All public interfaces use `memmem` for clarity
+- **Storage Location**: `~/.config/episodic-memory/` (not `.claude/`)
+- **Naming**: All public interfaces use `episodic-memory` for clarity
 - **Embedding Model**: `Xenova/multilingual-e5-small`
   - 384 dimensions
   - Loaded through `@huggingface/transformers`
@@ -396,7 +396,7 @@ bun run build
 
 ## Future Enhancements
 
-- Slash commands: `/memmem search`, `/memmem stats`
+- Slash commands: `/episodic-memory search`, `/episodic-memory stats`
 - Conversation tagging/categorization
 - Export/import functionality
 - Web UI for browsing history

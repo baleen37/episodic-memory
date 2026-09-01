@@ -8,9 +8,9 @@ Search indexed event/fact memory records. Use `read` with the returned archive p
 
 ## How This Command Works
 
-1. Call `mcp__plugin_memmem_memmem__search` with the user's query.
+1. Call `mcp__plugin_episodic_memory_episodic_memory__search` with the user's query.
 2. Review the returned memory records and source metadata.
-3. If more context is needed, call `mcp__plugin_memmem_memmem__read` with the returned `archive_path`, `line_start`, and `line_end`.
+3. If more context is needed, call `mcp__plugin_episodic_memory_episodic_memory__read` with the returned `archive_path`, `line_start`, and `line_end`.
 4. Synthesize findings with clear sources.
 
 ## Search

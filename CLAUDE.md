@@ -2,12 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# memmem
+# episodic-memory
 
 ## Purpose
 
 Persistent conversation memory across Claude Code and Codex sessions using archived transcripts.
-Memmem syncs local transcripts into an archive and runs them through a mem0 v2 style extraction
+Episodic Memory syncs local transcripts into an archive and runs them through a mem0 v2 style extraction
 and hybrid search pipeline (ported from mem0 v2.0.17), exposing memory search through CLI and MCP.
 
 ## Memory Architecture Principles
@@ -66,13 +66,13 @@ bun run cli <sync|search|stats|verify>   # Run built CLI (dist/cli-internal.mjs)
 | `src/cli/stats.ts` | CLI stats command — counts over `memories`/`vec_memories` |
 | `src/cli/verify.ts` | CLI verify command — missing/orphan vector checks over `memories`/`vec_memories` |
 | `src/cli/main.ts` | CLI router exposing `sync`, `search`, `stats`, `verify`, `doctor`, and `mcp` |
-| `src/cli-graceful.mjs` | Bun CLI graceful wrapper built to `bin/memmem` (imports `dist/cli-internal.mjs`) |
+| `src/cli-graceful.mjs` | Bun CLI graceful wrapper built to `bin/episodic-memory` (imports `dist/cli-internal.mjs`) |
 | `src/mcp/server.ts` | MCP server exposing the `search` tool only |
 | `src/mcp/handlers.ts` | MCP handler for `search`, delegating to `searchMemories()` |
 | `src/mcp/schemas.ts` | MCP input schema for `search` (`query`, `limit`, `threshold`, `explain`) |
 | `src/mcp/tools.ts` | MCP tool definition for `search` |
-| `hooks/hooks.json` | SessionStart hook configuration for `memmem sync` |
-| `src/cli/mcp.ts` | `memmem mcp` subcommand: ensures deps/build, then spawns the MCP server bundle |
+| `hooks/hooks.json` | SessionStart hook configuration for `episodic-memory sync` |
+| `src/cli/mcp.ts` | `episodic-memory mcp` subcommand: ensures deps/build, then spawns the MCP server bundle |
 | `scripts/build.mjs` | Bun.build bundling script |
 
 **Known transitional state**: `sync.ts` still opens the database via `db.ts`'s `openDatabase()`
@@ -86,7 +86,7 @@ reads or writes them anymore. They have not yet been deleted.
 ### Data Flow
 
 ```text
-SessionStart hook → bin/memmem sync → src/cli/sync.ts
+SessionStart hook → bin/episodic-memory sync → src/cli/sync.ts
 sync              → source adapters discover Claude/Codex JSONL transcripts
 sync              → copy changed transcripts into conversation-archive/<source_kind>/<relative path>
 sync              → parse changed archive files into transcript spans (per source adapter)
@@ -118,7 +118,7 @@ facts already known; consolidation happens purely through Phase 5's md5 dedup on
 
 ### Database Schema
 
-Primary tables in `~/.config/memmem/conversation-index/conversations.db` (`openMemoryDb()`):
+Primary tables in `~/.config/episodic-memory/conversation-index/conversations.db` (`openMemoryDb()`):
 
 - **`memories`**: `MemoryItem` rows — `id` (UUID), `memory` (text), `hash` (md5 of `memory`, unique),
   `metadata` (JSON blob holding scoping keys and promoted payload keys), `created_at`, `updated_at`.
@@ -187,7 +187,7 @@ Adapters discover roots, detect JSONL files, parse transcript spans for extracti
 `extract.ts` to turn a batch of transcript messages into extracted memory facts. Everything behind
 the `LLMProvider` interface (`types.ts`).
 
-- `loadConfig()` reads the `llm` section of `~/.config/memmem/config.json`; returns `null` when
+- `loadConfig()` reads the `llm` section of `~/.config/episodic-memory/config.json`; returns `null` when
   unconfigured, which is why sync works (transcripts still get archived) without any provider —
   extraction is simply skipped and no memory rows are created.
 - `createProvider(config)` is the single factory. Two configuration shapes:
@@ -218,13 +218,13 @@ Bun.build outputs bundles to `dist/` and the entrypoint executable to `bin/`:
 
 - `src/cli/main.ts` → `dist/cli-internal.mjs` (CLI bundle)
 - `src/mcp/server.ts` → `dist/mcp-server.mjs` (MCP server bundle)
-- `src/cli-graceful.mjs` → `bin/memmem` (graceful wrapper executable, bun shebang, chmod 0755)
+- `src/cli-graceful.mjs` → `bin/episodic-memory` (graceful wrapper executable, bun shebang, chmod 0755)
 
 External (not bundled): `@huggingface/transformers`, `bun:sqlite`, `sqlite-vec`, `onnxruntime-node`, `sharp`.
 
 ## Configuration
 
-`~/.config/memmem/config.json` may configure rate limits:
+`~/.config/episodic-memory/config.json` may configure rate limits:
 
 ```json
 {
@@ -238,9 +238,9 @@ Archive sync does not require an LLM provider configuration — transcripts are 
 
 Storage locations:
 
-- Database: `~/.config/memmem/conversation-index/conversations.db`
-- Archive: `~/.config/memmem/conversation-archive/`
-- Logs: `~/.config/memmem/logs/`
+- Database: `~/.config/episodic-memory/conversation-index/conversations.db`
+- Archive: `~/.config/episodic-memory/conversation-archive/`
+- Logs: `~/.config/episodic-memory/logs/`
 
 ## Testing
 

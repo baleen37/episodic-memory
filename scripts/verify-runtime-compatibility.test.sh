@@ -43,6 +43,10 @@ for file in \
 done
 
 package_version="$(jq -r '.version' "$PACKAGE_FILE")"
+package_name="$(jq -r '.name' "$PACKAGE_FILE")"
+plugin_name="${package_name##*/}"
+package_bin_name="$(jq -r '.bin | keys[0]' "$PACKAGE_FILE")"
+package_bin_path="$(jq -r --arg name "$package_bin_name" '.bin[$name]' "$PACKAGE_FILE")"
 package_description="$(jq -r '.description' "$PACKAGE_FILE")"
 package_repository="$(jq -r '.repository.url // .repository' "$PACKAGE_FILE")"
 package_homepage="$(jq -r '.homepage // .repository.url // .repository' "$PACKAGE_FILE")"
@@ -50,6 +54,7 @@ package_license="$(jq -r '.license' "$PACKAGE_FILE")"
 package_keywords="$(jq -c '.keywords' "$PACKAGE_FILE")"
 
 assert_equals "$package_version" "$(jq -r '.version' "$CLAUDE_PLUGIN_FILE")" "claude manifest version drift"
+assert_equals "$plugin_name" "$(jq -r '.name' "$CLAUDE_PLUGIN_FILE")" "claude manifest name drift"
 assert_equals "$package_description" "$(jq -r '.description' "$CLAUDE_PLUGIN_FILE")" "claude manifest description drift"
 assert_equals "$package_repository" "$(jq -r '.repository' "$CLAUDE_PLUGIN_FILE")" "claude manifest repository drift"
 assert_equals "$package_homepage" "$(jq -r '.homepage' "$CLAUDE_PLUGIN_FILE")" "claude manifest homepage drift"
@@ -57,11 +62,17 @@ assert_equals "$package_license" "$(jq -r '.license' "$CLAUDE_PLUGIN_FILE")" "cl
 assert_equals "$package_keywords" "$(jq -c '.keywords' "$CLAUDE_PLUGIN_FILE")" "claude manifest keywords drift"
 
 assert_equals "$package_version" "$(jq -r '.version' "$CODEX_PLUGIN_FILE")" "codex manifest version drift"
+assert_equals "$plugin_name" "$(jq -r '.name' "$CODEX_PLUGIN_FILE")" "codex manifest name drift"
 assert_equals "$package_description" "$(jq -r '.description' "$CODEX_PLUGIN_FILE")" "codex manifest description drift"
 assert_equals "$package_repository" "$(jq -r '.repository' "$CODEX_PLUGIN_FILE")" "codex manifest repository drift"
 assert_equals "$package_homepage" "$(jq -r '.homepage' "$CODEX_PLUGIN_FILE")" "codex manifest homepage drift"
 assert_equals "$package_license" "$(jq -r '.license' "$CODEX_PLUGIN_FILE")" "codex manifest license drift"
 assert_equals "$package_keywords" "$(jq -c '.keywords' "$CODEX_PLUGIN_FILE")" "codex manifest keywords drift"
+
+assert_equals "$plugin_name" "$package_bin_name" "package bin name drift"
+assert_equals "bin/$plugin_name" "$package_bin_path" "package bin path drift"
+assert_equals "$plugin_name" "$(jq -r '.mcpServers | keys[0]' "$ROOT_MCP_FILE")" "root MCP server name drift"
+assert_equals "true" "$(jq -r --arg name "$plugin_name" '.mcpServers[$name].args[1] | contains("/bin/" + $name)' "$ROOT_MCP_FILE")" "root MCP executable drift"
 
 assert_equals "object" "$(jq -r '.interface | type' "$CODEX_PLUGIN_FILE")" "codex manifest interface"
 assert_equals "true" "$(jq -r 'has("mcpServers")' "$CODEX_PLUGIN_FILE")" "codex manifest mcpServers presence"

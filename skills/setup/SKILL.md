@@ -1,27 +1,27 @@
 ---
 name: setup
-description: This skill provides configuration guidance for the memmem plugin. Invoke explicitly when user requests to configure plugin settings.
+description: This skill provides configuration guidance for the episodic-memory plugin. Invoke explicitly when user requests to configure plugin settings.
 version: 1.0.0
 ---
 
 # Configure Conversation Memory
 
-This skill provides guidance for configuring the memmem plugin,
+This skill provides guidance for configuring the episodic-memory plugin,
 including LLM settings for memory-record extraction, API key configuration,
 project exclusions, and environment variables.
 
 ## Config File Location
 
-The memmem plugin uses a configuration file at:
+The episodic-memory plugin uses a configuration file at:
 
 ```text
-~/.config/memmem/config.json
+~/.config/episodic-memory/config.json
 ```
 
 Create this directory and file if it doesn't exist:
 
 ```bash
-mkdir -p ~/.config/memmem
+mkdir -p ~/.config/episodic-memory
 ```
 
 ## LLM Provider Configuration
@@ -79,13 +79,13 @@ Use top-level `provider` with either a single `apiKey`, or a non-empty `provider
 
 ## Project Exclusions
 
-Exclude a conversation directory from indexing by placing a `.no-memmem` marker file in that directory:
+Exclude a conversation directory from indexing by placing a `.no-episodic-memory` marker file in that directory:
 
 ```bash
-touch /path/to/conversation/dir/.no-memmem
+touch /path/to/conversation/dir/.no-episodic-memory
 ```
 
-During sync, memmem skips directories containing `.no-memmem` and removes any already archived/indexed content for that subtree.
+During sync, episodic-memory skips directories containing `.no-episodic-memory` and removes any already archived/indexed content for that subtree.
 
 For single-conversation inline exclusion markers such as `DO NOT INDEX THIS CHAT`, see the README exclusion section.
 
@@ -105,16 +105,16 @@ Test your configuration:
 
 ```bash
 # Sync transcripts and extract memory records when a provider is configured
-memmem sync
+episodic-memory sync
 
 # Enable debug logging
-CONVERSATION_MEMORY_DEBUG=true memmem sync
+CONVERSATION_MEMORY_DEBUG=true episodic-memory sync
 
 # Verify index health
-memmem verify
+episodic-memory verify
 
 # Check logs
-tail -f ~/.config/memmem/logs/$(date +%Y-%m-%d).log
+tail -f ~/.config/episodic-memory/logs/$(date +%Y-%m-%d).log
 ```
 
 ## Troubleshooting
@@ -155,10 +155,10 @@ tail -f ~/.config/memmem/logs/$(date +%Y-%m-%d).log
 
 **Solution:**
 
-- Verify config.json exists at `~/.config/memmem/config.json`
+- Verify config.json exists at `~/.config/episodic-memory/config.json`
 - Check config.json has valid JSON syntax
 - Ensure `provider` is present with either `apiKey` or a non-empty `providers[]` list
-- Re-run `memmem sync` after configuring the provider so extraction can create memory rows
+- Re-run `episodic-memory sync` after configuring the provider so extraction can create memory rows
 
 ## Example Configurations
 

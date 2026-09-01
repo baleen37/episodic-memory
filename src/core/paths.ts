@@ -13,22 +13,22 @@ function ensureDir(dir: string): string {
 }
 
 /**
- * Get the memmem directory
+ * Get the episodic-memory directory
  *
  * Precedence:
  * 1. CONVERSATION_MEMORY_CONFIG_DIR env var (primary, documented in CLI)
- * 2. MEMMEM_CONFIG_DIR env var (alternative for backward compatibility)
- * 3. ~/.config/memmem/ (default)
+ * 2. EPISODIC_MEMORY_CONFIG_DIR env var (alternative for backward compatibility)
+ * 3. ~/.config/episodic-memory/ (default)
  */
 export function getSuperpowersDir(): string {
   let dir: string;
 
   if (process.env.CONVERSATION_MEMORY_CONFIG_DIR) {
     dir = process.env.CONVERSATION_MEMORY_CONFIG_DIR;
-  } else if (process.env.MEMMEM_CONFIG_DIR) {
-    dir = process.env.MEMMEM_CONFIG_DIR;
+  } else if (process.env.EPISODIC_MEMORY_CONFIG_DIR) {
+    dir = process.env.EPISODIC_MEMORY_CONFIG_DIR;
   } else {
-    dir = path.join(os.homedir(), '.config', 'memmem');
+    dir = path.join(os.homedir(), '.config', 'episodic-memory');
   }
 
   return ensureDir(dir);
@@ -59,12 +59,12 @@ export function getIndexDir(): string {
 export function getDbPath(): string {
   // Allow test override with direct DB path
   // CONVERSATION_MEMORY_DB_PATH is the primary env var (documented in CLI)
-  // MEMMEM_DB_PATH and TEST_DB_PATH are alternatives for backward compatibility
+  // EPISODIC_MEMORY_DB_PATH and TEST_DB_PATH are alternatives for backward compatibility
   if (process.env.CONVERSATION_MEMORY_DB_PATH) {
     return process.env.CONVERSATION_MEMORY_DB_PATH;
   }
-  if (process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH) {
-    return process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH!;
+  if (process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH) {
+    return process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH!;
   }
 
   return path.join(getIndexDir(), 'conversations.db');
@@ -74,7 +74,7 @@ export function getDbPath(): string {
  * Get embedding model cache directory
  *
  * Must be absolute: transformers.js defaults cacheDir to a cwd-relative
- * './.cache', which re-downloads the model into every directory memmem runs
+ * './.cache', which re-downloads the model into every directory episodic-memory runs
  * from and races when several processes download at once.
  */
 export function getModelCacheDir(): string {

@@ -1,9 +1,9 @@
 /**
  * Runtime compatibility e2e smoke tests.
  *
- * Verifies memmem behaves identically when only Codex's PLUGIN_ROOT or only
+ * Verifies episodic-memory behaves identically when only Codex's PLUGIN_ROOT or only
  * Claude's CLAUDE_PLUGIN_ROOT is set — the single runtime env-var difference.
- * Spawns real bin/memmem and dist bundles as child processes; isolates HOME to
+ * Spawns real bin/episodic-memory and dist bundles as child processes; isolates HOME to
  * a temp dir so the real DB/archive/LLM config are never touched.
  */
 import { describe, test, expect } from 'bun:test';
@@ -16,7 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
-const BIN = join(REPO_ROOT, 'bin', 'memmem');
+const BIN = join(REPO_ROOT, 'bin', 'episodic-memory');
 const MCP_BUNDLE = join(REPO_ROOT, 'dist', 'mcp-server.mjs');
 
 const RUNTIME_ENVS: ReadonlyArray<readonly [string, Record<string, string | undefined>]> = [
@@ -25,7 +25,7 @@ const RUNTIME_ENVS: ReadonlyArray<readonly [string, Record<string, string | unde
 ];
 
 function makeTmpHome(): string {
-  return mkdtempSync(join(tmpdir(), 'memmem-e2e-'));
+  return mkdtempSync(join(tmpdir(), 'episodic-memory-e2e-'));
 }
 function cleanup(tmpHome: string): void {
   rmSync(tmpHome, { recursive: true, force: true });
@@ -87,7 +87,7 @@ describe('CLI sync works under each runtime env (no LLM, no network)', () => {
 
   /** Find the first archived transcript file under the isolated HOME. */
   function findArchiveFile(tmpHome: string): string | null {
-    const base = join(tmpHome, '.config', 'memmem', 'conversation-archive');
+    const base = join(tmpHome, '.config', 'episodic-memory', 'conversation-archive');
     if (!existsSync(base)) return null;
     const stack = [base];
     while (stack.length) {
@@ -138,7 +138,7 @@ describe('CLI sync works under each runtime env (no LLM, no network)', () => {
       const childEnv = {
         ...runtimeEnv,
         HOME: tmpHome,
-        MEMMEM_DB_PATH: join(tmpHome, 'index', 'conversations.db'),
+        EPISODIC_MEMORY_DB_PATH: join(tmpHome, 'index', 'conversations.db'),
       };
 
       const stats = await runToCompletion([BIN, 'stats'], childEnv, 60_000);
@@ -205,7 +205,7 @@ describe('MCP server starts and lists tools under each runtime env', () => {
           HOME: tmpHome,
         },
       });
-      client = new Client({ name: 'memmem-e2e', version: '1.0.0' });
+      client = new Client({ name: 'episodic-memory-e2e', version: '1.0.0' });
       await client.connect(transport); // performs the initialize handshake
 
       const { tools } = await client.listTools();

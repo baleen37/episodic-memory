@@ -34,7 +34,7 @@ describe('getMemoryStats', () => {
   test('counts memories and vectors', () => {
     db = newMemoryDb();
 
-    insertMemory(db, 'mem-1', 'memmem stores atomic memory records.');
+    insertMemory(db, 'mem-1', 'episodic-memory stores atomic memory records.');
     const rowid = (db.query('SELECT rowid AS r FROM memories WHERE id = ?').get('mem-1') as { r: number }).r;
     insertVector(db, rowid);
     insertMemory(db, 'mem-2', 'A memory without a vector yet.');

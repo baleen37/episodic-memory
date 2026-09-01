@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build script for memmem plugin
+ * Build script for episodic-memory plugin
  * Bundles the MCP server and CLI into standalone files using Bun.build
  */
 
@@ -51,11 +51,11 @@ async function buildCli() {
     await buildEntry("src/cli/main.ts", "dist/cli-internal.mjs");
     await buildEntry("src/mcp/server.ts", "dist/mcp-server.mjs");
 
-    // bin/memmem = graceful wrapper executable (bun shebang).
+    // bin/episodic-memory = graceful wrapper executable (bun shebang).
     const graceful = await Bun.file(join("src", "cli-graceful.mjs")).text();
-    await writeFile(join("bin", "memmem"), graceful);
-    await chmod(join("bin", "memmem"), 0o755);
-    console.log("✓ Built bin/memmem (graceful executable)");
+    await writeFile(join("bin", "episodic-memory"), graceful);
+    await chmod(join("bin", "episodic-memory"), 0o755);
+    console.log("✓ Built bin/episodic-memory (graceful executable)");
 
     console.log("\n✅ Build complete!");
   } catch (error) {
