@@ -128,7 +128,9 @@ describe('hooks.json sync-only hook configuration', () => {
     const dependencyChecker = readRepoFile('scripts/lib/check-dependencies.mjs');
 
     expect(dependencyChecker.startsWith('#!/usr/bin/env bun')).toBe(true);
-    expect(dependencyChecker).toContain("spawn(bunCommand, ['install'");
+    expect(dependencyChecker).toContain('spawn(bunCommand, args');
+    expect(dependencyChecker).toContain("['install', '--silent']");
+    expect(dependencyChecker).toContain("['add', '--no-save', '--ignore-scripts', nativePackage]");
     expect(dependencyChecker).toContain("spawn(bunCommand, ['run', 'build'");
     expect(dependencyChecker).not.toContain("spawn(npmCommand");
   });

@@ -1770,23 +1770,57 @@ function findRoot(start) {
   }
   return start;
 }
+var NATIVE_SQLITE_VEC_PACKAGES = {
+  darwin: {
+    arm64: "sqlite-vec-darwin-arm64",
+    x64: "sqlite-vec-darwin-x64"
+  },
+  linux: {
+    arm64: "sqlite-vec-linux-arm64",
+    x64: "sqlite-vec-linux-x64"
+  },
+  win32: {
+    x64: "sqlite-vec-windows-x64"
+  }
+};
+var NATIVE_SQLITE_VEC_EXTENSIONS = {
+  darwin: "dylib",
+  linux: "so",
+  win32: "dll"
+};
+function getNativeSqliteVecPackageName(platformName = process.platform, architecture = process.arch) {
+  return NATIVE_SQLITE_VEC_PACKAGES[platformName]?.[architecture] || null;
+}
+function getNativeSqliteVecExtensionPath(root = ROOT, platformName = process.platform, architecture = process.arch) {
+  const packageName = getNativeSqliteVecPackageName(platformName, architecture);
+  const extension = NATIVE_SQLITE_VEC_EXTENSIONS[platformName];
+  if (!packageName || !extension)
+    return null;
+  return join3(root, "node_modules", packageName, `vec0.${extension}`);
+}
 var ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname2);
-function checkDependencies() {
-  const nodeModulesPath = join3(ROOT, "node_modules");
+function checkDependencies(root = ROOT) {
+  const nodeModulesPath = join3(root, "node_modules");
   if (!existsSync2(nodeModulesPath)) {
     return { installed: false, missing: ["node_modules"] };
   }
-  return { installed: true, missing: [] };
+  const missing = [];
+  if (!existsSync2(join3(nodeModulesPath, "sqlite-vec"))) {
+    missing.push("sqlite-vec");
+  }
+  const nativePackage = getNativeSqliteVecPackageName();
+  const nativeExtensionPath = getNativeSqliteVecExtensionPath(root);
+  if (nativePackage && nativeExtensionPath && !existsSync2(nativeExtensionPath)) {
+    missing.push(nativePackage);
+  }
+  return { installed: missing.length === 0, missing };
 }
-function installDependencies(silent = false) {
+function runBunCommand(args, silent) {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
     const bunCommand = isWindows ? "bun.exe" : "bun";
-    if (!silent) {
-      console.error("[episodic-memory] Installing dependencies...");
-    }
     let stderrOutput = "";
-    const child = spawn(bunCommand, ["install", "--silent"], {
+    const child = spawn(bunCommand, args, {
       cwd: ROOT,
       stdio: silent ? "ignore" : ["ignore", "pipe", "pipe"],
       shell: isWindows,
@@ -1803,12 +1837,9 @@ function installDependencies(silent = false) {
     }
     child.on("exit", (code) => {
       if (code === 0) {
-        if (!silent) {
-          console.error("[episodic-memory] Dependencies installed.");
-        }
         resolve();
       } else {
-        const error = new Error(`bun install failed with exit code ${code}`);
+        const error = new Error(`bun ${args[0]} failed with exit code ${code}`);
         error.stderr = stderrOutput;
         reject(error);
       }
@@ -1820,6 +1851,26 @@ function installDependencies(silent = false) {
       child.unref();
     }
   });
+}
+async function installDependencies(silent = false) {
+  if (!silent) {
+    console.error("[episodic-memory] Installing dependencies...");
+  }
+  await runBunCommand(["install", "--silent"], silent);
+  const nativePackage = getNativeSqliteVecPackageName();
+  const nativeExtensionPath = getNativeSqliteVecExtensionPath();
+  if (nativePackage && nativeExtensionPath && !existsSync2(nativeExtensionPath)) {
+    if (!silent) {
+      console.error(`[episodic-memory] Installing native dependency ${nativePackage}...`);
+    }
+    await runBunCommand(["add", "--no-save", "--ignore-scripts", nativePackage], silent);
+    if (!existsSync2(nativeExtensionPath)) {
+      throw new Error(`native dependency install did not provide ${nativePackage}`);
+    }
+  }
+  if (!silent) {
+    console.error("[episodic-memory] Dependencies installed.");
+  }
 }
 function analyzeError(error) {
   const stderr = error.stderr || error.message || "";
@@ -4106,6 +4157,6 @@ if (__require.main == __require.module) {
   });
 }
 export {
-  getHelpText,
-  parseSearchArgs
+  parseSearchArgs,
+  getHelpText
 };

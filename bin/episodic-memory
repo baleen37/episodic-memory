@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
  * Graceful CLI wrapper - checks dependencies before running actual CLI.
- * Prevents ERR_MODULE_NOT_FOUND errors on first run by silently skipping
- * and triggering background bun install.
+ * Prevents missing dependency errors on first run by completing installation
+ * before importing the actual CLI.
  */
 
 import { checkDependencies, installDependencies } from '../scripts/lib/check-dependencies.mjs';
@@ -16,10 +16,8 @@ async function main() {
   const { installed, missing } = checkDependencies();
 
   if (!installed) {
-    // Install in background, don't block CLI
-    installDependencies(true).catch(() => {
-      // Silent failure - CLI might still work with partial deps
-    });
+    // Wait for the platform-native sqlite-vec extension before importing the CLI.
+    await installDependencies(false);
   }
 
   // Run CLI regardless
