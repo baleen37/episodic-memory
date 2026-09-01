@@ -6,6 +6,12 @@ PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC_DIR="$PLUGIN_ROOT/src"
 DIST_DIR="$PLUGIN_ROOT/dist"
 
+if [ "$(uname -s)" = "Darwin" ]; then
+  STAT_MTIME_ARGS=(-f %m)
+else
+  STAT_MTIME_ARGS=(-c %Y)
+fi
+
 # If dist doesn't exist, build
 if [ ! -d "$DIST_DIR" ]; then
   echo "dist/ not found, building..."
@@ -15,10 +21,10 @@ if [ ! -d "$DIST_DIR" ]; then
 fi
 
 # Find the most recently modified source file
-LATEST_SRC=$(find "$SRC_DIR" -type f -name "*.ts" -exec stat -f %m {} \; 2>/dev/null | sort -rn | head -1)
+LATEST_SRC=$(find "$SRC_DIR" -type f -name "*.ts" -exec stat "${STAT_MTIME_ARGS[@]}" {} \; 2>/dev/null | sort -rn | head -1)
 
 # Find the oldest dist file
-EARLIEST_DIST=$(find "$DIST_DIR" -type f -exec stat -f %m {} \; 2>/dev/null | sort -n | head -1)
+EARLIEST_DIST=$(find "$DIST_DIR" -type f -exec stat "${STAT_MTIME_ARGS[@]}" {} \; 2>/dev/null | sort -n | head -1)
 
 # If no src files found, skip
 if [ -z "$LATEST_SRC" ]; then

@@ -21,20 +21,68 @@ function findRoot(start) {
   return start;
 }
 
+const NATIVE_SQLITE_VEC_PACKAGES = {
+  darwin: {
+    arm64: 'sqlite-vec-darwin-arm64',
+    x64: 'sqlite-vec-darwin-x64',
+  },
+  linux: {
+    arm64: 'sqlite-vec-linux-arm64',
+    x64: 'sqlite-vec-linux-x64',
+  },
+  win32: {
+    x64: 'sqlite-vec-windows-x64',
+  },
+};
+
+const NATIVE_SQLITE_VEC_EXTENSIONS = {
+  darwin: 'dylib',
+  linux: 'so',
+  win32: 'dll',
+};
+
+/** Return the platform package that sqlite-vec loads at runtime. */
+export function getNativeSqliteVecPackageName(platformName = process.platform, architecture = process.arch) {
+  return NATIVE_SQLITE_VEC_PACKAGES[platformName]?.[architecture] || null;
+}
+
+/** Return the loadable extension path expected by sqlite-vec. */
+export function getNativeSqliteVecExtensionPath(
+  root = ROOT,
+  platformName = process.platform,
+  architecture = process.arch,
+) {
+  const packageName = getNativeSqliteVecPackageName(platformName, architecture);
+  const extension = NATIVE_SQLITE_VEC_EXTENSIONS[platformName];
+  if (!packageName || !extension) return null;
+  return join(root, 'node_modules', packageName, `vec0.${extension}`);
+}
+
 const ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || findRoot(__dirname);
 
 /**
  * Check if dependencies are installed
  * @returns {{ installed: boolean, missing: string[], error?: string }}
  */
-export function checkDependencies() {
-  const nodeModulesPath = join(ROOT, 'node_modules');
+export function checkDependencies(root = ROOT) {
+  const nodeModulesPath = join(root, 'node_modules');
 
   if (!existsSync(nodeModulesPath)) {
     return { installed: false, missing: ['node_modules'] };
   }
 
-  return { installed: true, missing: [] };
+  const missing = [];
+  if (!existsSync(join(nodeModulesPath, 'sqlite-vec'))) {
+    missing.push('sqlite-vec');
+  }
+
+  const nativePackage = getNativeSqliteVecPackageName();
+  const nativeExtensionPath = getNativeSqliteVecExtensionPath(root);
+  if (nativePackage && nativeExtensionPath && !existsSync(nativeExtensionPath)) {
+    missing.push(nativePackage);
+  }
+
+  return { installed: missing.length === 0, missing };
 }
 
 /**
@@ -91,21 +139,17 @@ function newestSourceMtime(dir) {
 
 /**
  * Install dependencies using bun
- * @param {boolean} silent - Run silently in background
+ * @param {boolean} silent - Suppress installer output and run detached
  * @returns {Promise<void>}
  */
-export function installDependencies(silent = false) {
+function runBunCommand(args, silent) {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === 'win32';
     const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
-    if (!silent) {
-      console.error('[episodic-memory] Installing dependencies...');
-    }
-
     let stderrOutput = '';
 
-    const child = spawn(bunCommand, ['install', '--silent'], {
+    const child = spawn(bunCommand, args, {
       cwd: ROOT,
       stdio: silent ? 'ignore' : ['ignore', 'pipe', 'pipe'],
       shell: isWindows,
@@ -125,12 +169,9 @@ export function installDependencies(silent = false) {
 
     child.on('exit', (code) => {
       if (code === 0) {
-        if (!silent) {
-          console.error('[episodic-memory] Dependencies installed.');
-        }
         resolve();
       } else {
-        const error = new Error(`bun install failed with exit code ${code}`);
+        const error = new Error(`bun ${args[0]} failed with exit code ${code}`);
         error.stderr = stderrOutput;
         reject(error);
       }
@@ -144,6 +185,29 @@ export function installDependencies(silent = false) {
       child.unref();
     }
   });
+}
+
+export async function installDependencies(silent = false) {
+  if (!silent) {
+    console.error('[episodic-memory] Installing dependencies...');
+  }
+  await runBunCommand(['install', '--silent'], silent);
+
+  const nativePackage = getNativeSqliteVecPackageName();
+  const nativeExtensionPath = getNativeSqliteVecExtensionPath();
+  if (nativePackage && nativeExtensionPath && !existsSync(nativeExtensionPath)) {
+    if (!silent) {
+      console.error(`[episodic-memory] Installing native dependency ${nativePackage}...`);
+    }
+    await runBunCommand(['add', '--no-save', '--ignore-scripts', nativePackage], silent);
+    if (!existsSync(nativeExtensionPath)) {
+      throw new Error(`native dependency install did not provide ${nativePackage}`);
+    }
+  }
+
+  if (!silent) {
+    console.error('[episodic-memory] Dependencies installed.');
+  }
 }
 
 /**

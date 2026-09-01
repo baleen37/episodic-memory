@@ -31,6 +31,7 @@ These packages/runtime modules are marked external and must be available at runt
 - `sharp` — Image processing dependency used by transformer tooling
 - `onnxruntime-node` — ONNX runtime for ML models
 - `sqlite-vec` — Vector similarity search
+- Platform package for `sqlite-vec` — loadable native extension (`.dylib`, `.so`, or `.dll`)
 
 ### lib/check-dependencies.mjs
 
@@ -40,7 +41,11 @@ Shared dependency-checking logic imported at runtime by `bin/episodic-memory` (b
 
 ```javascript
 // Check if dependencies are installed
-checkDependencies() -> { installed: boolean, missing: string[], error?: string }
+checkDependencies(root?: string) -> { installed: boolean, missing: string[], error?: string }
+
+// Resolve the platform-native sqlite-vec package and extension path
+getNativeSqliteVecPackageName(platform?: string, architecture?: string) -> string | null
+getNativeSqliteVecExtensionPath(root?: string, platform?: string, architecture?: string) -> string | null
 
 // Check if build is needed
 checkBuildNeeded() -> { needsBuild: boolean, reason: string }

@@ -85,4 +85,6 @@ if jq -e 'has("interface")' "$CLAUDE_PLUGIN_FILE" >/dev/null; then
   fail "claude manifest must not include Codex-only interface field"
 fi
 
+bash "$SCRIPT_DIR/conditional-build.test.sh"
+
 echo "PASS: runtime compatibility manifests are valid"

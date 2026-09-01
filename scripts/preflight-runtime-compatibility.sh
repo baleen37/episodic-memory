@@ -11,7 +11,23 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 echo "== Claude plugin validation =="
-claude plugin validate . --strict
+VALIDATION_DIR="$(mktemp -d "${TMPDIR:-/tmp}/episodic-memory-plugin-validation.XXXXXX")"
+cleanup_validation_dir() {
+  rm -rf "$VALIDATION_DIR"
+}
+trap cleanup_validation_dir EXIT
+
+# CLAUDE.md is repository maintainer guidance. Claude's plugin validator warns
+# that a plugin-root CLAUDE.md is not loaded as project context, so validate a
+# payload copy that contains the plugin surface without that repository file.
+tar -C "$REPO_ROOT" \
+  --exclude='./CLAUDE.md' \
+  --exclude='./.git' \
+  --exclude='./.worktrees' \
+  --exclude='./node_modules' \
+  --exclude='./.verify' \
+  -cf - . | tar -C "$VALIDATION_DIR" -xf -
+claude plugin validate "$VALIDATION_DIR" --strict
 
 echo "== Runtime manifest compatibility =="
 bash scripts/verify-runtime-compatibility.test.sh
