@@ -4157,6 +4157,6 @@ if (__require.main == __require.module) {
   });
 }
 export {
-  parseSearchArgs,
-  getHelpText
+  getHelpText,
+  parseSearchArgs
 };
