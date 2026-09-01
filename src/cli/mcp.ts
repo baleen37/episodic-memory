@@ -28,7 +28,7 @@ const PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT ||
 export async function ensureDependencies(): Promise<void> {
   const { installed } = checkDependencies();
   if (!installed) {
-    console.error('[memmem] Installing dependencies (first run only)...');
+    console.error('[episodic-memory] Installing dependencies (first run only)...');
     await installDependencies(false);
   }
 }
@@ -38,7 +38,7 @@ export async function runMcpCli(): Promise<void> {
     await ensureDependencies();
   } catch (error) {
     const analysis = analyzeError(error as Error);
-    console.error('[memmem] ERROR: setup failed.');
+    console.error('[episodic-memory] ERROR: setup failed.');
     console.error(`Cause: ${analysis.cause}`);
     console.error(`Fix: ${analysis.fix}`);
     process.exit(1);
@@ -46,7 +46,7 @@ export async function runMcpCli(): Promise<void> {
 
   const mcpServerPath = join(PLUGIN_ROOT, 'dist', 'mcp-server.mjs');
   if (!existsSync(mcpServerPath)) {
-    console.error(`[memmem] ERROR: MCP server not found at ${mcpServerPath}`);
+    console.error(`[episodic-memory] ERROR: MCP server not found at ${mcpServerPath}`);
     console.error('Please run: bun run build');
     process.exit(1);
   }
@@ -62,7 +62,7 @@ export async function runMcpCli(): Promise<void> {
     else process.exit(code ?? 0);
   });
   child.on('error', (err) => {
-    console.error(`[memmem] ERROR: Failed to start MCP server: ${err.message}`);
+    console.error(`[episodic-memory] ERROR: Failed to start MCP server: ${err.message}`);
     process.exit(1);
   });
 }

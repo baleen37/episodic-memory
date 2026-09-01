@@ -24,7 +24,7 @@ export type { SearchInput, SearchResultItem };
 
 const server = new Server(
   {
-    name: 'memmem',
+    name: 'episodic-memory',
     version: '3.0.0',
   },
   {

@@ -106,8 +106,8 @@ async function runBenchmarkCommand(): Promise<void> {
   const fixture = await loadSearchQualityFixture();
   const db = new Database(':memory:');
   const queryEmbeddings = new Map(fixture.queries.map((query) => [query.query, query.queryEmbedding]));
-  const previousEmbeddingsDisabled = process.env.MEMMEM_DISABLE_EMBEDDINGS;
-  delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+  const previousEmbeddingsDisabled = process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
+  delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
 
   try {
     sqliteVec.load(db);
@@ -131,9 +131,9 @@ async function runBenchmarkCommand(): Promise<void> {
     __setModelForTests(null, null);
     __setEmbeddingConfigForTests(null);
     if (previousEmbeddingsDisabled === undefined) {
-      delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+      delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     } else {
-      process.env.MEMMEM_DISABLE_EMBEDDINGS = previousEmbeddingsDisabled;
+      process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS = previousEmbeddingsDisabled;
     }
     db.close();
   }

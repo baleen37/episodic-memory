@@ -39,9 +39,9 @@ export function runDoctorCli(): void {
     if (hasFail) {
       process.exitCode = 1;
     } else if (hasWarn) {
-      console.log('\nmemmem is usable, but some checks need attention.');
+      console.log('\nepisodic-memory is usable, but some checks need attention.');
     } else {
-      console.log('\nmemmem is healthy.');
+      console.log('\nepisodic-memory is healthy.');
     }
   } finally {
     db.close();

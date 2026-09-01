@@ -6524,10 +6524,10 @@ function getSuperpowersDir() {
   let dir;
   if (process.env.CONVERSATION_MEMORY_CONFIG_DIR) {
     dir = process.env.CONVERSATION_MEMORY_CONFIG_DIR;
-  } else if (process.env.MEMMEM_CONFIG_DIR) {
-    dir = process.env.MEMMEM_CONFIG_DIR;
+  } else if (process.env.EPISODIC_MEMORY_CONFIG_DIR) {
+    dir = process.env.EPISODIC_MEMORY_CONFIG_DIR;
   } else {
-    dir = path.join(os.homedir(), ".config", "memmem");
+    dir = path.join(os.homedir(), ".config", "episodic-memory");
   }
   return ensureDir(dir);
 }
@@ -6538,8 +6538,8 @@ function getDbPath() {
   if (process.env.CONVERSATION_MEMORY_DB_PATH) {
     return process.env.CONVERSATION_MEMORY_DB_PATH;
   }
-  if (process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH) {
-    return process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH;
+  if (process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH) {
+    return process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH;
   }
   return path.join(getIndexDir(), "conversations.db");
 }
@@ -6559,7 +6559,7 @@ var init_paths = () => {};
 import { appendFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 function getThreshold() {
-  const raw = (process.env.MEMMEM_LOG_LEVEL ?? "info").toLowerCase();
+  const raw = (process.env.EPISODIC_MEMORY_LOG_LEVEL ?? "info").toLowerCase();
   if (raw === "silent")
     return -1;
   return LEVELS[raw] ?? LEVELS["info"];
@@ -6669,7 +6669,7 @@ var init_logger = __esm(() => {
 import { existsSync, readFileSync } from "fs";
 import { join as join2 } from "path";
 function loadConfig() {
-  const configDir = join2(process.env.HOME ?? "", ".config", "memmem");
+  const configDir = join2(process.env.HOME ?? "", ".config", "episodic-memory");
   const configPath = join2(configDir, "config.json");
   if (!configFileDeps.existsSync(configPath)) {
     return null;
@@ -16920,7 +16920,7 @@ function hasExplicitEmbeddingRateLimit() {
   return loadConfigFn2()?.ratelimit?.embedding !== undefined;
 }
 function isEmbeddingsDisabled() {
-  return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
+  return process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS === "true";
 }
 async function embedQuery(text) {
   return run("query", text);
@@ -17301,7 +17301,7 @@ function handleError(error2) {
   return error2 instanceof Error ? `Error: ${error2.message}` : `Error: ${String(error2)}`;
 }
 var server = new Server({
-  name: "memmem",
+  name: "episodic-memory",
   version: "3.0.0"
 }, {
   capabilities: {

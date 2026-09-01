@@ -1,6 +1,6 @@
 # MCP Tools API Reference
 
-memmem exposes one read-only MCP tool for searching local memory records.
+episodic-memory exposes one read-only MCP tool for searching local memory records.
 
 ## search
 

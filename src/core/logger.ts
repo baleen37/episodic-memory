@@ -1,9 +1,9 @@
 /**
  * Level-gated logger. Writes to stderr and mirrors output to a dated log file
- * at ~/.config/memmem/logs/YYYY-MM-DD.log (buffered; file writes are suppressed
+ * at ~/.config/episodic-memory/logs/YYYY-MM-DD.log (buffered; file writes are suppressed
  * under `bun test` / NODE_ENV=test to avoid polluting the real logs directory).
  *
- * Control via MEMMEM_LOG_LEVEL env var:
+ * Control via EPISODIC_MEMORY_LOG_LEVEL env var:
  *   error | warn | info | debug   (default: info)
  *   silent                         (disables all output)
  */
@@ -22,7 +22,7 @@ const LEVELS: Record<string, number> = {
 };
 
 function getThreshold(): number {
-  const raw = (process.env.MEMMEM_LOG_LEVEL ?? 'info').toLowerCase();
+  const raw = (process.env.EPISODIC_MEMORY_LOG_LEVEL ?? 'info').toLowerCase();
   if (raw === 'silent') return -1;
   return LEVELS[raw] ?? LEVELS['info'];
 }

@@ -31,10 +31,10 @@ function getSuperpowersDir() {
   let dir;
   if (process.env.CONVERSATION_MEMORY_CONFIG_DIR) {
     dir = process.env.CONVERSATION_MEMORY_CONFIG_DIR;
-  } else if (process.env.MEMMEM_CONFIG_DIR) {
-    dir = process.env.MEMMEM_CONFIG_DIR;
+  } else if (process.env.EPISODIC_MEMORY_CONFIG_DIR) {
+    dir = process.env.EPISODIC_MEMORY_CONFIG_DIR;
   } else {
-    dir = path.join(os.homedir(), ".config", "memmem");
+    dir = path.join(os.homedir(), ".config", "episodic-memory");
   }
   return ensureDir(dir);
 }
@@ -51,8 +51,8 @@ function getDbPath() {
   if (process.env.CONVERSATION_MEMORY_DB_PATH) {
     return process.env.CONVERSATION_MEMORY_DB_PATH;
   }
-  if (process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH) {
-    return process.env.MEMMEM_DB_PATH || process.env.TEST_DB_PATH;
+  if (process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH) {
+    return process.env.EPISODIC_MEMORY_DB_PATH || process.env.TEST_DB_PATH;
   }
   return path.join(getIndexDir(), "conversations.db");
 }
@@ -72,7 +72,7 @@ var init_paths = () => {};
 import { appendFileSync, readdirSync as readdirSync3, unlinkSync } from "fs";
 import { join as join5 } from "path";
 function getThreshold() {
-  const raw = (process.env.MEMMEM_LOG_LEVEL ?? "info").toLowerCase();
+  const raw = (process.env.EPISODIC_MEMORY_LOG_LEVEL ?? "info").toLowerCase();
   if (raw === "silent")
     return -1;
   return LEVELS[raw] ?? LEVELS["info"];
@@ -1424,7 +1424,7 @@ var init_zai_provider = __esm(() => {
 import { existsSync as existsSync4, readFileSync } from "fs";
 import { join as join6 } from "path";
 function loadConfig() {
-  const configDir = join6(process.env.HOME ?? "", ".config", "memmem");
+  const configDir = join6(process.env.HOME ?? "", ".config", "episodic-memory");
   const configPath = join6(configDir, "config.json");
   if (!configFileDeps.existsSync(configPath)) {
     return null;
@@ -1672,7 +1672,7 @@ function checkIndex(db) {
       name: "index",
       status: "fail",
       detail: `Integrity issues: ${v.missingVectors.length} missing vectors, ` + `${v.orphanVectors.length} orphan vectors.`,
-      suggestion: "memmem sync"
+      suggestion: "episodic-memory sync"
     };
   }
   return { name: "index", status: "ok", detail: "Memory index integrity verified." };
@@ -1684,7 +1684,7 @@ function checkData(db) {
       name: "data",
       status: "warn",
       detail: "No memories — nothing has been indexed yet.",
-      suggestion: "memmem sync"
+      suggestion: "episodic-memory sync"
     };
   }
   if (s.missingVectors > 0) {
@@ -1692,7 +1692,7 @@ function checkData(db) {
       name: "data",
       status: "warn",
       detail: `${s.missingVectors} record(s) are not vectorized.`,
-      suggestion: "memmem sync"
+      suggestion: "episodic-memory sync"
     };
   }
   return {
@@ -1739,10 +1739,10 @@ function runDoctorCli() {
       process.exitCode = 1;
     } else if (hasWarn) {
       console.log(`
-memmem is usable, but some checks need attention.`);
+episodic-memory is usable, but some checks need attention.`);
     } else {
       console.log(`
-memmem is healthy.`);
+episodic-memory is healthy.`);
     }
   } finally {
     db.close();
@@ -1783,7 +1783,7 @@ function installDependencies(silent = false) {
     const isWindows = process.platform === "win32";
     const bunCommand = isWindows ? "bun.exe" : "bun";
     if (!silent) {
-      console.error("[memmem] Installing dependencies...");
+      console.error("[episodic-memory] Installing dependencies...");
     }
     let stderrOutput = "";
     const child = spawn(bunCommand, ["install", "--silent"], {
@@ -1804,7 +1804,7 @@ function installDependencies(silent = false) {
     child.on("exit", (code) => {
       if (code === 0) {
         if (!silent) {
-          console.error("[memmem] Dependencies installed.");
+          console.error("[episodic-memory] Dependencies installed.");
         }
         resolve();
       } else {
@@ -1862,7 +1862,7 @@ var PLUGIN_ROOT = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT || f
 async function ensureDependencies() {
   const { installed } = checkDependencies();
   if (!installed) {
-    console.error("[memmem] Installing dependencies (first run only)...");
+    console.error("[episodic-memory] Installing dependencies (first run only)...");
     await installDependencies(false);
   }
 }
@@ -1871,14 +1871,14 @@ async function runMcpCli() {
     await ensureDependencies();
   } catch (error) {
     const analysis = analyzeError(error);
-    console.error("[memmem] ERROR: setup failed.");
+    console.error("[episodic-memory] ERROR: setup failed.");
     console.error(`Cause: ${analysis.cause}`);
     console.error(`Fix: ${analysis.fix}`);
     process.exit(1);
   }
   const mcpServerPath = join4(PLUGIN_ROOT, "dist", "mcp-server.mjs");
   if (!existsSync3(mcpServerPath)) {
-    console.error(`[memmem] ERROR: MCP server not found at ${mcpServerPath}`);
+    console.error(`[episodic-memory] ERROR: MCP server not found at ${mcpServerPath}`);
     console.error("Please run: bun run build");
     process.exit(1);
   }
@@ -1893,7 +1893,7 @@ async function runMcpCli() {
       process.exit(code ?? 0);
   });
   child.on("error", (err) => {
-    console.error(`[memmem] ERROR: Failed to start MCP server: ${err.message}`);
+    console.error(`[episodic-memory] ERROR: Failed to start MCP server: ${err.message}`);
     process.exit(1);
   });
 }
@@ -2032,7 +2032,7 @@ function hasExplicitEmbeddingRateLimit() {
   return loadConfigFn2()?.ratelimit?.embedding !== undefined;
 }
 function isEmbeddingsDisabled() {
-  return process.env.MEMMEM_DISABLE_EMBEDDINGS === "true";
+  return process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS === "true";
 }
 async function embedQuery(text) {
   return run("query", text);
@@ -3888,7 +3888,7 @@ function readArchiveFile(archivePath) {
 }
 function findJsonlFiles(root, adapter, excludedDirs = []) {
   const files = [];
-  if (existsSync7(path6.join(root, ".no-memmem"))) {
+  if (existsSync7(path6.join(root, ".no-episodic-memory"))) {
     excludedDirs.push(root);
     return files;
   }
@@ -4026,10 +4026,10 @@ function parseSearchArgs(args) {
 }
 function getHelpText() {
   return `
-memmem - Event/fact memory for Claude Code and Codex transcripts
+episodic-memory - Event/fact memory for Claude Code and Codex transcripts
 
 USAGE:
-  memmem <command>
+  episodic-memory <command>
 
 COMMANDS:
   sync      Copy transcripts and extract memory records
@@ -4046,7 +4046,7 @@ SEARCH OPTIONS:
   --source-kind <kind>    Filter by transcript source kind
 
 EXAMPLES:
-  memmem search "source of truth" --limit 5
+  episodic-memory search "source of truth" --limit 5
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory

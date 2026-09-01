@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "memmem": {
+    "episodic-memory": {
       "command": "sh",
-      "args": ["-lc", "exec \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/memmem\" mcp"],
+      "args": ["-lc", "exec \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/episodic-memory\" mcp"],
       "cwd": "."
     }
   }

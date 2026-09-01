@@ -26,6 +26,6 @@ echo "== Build =="
 bun run build
 
 echo "== CLI smoke =="
-bin/memmem --help >/dev/null
+bin/episodic-memory --help >/dev/null
 
 echo "PASS: runtime compatibility preflight completed"

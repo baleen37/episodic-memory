@@ -18,7 +18,7 @@ let originalEnv: NodeJS.ProcessEnv;
 let tempDirs: string[] = [];
 
 function setupTempDir(): string {
-  const tempDir = path.join(os.tmpdir(), `memmem-test-${Date.now()}-${Math.random()}`);
+  const tempDir = path.join(os.tmpdir(), `episodic-memory-test-${Date.now()}-${Math.random()}`);
   tempDirs.push(tempDir);
   return tempDir;
 }
@@ -39,8 +39,10 @@ describe('paths utilities', () => {
 
     // Clear relevant environment variables for clean testing
     delete process.env.CONVERSATION_MEMORY_CONFIG_DIR;
+    delete process.env.EPISODIC_MEMORY_CONFIG_DIR;
     delete process.env.TEST_ARCHIVE_DIR;
     delete process.env.CONVERSATION_MEMORY_DB_PATH;
+    delete process.env.EPISODIC_MEMORY_DB_PATH;
     delete process.env.TEST_DB_PATH;
     delete process.env.CONVERSATION_SEARCH_EXCLUDE_PROJECTS;
   });
@@ -99,6 +101,15 @@ describe('paths utilities', () => {
   });
 
   describe('getSuperpowersDir', () => {
+    test('respects EPISODIC_MEMORY_CONFIG_DIR environment variable', () => {
+      const customDir = setupTempDir();
+      process.env.EPISODIC_MEMORY_CONFIG_DIR = customDir;
+
+      const result = getSuperpowersDir();
+
+      expect(result).toBe(customDir);
+    });
+
     test('respects CONVERSATION_MEMORY_CONFIG_DIR environment variable', () => {
       const customDir = setupTempDir();
       process.env.CONVERSATION_MEMORY_CONFIG_DIR = customDir;
@@ -108,12 +119,12 @@ describe('paths utilities', () => {
       expect(result).toBe(customDir);
     });
 
-    test('uses default ~/.config/memmem when env var not set', () => {
+    test('uses default ~/.config/episodic-memory when env var not set', () => {
       // Delete the env var to test default behavior
       delete process.env.CONVERSATION_MEMORY_CONFIG_DIR;
 
       const result = getSuperpowersDir();
-      const expected = path.join(os.homedir(), '.config', 'memmem');
+      const expected = path.join(os.homedir(), '.config', 'episodic-memory');
 
       expect(result).toBe(expected);
     });
@@ -202,6 +213,17 @@ describe('paths utilities', () => {
       fs.mkdirSync(customDbPath, { recursive: true });
       const dbFile = path.join(customDbPath, 'custom.db');
       process.env.CONVERSATION_MEMORY_DB_PATH = dbFile;
+
+      const result = getDbPath();
+
+      expect(result).toBe(dbFile);
+    });
+
+    test('respects EPISODIC_MEMORY_DB_PATH environment variable', () => {
+      const customDbPath = setupTempDir();
+      fs.mkdirSync(customDbPath, { recursive: true });
+      const dbFile = path.join(customDbPath, 'custom.db');
+      process.env.EPISODIC_MEMORY_DB_PATH = dbFile;
 
       const result = getDbPath();
 

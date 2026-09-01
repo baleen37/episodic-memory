@@ -9,7 +9,7 @@
  * - Burst support via bucket capacity
  * - Non-blocking tryAcquire for immediate feedback
  * - Singleton instances for embedding and LLM rate limiting
- * - Configurable via ~/.config/memmem/config.json
+ * - Configurable via ~/.config/episodic-memory/config.json
  */
 
 import { loadConfig } from './llm/config.js';
@@ -163,7 +163,7 @@ let llmLimiter: RateLimiter | null = null;
 /**
  * Gets the singleton rate limiter for embedding generation.
  *
- * Reads configuration from ~/.config/memmem/config.json if available.
+ * Reads configuration from ~/.config/episodic-memory/config.json if available.
  * Default: 0.5 requests per second, burst of 1
  *
  * @returns RateLimiter instance for embeddings
@@ -184,7 +184,7 @@ export function getEmbeddingRateLimiter(): RateLimiter {
 /**
  * Gets the singleton rate limiter for LLM API calls.
  *
- * Reads configuration from ~/.config/memmem/config.json if available.
+ * Reads configuration from ~/.config/episodic-memory/config.json if available.
  * Default: 0.5 requests per second, burst of 1
  *
  * @returns RateLimiter instance for LLM calls

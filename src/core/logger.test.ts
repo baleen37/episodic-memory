@@ -11,22 +11,22 @@ describe('logger', () => {
   let tempConfigDir: string;
 
   beforeEach(() => {
-    originalLevel = process.env.MEMMEM_LOG_LEVEL;
+    originalLevel = process.env.EPISODIC_MEMORY_LOG_LEVEL;
     originalConfigDir = process.env.CONVERSATION_MEMORY_CONFIG_DIR;
-    tempConfigDir = mkdtempSync(join(tmpdir(), 'memmem-log-'));
+    tempConfigDir = mkdtempSync(join(tmpdir(), 'episodic-memory-log-'));
     process.env.CONVERSATION_MEMORY_CONFIG_DIR = tempConfigDir;
     stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 
   afterEach(() => {
     // Flush before restoring config dir so any residual buffer goes to the
-    // temp dir (not the real ~/.config/memmem/logs/).
+    // temp dir (not the real ~/.config/episodic-memory/logs/).
     __flushForTests();
     __resetRetentionForTests();
     if (originalLevel === undefined) {
-      delete process.env.MEMMEM_LOG_LEVEL;
+      delete process.env.EPISODIC_MEMORY_LOG_LEVEL;
     } else {
-      process.env.MEMMEM_LOG_LEVEL = originalLevel;
+      process.env.EPISODIC_MEMORY_LOG_LEVEL = originalLevel;
     }
     if (originalConfigDir === undefined) {
       delete process.env.CONVERSATION_MEMORY_CONFIG_DIR;
@@ -39,7 +39,7 @@ describe('logger', () => {
 
   describe('default level (info)', () => {
     beforeEach(() => {
-      delete process.env.MEMMEM_LOG_LEVEL;
+      delete process.env.EPISODIC_MEMORY_LOG_LEVEL;
     });
 
     test('info is output', () => {
@@ -66,9 +66,9 @@ describe('logger', () => {
     });
   });
 
-  describe('MEMMEM_LOG_LEVEL=debug', () => {
+  describe('EPISODIC_MEMORY_LOG_LEVEL=debug', () => {
     beforeEach(() => {
-      process.env.MEMMEM_LOG_LEVEL = 'debug';
+      process.env.EPISODIC_MEMORY_LOG_LEVEL = 'debug';
     });
 
     test('debug is output', () => {
@@ -83,9 +83,9 @@ describe('logger', () => {
     });
   });
 
-  describe('MEMMEM_LOG_LEVEL=silent', () => {
+  describe('EPISODIC_MEMORY_LOG_LEVEL=silent', () => {
     beforeEach(() => {
-      process.env.MEMMEM_LOG_LEVEL = 'silent';
+      process.env.EPISODIC_MEMORY_LOG_LEVEL = 'silent';
     });
 
     test('error is suppressed', () => {
@@ -111,7 +111,7 @@ describe('logger', () => {
 
   describe('output format', () => {
     beforeEach(() => {
-      delete process.env.MEMMEM_LOG_LEVEL;
+      delete process.env.EPISODIC_MEMORY_LOG_LEVEL;
     });
 
     test('includes ISO timestamp', () => {
@@ -178,7 +178,7 @@ describe('logger', () => {
     });
 
     test('silent level writes no file', () => {
-      process.env.MEMMEM_LOG_LEVEL = 'silent';
+      process.env.EPISODIC_MEMORY_LOG_LEVEL = 'silent';
       log.error('should not be written');
       __flushForTests();
       const logsDir = join(tempConfigDir, 'logs');

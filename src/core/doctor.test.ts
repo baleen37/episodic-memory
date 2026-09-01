@@ -42,7 +42,7 @@ function setMtime(path: string, epochSeconds: number): void {
 
 describe('newestMtime', () => {
   test('returns the max mtime across .ts files, ignoring other extensions', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-mtime-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-mtime-'));
     const a = join(dir, 'a.ts');
     const b = join(dir, 'b.ts');
     const other = join(dir, 'note.md');
@@ -57,7 +57,7 @@ describe('newestMtime', () => {
   });
 
   test('recurses into subdirectories', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-mtime-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-mtime-'));
     writeFileSync(join(dir, 'top.ts'), '');
     setMtime(join(dir, 'top.ts'), 1000);
     const nested = join(dir, 'nested');
@@ -85,7 +85,7 @@ describe('runDiagnostics', () => {
   }
 
   test('all ok when build fresh and index clean with data', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     insertMemory(db, 'mem-1', 'A clean record.');
     const rowid = (db.query('SELECT rowid AS r FROM memories WHERE id = ?').get('mem-1') as { r: number }).r;
@@ -100,7 +100,7 @@ describe('runDiagnostics', () => {
   });
 
   test('build fail when a dist artifact is missing', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
@@ -116,7 +116,7 @@ describe('runDiagnostics', () => {
   });
 
   test('build fail when src newer than dist', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
@@ -134,7 +134,7 @@ describe('runDiagnostics', () => {
   });
 
   test('build ok when src is newer only by bulk-extract mtime noise', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
@@ -153,7 +153,7 @@ describe('runDiagnostics', () => {
   });
 
   test('build fail when src edited past the tolerance window', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     const distDir = join(dir, 'dist');
     const srcDir = join(dir, 'src');
@@ -171,17 +171,17 @@ describe('runDiagnostics', () => {
   });
 
   test('data warn when no records', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
 
     const results = runDiagnostics(db, freshBuildDirs());
     const data = results.find((r) => r.name === 'data')!;
     expect(data.status).toBe('warn');
-    expect(data.suggestion).toBe('memmem sync');
+    expect(data.suggestion).toBe('episodic-memory sync');
   });
 
   test('index fail when a memory is missing its vector', () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-doctor-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-doctor-'));
     db = newMemoryDb();
     insertMemory(db, 'mem-1', 'Record without a vector.');
 

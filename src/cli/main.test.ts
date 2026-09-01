@@ -49,14 +49,14 @@ describe('CLI argument parsing', () => {
     expect(help).toContain('search');
     expect(help).toContain('stats');
     expect(help).toContain('verify');
-    expect(help).toContain('memmem - Event/fact memory for Claude Code and Codex transcripts');
+    expect(help).toContain('episodic-memory - Event/fact memory for Claude Code and Codex transcripts');
     expect(help).toContain('sync      Copy transcripts and extract memory records');
     expect(help).toContain('search    Search indexed memory records');
     expect(help).toContain('stats     Print memory index statistics');
     expect(help).toContain('verify    Verify memory index integrity');
     expect(help).toContain('--limit <number>');
     expect(help).toContain('--source-kind <kind>');
-    expect(help).toContain('memmem search "source of truth" --limit 5');
+    expect(help).toContain('episodic-memory search "source of truth" --limit 5');
     expect(help).not.toContain('recall');
   });
 
@@ -72,7 +72,7 @@ describe('CLI search behavior', () => {
 
   afterEach(() => {
     delete process.env.TEST_DB_PATH;
-    delete process.env.MEMMEM_DISABLE_EMBEDDINGS;
+    delete process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS;
     __setModelForTests(null, null);
     if (dir) rmSync(dir, { recursive: true, force: true });
     dir = null;
@@ -89,7 +89,7 @@ describe('CLI search behavior', () => {
   });
 
   test('prints matched memory text and score', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'memmem-cli-search-'));
+    dir = mkdtempSync(join(tmpdir(), 'episodic-memory-cli-search-'));
     process.env.TEST_DB_PATH = join(dir, 'test.db');
     __setModelForTests(async () => {}, async () => Array.from({ length: 384 }, () => 0.1));
 

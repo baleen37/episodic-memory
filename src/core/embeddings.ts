@@ -89,7 +89,7 @@ export function __resetEmbeddingConcurrencyForTests(): void {
 }
 
 export function isEmbeddingsDisabled(): boolean {
-  return process.env.MEMMEM_DISABLE_EMBEDDINGS === 'true';
+  return process.env.EPISODIC_MEMORY_DISABLE_EMBEDDINGS === 'true';
 }
 
 export async function initEmbeddings(): Promise<void> {

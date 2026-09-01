@@ -64,10 +64,10 @@ export function parseSearchArgs(args: string[]): SearchCliArgs {
 
 export function getHelpText(): string {
   return `
-memmem - Event/fact memory for Claude Code and Codex transcripts
+episodic-memory - Event/fact memory for Claude Code and Codex transcripts
 
 USAGE:
-  memmem <command>
+  episodic-memory <command>
 
 COMMANDS:
   sync      Copy transcripts and extract memory records
@@ -84,7 +84,7 @@ SEARCH OPTIONS:
   --source-kind <kind>    Filter by transcript source kind
 
 EXAMPLES:
-  memmem search "source of truth" --limit 5
+  episodic-memory search "source of truth" --limit 5
 
 ENVIRONMENT VARIABLES:
   CONVERSATION_MEMORY_CONFIG_DIR   Override config directory

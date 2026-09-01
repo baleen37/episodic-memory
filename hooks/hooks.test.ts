@@ -46,7 +46,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
+      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" sync --background',
     });
   });
 
@@ -64,7 +64,7 @@ describe('hooks.json sync-only hook configuration', () => {
     const [hook] = hookGroup.hooks;
     expect(hook).toEqual({
       type: 'command',
-      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
+      command: '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" sync --background',
     });
   });
 
@@ -87,8 +87,8 @@ describe('hooks.json sync-only hook configuration', () => {
 
     // Both SessionStart and Stop run the same self-backgrounding sync command.
     expect(commands).toEqual([
-      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
-      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/memmem" sync --background',
+      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" sync --background',
+      '"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" sync --background',
     ]);
     for (const command of commands) {
       expect(command).not.toContain('recall');
@@ -98,22 +98,22 @@ describe('hooks.json sync-only hook configuration', () => {
     }
   });
 
-  it('builds bin/memmem as a bun shebang executable', () => {
+  it('builds bin/episodic-memory as a bun shebang executable', () => {
     const graceful = readRepoFile('src/cli-graceful.mjs');
 
     expect(graceful.startsWith('#!/usr/bin/env bun')).toBe(true);
     expect(graceful).toContain("error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND'");
   });
 
-  it('routes MCP through the plugin-root aware bin/memmem mcp subcommand', () => {
+  it('routes MCP through the plugin-root aware bin/episodic-memory mcp subcommand', () => {
     const mcpConfig = JSON.parse(readRepoFile('.mcp.json'));
 
-    expect(mcpConfig.mcpServers.memmem.command).toBe('sh');
-    expect(mcpConfig.mcpServers.memmem.args).toEqual([
+    expect(mcpConfig.mcpServers['episodic-memory'].command).toBe('sh');
+    expect(mcpConfig.mcpServers['episodic-memory'].args).toEqual([
       '-lc',
-      'exec "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/memmem" mcp',
+      'exec "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}/bin/episodic-memory" mcp',
     ]);
-    expect(mcpConfig.mcpServers.memmem.cwd).toBe('.');
+    expect(mcpConfig.mcpServers['episodic-memory'].cwd).toBe('.');
   });
 
   it('MCP launcher accepts both Claude and Codex plugin root environment names', () => {

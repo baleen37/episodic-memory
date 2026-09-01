@@ -1,12 +1,12 @@
 {
-  "name": "memmem",
+  "name": "episodic-memory",
   "version": "2.1.0",
-  "description": "Memmem - Conversation memory with semantic search across Claude Code and Codex sessions",
+  "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
   "author": {
     "name": "Baleen"
   },
-  "repository": "https://github.com/baleen37/memmem",
-  "homepage": "https://github.com/baleen37/memmem",
+  "repository": "https://github.com/baleen37/episodic-memory",
+  "homepage": "https://github.com/baleen37/episodic-memory",
   "license": "MIT",
   "keywords": [
     "memory",

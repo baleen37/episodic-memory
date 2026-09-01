@@ -1,14 +1,14 @@
 {
-  "name": "@baleen/memmem",
+  "name": "@baleen/episodic-memory",
   "version": "2.1.0",
   "private": false,
   "type": "module",
-  "description": "Memmem - Conversation memory with semantic search across Claude Code and Codex sessions",
+  "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
   "repository": {
     "type": "git",
-    "url": "https://github.com/baleen37/memmem"
+    "url": "https://github.com/baleen37/episodic-memory"
   },
-  "homepage": "https://github.com/baleen37/memmem",
+  "homepage": "https://github.com/baleen37/episodic-memory",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -29,7 +29,7 @@
     "cli": "bun dist/cli-internal.mjs"
   },
   "bin": {
-    "memmem": "bin/memmem"
+    "episodic-memory": "bin/episodic-memory"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

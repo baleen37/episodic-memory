@@ -1,12 +1,12 @@
 {
-  "name": "memmem",
+  "name": "episodic-memory",
   "version": "2.1.0",
-  "description": "Memmem - Conversation memory with semantic search across Claude Code and Codex sessions",
+  "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
   "author": {
     "name": "Baleen"
   },
-  "homepage": "https://github.com/baleen37/memmem",
-  "repository": "https://github.com/baleen37/memmem",
+  "homepage": "https://github.com/baleen37/episodic-memory",
+  "repository": "https://github.com/baleen37/episodic-memory",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -18,15 +18,15 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Memmem",
+    "displayName": "Episodic Memory",
     "shortDescription": "Search indexed Claude Code and Codex transcripts.",
-    "longDescription": "Memmem archives local Claude Code and Codex transcripts, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through MCP tools and skills.",
+    "longDescription": "Episodic Memory archives local Claude Code and Codex transcripts, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through MCP tools and skills.",
     "developerName": "Baleen",
     "category": "Productivity",
     "capabilities": [
       "Read"
     ],
-    "websiteURL": "https://github.com/baleen37/memmem",
+    "websiteURL": "https://github.com/baleen37/episodic-memory",
     "defaultPrompt": [
       "Search my past conversations about this bug.",
       "Find prior decisions for this repository.",

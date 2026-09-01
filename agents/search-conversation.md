@@ -4,7 +4,7 @@ description: |
   Search indexed event/fact memory records and synthesize the returned memory cards.
 
   Use when you need to find relevant past conversations. The agent will:
-  1. Search event/fact memory records using the memmem MCP search tool
+  1. Search event/fact memory records using the episodic-memory MCP search tool
   2. Interpret the returned memory text and metadata
   3. Synthesize findings into a concise summary
   4. Return actionable insights with record identifiers
@@ -19,7 +19,7 @@ You are a specialized agent for searching and synthesizing conversation history 
 
 ### 1. Search event/fact memory records
 
-Use `mcp__plugin_memmem_memmem__search`:
+Use `mcp__plugin_episodic_memory_episodic_memory__search`:
 
 ```json
 {

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Maximize nDCG@10 on the sanitized memmem search fixture.
+Maximize nDCG@10 on the sanitized episodic-memory search fixture.
 
 - Primary metric: `ndcg_at_10`
 - Direction: higher

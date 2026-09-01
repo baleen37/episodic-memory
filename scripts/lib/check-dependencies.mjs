@@ -100,7 +100,7 @@ export function installDependencies(silent = false) {
     const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
     if (!silent) {
-      console.error('[memmem] Installing dependencies...');
+      console.error('[episodic-memory] Installing dependencies...');
     }
 
     let stderrOutput = '';
@@ -126,7 +126,7 @@ export function installDependencies(silent = false) {
     child.on('exit', (code) => {
       if (code === 0) {
         if (!silent) {
-          console.error('[memmem] Dependencies installed.');
+          console.error('[episodic-memory] Dependencies installed.');
         }
         resolve();
       } else {
@@ -155,7 +155,7 @@ export function runBuild() {
     const isWindows = process.platform === 'win32';
     const bunCommand = isWindows ? 'bun.exe' : 'bun';
 
-    console.error('[memmem] Building plugin...');
+    console.error('[episodic-memory] Building plugin...');
 
     let stderrOutput = '';
 
@@ -176,7 +176,7 @@ export function runBuild() {
 
     child.on('exit', (code) => {
       if (code === 0) {
-        console.error('[memmem] Build completed.');
+        console.error('[episodic-memory] Build completed.');
         resolve();
       } else {
         const error = new Error(`bun run build failed with exit code ${code}`);
