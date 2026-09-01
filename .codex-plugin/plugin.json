@@ -1,6 +1,6 @@
 {
   "name": "episodic-memory",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
   "author": {
     "name": "Baleen"
