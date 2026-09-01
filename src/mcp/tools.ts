@@ -6,7 +6,18 @@ export const searchTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Search query.' },
+      query: {
+        anyOf: [
+          { type: 'string', minLength: 1 },
+          {
+            type: 'array',
+            items: { type: 'string', minLength: 1 },
+            minItems: 2,
+            maxItems: 5,
+          },
+        ],
+        description: 'Search query. Use a string for normal search, or an array of 2-5 queries for strict AND search.',
+      },
       limit: { type: 'number', description: 'Max results. Default 20.' },
       threshold: { type: 'number', description: 'Minimum semantic score, 0-1. Default 0.1.' },
       explain: { type: 'boolean', description: 'Include score breakdown. Default false.' },

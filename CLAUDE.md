@@ -203,14 +203,16 @@ When adding a provider: implement `LLMProvider`, export it from `index.ts`, and 
 
 MCP exposes only:
 
-- **`search`**: `query` (required string), `limit` (default 20, max 50), `threshold` (minimum
-  semantic score 0-1, default 0.1), `explain` (attach `score_details`, default false). Always
-  scoped to the local `user_id`. Returns flat memory records (`id`, `memory`, `hash`, `metadata`,
-  `score`, `created_at`, `updated_at`, plus any promoted metadata keys).
+- **`search`**: `query` (required string or an array of 2-5 strings for strict AND search), `limit`
+  (default 20, max 50), `threshold` (minimum semantic score 0-1, default 0.1), `explain` (attach
+  `score_details`, default false). Array queries return only records present in every individual
+  result set, ranked by mean score; an empty intersection stays empty. Always scoped to the local
+  `user_id`. Returns flat memory records (`id`, `memory`, `hash`, `metadata`, `score`, `created_at`,
+  `updated_at`, plus any promoted metadata keys).
 
-There is no `fetch` tool, no multi-query/array `query` support, no omitted-query recency listing,
-and no `after`/`before` filtering on the MCP surface — all of these existed in the pre-mem0v2
-architecture and were removed. There is no summary detail or graph layer in the target architecture.
+There is no `fetch` tool, no omitted-query recency listing, and no `after`/`before` filtering on
+the MCP surface — these existed in the pre-mem0v2 architecture and were removed. There is no
+summary detail or graph layer in the target architecture.
 
 ### Build Output
 

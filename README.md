@@ -67,7 +67,7 @@ Search indexed event/fact memory records.
 
 **Parameters:**
 
-- `query` (string, required): Search query
+- `query` (string | string[], required): Search query. Use a string for normal search, or an array of 2-5 strings for strict AND search; only records matching every query are returned.
 - `limit` (number, optional): Maximum results to return (1-50, default: 20)
 - `threshold` (number, optional): Minimum semantic score from 0 to 1
 - `explain` (boolean, optional): Include the score breakdown
@@ -76,6 +76,14 @@ Search indexed event/fact memory records.
 
 ```javascript
 { query: "React Router authentication errors", limit: 10, threshold: 0.2 }
+```
+
+For strict multi-query search, pass 2-5 query strings. The results are the
+intersection of the individual searches, ranked by mean score. An empty
+intersection returns no results; it does not fall back to OR search.
+
+```javascript
+{ query: ["React Router", "authentication", "JWT"], limit: 10 }
 ```
 
 ## Installation

@@ -49,9 +49,9 @@ describe('MCP Server - episodic-memory__search tool', () => {
       expect(result.isError).toBe(false);
     });
 
-    test('rejects an array query (multi-query AND search was dropped in the mem0 v2 port)', async () => {
+    test('accepts an array query for strict AND search', async () => {
       const result = await mockToolCall('search', { query: ['alpha', 'beta'] });
-      expect(result.isError).toBe(true);
+      expect(result.isError).toBe(false);
     });
   });
 
