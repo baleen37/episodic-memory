@@ -28,6 +28,18 @@ Use `mcp__plugin_episodic_memory_episodic_memory__search`:
 }
 ```
 
+For a focused AND search, pass 2-5 concepts as an array:
+
+```json
+{
+  "query": ["React Router", "authentication", "JWT"],
+  "limit": 10
+}
+```
+
+Array queries return only records matching every concept. An empty result is
+not broadened into an OR search.
+
 Optional controls:
 
 ```json

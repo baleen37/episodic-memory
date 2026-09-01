@@ -18,6 +18,10 @@ export interface SearchArgs {
   explain?: boolean;
 }
 
+export interface MultiSearchArgs extends Omit<SearchArgs, 'query'> {
+  queries: string[];
+}
+
 export interface SearchResultItem {
   id: string;
   memory: string;
@@ -175,4 +179,81 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
   }
 
   return { results };
+}
+
+function mean(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function meanScoreDetails(details: ScoreDetails[]): ScoreDetails {
+  return {
+    semantic_score: mean(details.map(detail => detail.semantic_score)),
+    bm25_score: mean(details.map(detail => detail.bm25_score)),
+    entity_boost: mean(details.map(detail => detail.entity_boost)),
+    raw_score: mean(details.map(detail => detail.raw_score)),
+    max_possible_score: mean(details.map(detail => detail.max_possible_score)),
+    final_score: mean(details.map(detail => detail.final_score)),
+    threshold: details[0].threshold,
+  };
+}
+
+export async function searchMemoriesMulti(
+  args: MultiSearchArgs,
+): Promise<{ results: SearchResultItem[] }> {
+  const { db, filters, queries, limit = 20, threshold, explain = false } = args;
+  if (queries.length === 0) return { results: [] };
+  if (queries.length === 1) {
+    return searchMemories({ db, query: queries[0], filters, limit, threshold, explain });
+  }
+
+  // Oversample each query before intersecting so a shared record is not lost
+  // merely because it ranks below the final result limit for one query.
+  const candidateLimit = Math.min(MAX_KNN_K, Math.max(limit * 5, 60));
+  const perQuery = await Promise.all(
+    queries.map(query => searchMemories({
+      db,
+      query,
+      filters,
+      limit: candidateLimit,
+      threshold,
+      explain,
+    })),
+  );
+
+  const byId = new Map<string, {
+    item: SearchResultItem;
+    scores: number[];
+    details: ScoreDetails[];
+  }>();
+
+  for (const { results } of perQuery) {
+    for (const result of results) {
+      const entry = byId.get(result.id);
+      if (entry) {
+        entry.scores.push(result.score);
+        if (result.score_details) entry.details.push(result.score_details);
+      } else {
+        byId.set(result.id, {
+          item: result,
+          scores: [result.score],
+          details: result.score_details ? [result.score_details] : [],
+        });
+      }
+    }
+  }
+
+  const results: SearchResultItem[] = [];
+  for (const { item, scores, details } of byId.values()) {
+    if (scores.length !== queries.length) continue;
+
+    const score = mean(scores);
+    const result = { ...item, score };
+    if (explain && details.length === queries.length) {
+      result.score_details = meanScoreDetails(details);
+    }
+    results.push(result);
+  }
+
+  results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return { results: results.slice(0, limit) };
 }

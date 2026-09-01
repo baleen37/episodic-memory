@@ -11,7 +11,7 @@ namespace used by this plugin.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | `string` | Yes | - | Search query |
+| `query` | `string \| string[]` | Yes | - | String for normal search, or 2-5 strings for strict AND search |
 | `limit` | `number` | No | `20` | Max results, from 1 to 50 |
 | `threshold` | `number` | No | `0.1` | Minimum semantic score, from 0 to 1 |
 | `explain` | `boolean` | No | `false` | Include the score breakdown |
@@ -23,6 +23,16 @@ namespace used by this plugin.
   "query": "authentication patterns",
   "limit": 10,
   "threshold": 0.2
+}
+```
+
+Strict multi-query search returns only records matching every query. If the
+intersection is empty, the result is empty and no OR fallback is performed.
+
+```json
+{
+  "query": ["React Router", "authentication", "JWT"],
+  "limit": 10
 }
 ```
 
@@ -58,6 +68,9 @@ semantic, keyword, and entity contributions used for ranking.
 ```typescript
 const result = await search({ query: 'authentication', limit: 10 });
 // Synthesize the relevant result.memory values and cite their result.id values.
+
+const focused = await search({ query: ['React Router', 'authentication'], limit: 10 });
+// Array queries use strict AND semantics.
 ```
 
 ## Why Use the Agent Instead?

@@ -17,8 +17,25 @@ describe('MCP schemas', () => {
     expect(() => SearchInputSchema.parse({ query: '' })).toThrow();
   });
 
-  test('rejects an array query (multi-query AND search was dropped in the mem0 v2 port)', () => {
-    expect(() => SearchInputSchema.parse({ query: ['alpha', 'beta'] })).toThrow();
+  test('accepts an array of 2-5 query strings for AND search', () => {
+    expect(SearchInputSchema.parse({ query: ['alpha', 'beta'] })).toEqual({
+      query: ['alpha', 'beta'],
+    });
+    expect(SearchInputSchema.parse({ query: ['a', 'b', 'c', 'd', 'e'] })).toEqual({
+      query: ['a', 'b', 'c', 'd', 'e'],
+    });
+  });
+
+  test('rejects an array with fewer than 2 queries', () => {
+    expect(() => SearchInputSchema.parse({ query: ['only-one'] })).toThrow();
+  });
+
+  test('rejects an array with more than 5 queries', () => {
+    expect(() => SearchInputSchema.parse({ query: ['a', 'b', 'c', 'd', 'e', 'f'] })).toThrow();
+  });
+
+  test('rejects an array containing an empty query', () => {
+    expect(() => SearchInputSchema.parse({ query: ['alpha', ''] })).toThrow();
   });
 
   test('accepts threshold within [0,1]', () => {

@@ -23,6 +23,11 @@ describe('MCP surface', () => {
     expect(props.threshold).toBeDefined();
     expect(props.explain).toBeDefined();
   });
+
+  test('search schema advertises array queries for strict AND search', () => {
+    const props = TOOLS[0].inputSchema.properties as Record<string, unknown>;
+    expect(props.query).toMatchObject({ anyOf: expect.any(Array) });
+  });
 });
 
 // Deterministic 384-dim embeddings: direction encoded in the first two slots.
@@ -78,5 +83,18 @@ describe('handlers', () => {
   test('returns an empty result set when nothing matches the scope', async () => {
     const { results } = await handleSearch({ query: 'puppy' }, db);
     expect(results).toEqual([]);
+  });
+
+  test('handleSearch returns only records matching every query', async () => {
+    insertMemories(db, [
+      { id: 'm1', memory: 'User adopted a beagle puppy named Max', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(0) },
+      { id: 'm2', memory: 'User started pottery classes on Tuesdays', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(1.5) },
+      { id: 'm3', memory: 'User combined puppy care with pottery classes', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(0.75) },
+    ]);
+
+    const params = { query: ['puppy', 'pottery'], limit: 10 } as Parameters<typeof handleSearch>[0];
+    const { results } = await handleSearch(params, db);
+
+    expect(results.map(result => result.id)).toEqual(['m3']);
   });
 });

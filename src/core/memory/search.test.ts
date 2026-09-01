@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
 import { createMemorySchema } from './schema.js';
 import { insertMemories } from './store.js';
-import { searchMemories } from './search.js';
+import { searchMemories, searchMemoriesMulti } from './search.js';
 import { __setModelForTests } from '../embeddings.js';
 import { resetRateLimiters, __setLoadConfigForTests } from '../ratelimiter.js';
 
@@ -220,5 +220,74 @@ describe('searchMemories', () => {
 
     expect(results).toHaveLength(20);
     expect(results.every(r => r.metadata.agent_id === 'codex-sessions')).toBe(true);
+  });
+
+  test('multi-query search returns only records matching every query with mean scores', async () => {
+    seed();
+    insertMemories(db, [
+      {
+        id: 'm4',
+        memory: 'User combined puppy care with pottery classes',
+        metadata: { user_id: 'alice' },
+        embedding: vec(0.75),
+      },
+    ]);
+
+    const [puppy, pottery] = await Promise.all([
+      searchMemories({ db, query: 'puppy', filters: { user_id: 'alice' }, limit: 60 }),
+      searchMemories({ db, query: 'pottery', filters: { user_id: 'alice' }, limit: 60 }),
+    ]);
+    const expected = (
+      puppy.results.find(result => result.id === 'm4')!.score
+      + pottery.results.find(result => result.id === 'm4')!.score
+    ) / 2;
+
+    const { results } = await searchMemoriesMulti({
+      db,
+      queries: ['puppy', 'pottery'],
+      filters: { user_id: 'alice' },
+      limit: 10,
+    });
+
+    expect(results.map(result => result.id)).toEqual(['m4']);
+    expect(results[0].score).toBeCloseTo(expected, 5);
+  });
+
+  test('multi-query search returns empty instead of falling back when the intersection is empty', async () => {
+    seed();
+
+    const { results } = await searchMemoriesMulti({
+      db,
+      queries: ['puppy', 'pottery'],
+      filters: { user_id: 'alice' },
+      threshold: 0.9,
+      limit: 10,
+    });
+
+    expect(results).toEqual([]);
+  });
+
+  test('multi-query search averages score details when explain is enabled', async () => {
+    seed();
+    insertMemories(db, [
+      {
+        id: 'm4',
+        memory: 'User combined puppy care with pottery classes',
+        metadata: { user_id: 'alice' },
+        embedding: vec(0.75),
+      },
+    ]);
+
+    const { results } = await searchMemoriesMulti({
+      db,
+      queries: ['puppy', 'pottery'],
+      filters: { user_id: 'alice' },
+      limit: 10,
+      explain: true,
+    });
+
+    expect(results[0].score_details).toBeDefined();
+    expect(results[0].score_details!.final_score).toBeCloseTo(results[0].score, 5);
+    expect(results[0].score_details!.threshold).toBe(0.1);
   });
 });

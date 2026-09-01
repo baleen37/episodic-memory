@@ -1,9 +1,13 @@
 import type { Database } from 'bun:sqlite';
-import { searchMemories, type SearchResultItem } from '../core/memory/search.js';
+import {
+  searchMemories,
+  searchMemoriesMulti,
+  type SearchResultItem,
+} from '../core/memory/search.js';
 import { LOCAL_USER_ID } from '../core/constants.js';
 
 export interface SearchInput {
-  query: string;
+  query: string | string[];
   limit?: number;
   threshold?: number;
   explain?: boolean;
@@ -13,12 +17,15 @@ export async function handleSearch(
   params: SearchInput,
   db: Database,
 ): Promise<{ results: SearchResultItem[] }> {
-  return searchMemories({
+  const options = {
     db,
-    query: params.query,
     filters: { user_id: LOCAL_USER_ID },
     limit: params.limit,
     threshold: params.threshold,
     explain: params.explain,
-  });
+  };
+
+  return Array.isArray(params.query)
+    ? searchMemoriesMulti({ ...options, queries: params.query })
+    : searchMemories({ ...options, query: params.query });
 }
