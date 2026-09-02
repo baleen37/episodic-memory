@@ -9,6 +9,13 @@ describe('MCP schemas', () => {
     });
   });
 
+  test('defaults limit to 10', () => {
+    expect(SearchInputSchema.parse({ query: 'memory search' })).toEqual({
+      query: 'memory search',
+      limit: 10,
+    });
+  });
+
   test('requires a query', () => {
     expect(() => SearchInputSchema.parse({})).toThrow();
   });
@@ -20,9 +27,11 @@ describe('MCP schemas', () => {
   test('accepts an array of 2-5 query strings for AND search', () => {
     expect(SearchInputSchema.parse({ query: ['alpha', 'beta'] })).toEqual({
       query: ['alpha', 'beta'],
+      limit: 10,
     });
     expect(SearchInputSchema.parse({ query: ['a', 'b', 'c', 'd', 'e'] })).toEqual({
       query: ['a', 'b', 'c', 'd', 'e'],
+      limit: 10,
     });
   });
 
@@ -38,22 +47,9 @@ describe('MCP schemas', () => {
     expect(() => SearchInputSchema.parse({ query: ['alpha', ''] })).toThrow();
   });
 
-  test('accepts threshold within [0,1]', () => {
-    expect(SearchInputSchema.parse({ query: 'memory search', threshold: 0.5 })).toEqual({
-      query: 'memory search',
-      threshold: 0.5,
-    });
-  });
-
-  test('rejects threshold outside [0,1]', () => {
-    expect(() => SearchInputSchema.parse({ query: 'memory search', threshold: 1.5 })).toThrow();
-  });
-
-  test('accepts explain flag', () => {
-    expect(SearchInputSchema.parse({ query: 'memory search', explain: true })).toEqual({
-      query: 'memory search',
-      explain: true,
-    });
+  test('rejects removed threshold and explain inputs', () => {
+    expect(() => SearchInputSchema.parse({ query: 'memory search', threshold: 0.5 })).toThrow();
+    expect(() => SearchInputSchema.parse({ query: 'memory search', explain: false })).toThrow();
   });
 
   test('rejects unknown search filter keys', () => {

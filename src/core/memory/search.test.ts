@@ -50,11 +50,6 @@ describe('searchMemories', () => {
     await expect(searchMemories({ db, query: 'puppy', filters: {} })).rejects.toThrow(/user_id/);
   });
 
-  test('rejects an out-of-range threshold', async () => {
-    await expect(searchMemories({ db, query: 'x', filters: { user_id: 'alice' }, threshold: 1.5 }))
-      .rejects.toThrow(/threshold/i);
-  });
-
   test('ranks the semantically closest memory first', async () => {
     seed();
     const { results } = await searchMemories({ db, query: 'puppy', filters: { user_id: 'alice' } });
@@ -98,10 +93,9 @@ describe('searchMemories', () => {
     insertMemories(db, filler);
 
     const { results } = await searchMemories({
-      db, query: 'pottery', filters: { user_id: 'alice' }, explain: true,
+      db, query: 'pottery', filters: { user_id: 'alice' },
     });
     expect(results[0].id).toBe('m2');
-    expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
   });
 
   test('BM25 still scores when only some query terms match', async () => {
@@ -118,10 +112,9 @@ describe('searchMemories', () => {
     insertMemories(db, filler);
 
     const { results } = await searchMemories({
-      db, query: 'pottery zzzznomatch', filters: { user_id: 'alice' }, explain: true,
+      db, query: 'pottery zzzznomatch', filters: { user_id: 'alice' },
     });
     expect(results[0].id).toBe('m2');
-    expect(results[0].score_details!.bm25_score).toBeGreaterThan(0);
   });
 
   test('degrades to semantic-only when no keyword matches', async () => {
@@ -132,23 +125,12 @@ describe('searchMemories', () => {
     // exact direction — so scope to bob (who owns m3) for a surviving candidate.
     seed();
     const { results } = await searchMemories({
-      db, query: 'zzzznomatch', filters: { user_id: 'bob' }, explain: true,
+      db, query: 'zzzznomatch', filters: { user_id: 'bob' },
     });
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].score_details!.bm25_score).toBe(0);
-    expect(results[0].score_details!.max_possible_score).toBe(1.0);
   });
 
-  test('explain exposes the score breakdown', async () => {
-    seed();
-    const { results } = await searchMemories({
-      db, query: 'puppy', filters: { user_id: 'alice' }, explain: true,
-    });
-    expect(results[0].score_details).toBeDefined();
-    expect(results[0].score_details!.max_possible_score).toBeGreaterThanOrEqual(1.0);
-  });
-
-  test('omits score_details by default', async () => {
+  test('does not expose score details', async () => {
     seed();
     const { results } = await searchMemories({ db, query: 'puppy', filters: { user_id: 'alice' } });
     expect(results[0].score_details).toBeUndefined();
@@ -160,24 +142,18 @@ describe('searchMemories', () => {
     expect(results).toHaveLength(1);
   });
 
-  test('threshold drops candidates whose raw semantic score is below it', async () => {
-    // 'puppy' embeds to vec(0); m2/m3 sit at vec(1.5)/vec(3.0), so their
-    // semantic scores fall below 0.9 while m1 (an exact vector match) clears it.
+  test('uses a default limit of 10', async () => {
     seed();
+    insertMemories(db, Array.from({ length: 12 }, (_, i) => ({
+      id: `limit-${i}`,
+      memory: `Limit filler ${i}`,
+      metadata: { user_id: 'alice' },
+      embedding: vec(0),
+    })));
     const { results } = await searchMemories({
-      db, query: 'puppy', filters: { user_id: 'alice' }, threshold: 0.9,
+      db, query: 'puppy', filters: { user_id: 'alice' },
     });
-    expect(results.map(r => r.id)).toEqual(['m1']);
-  });
-
-  test('a threshold above every semantic score returns nothing', async () => {
-    // No document is close to this query direction, so every raw semantic
-    // score falls under the gate and nothing survives.
-    seed();
-    const { results } = await searchMemories({
-      db, query: 'pottery', filters: { user_id: 'bob' }, threshold: 0.9,
-    });
-    expect(results).toHaveLength(0);
+    expect(results).toHaveLength(10);
   });
 
   test('returns an empty list on an empty store', async () => {
@@ -260,34 +236,10 @@ describe('searchMemories', () => {
       db,
       queries: ['puppy', 'pottery'],
       filters: { user_id: 'alice' },
-      threshold: 0.9,
       limit: 10,
     });
 
     expect(results).toEqual([]);
   });
 
-  test('multi-query search averages score details when explain is enabled', async () => {
-    seed();
-    insertMemories(db, [
-      {
-        id: 'm4',
-        memory: 'User combined puppy care with pottery classes',
-        metadata: { user_id: 'alice' },
-        embedding: vec(0.75),
-      },
-    ]);
-
-    const { results } = await searchMemoriesMulti({
-      db,
-      queries: ['puppy', 'pottery'],
-      filters: { user_id: 'alice' },
-      limit: 10,
-      explain: true,
-    });
-
-    expect(results[0].score_details).toBeDefined();
-    expect(results[0].score_details!.final_score).toBeCloseTo(results[0].score, 5);
-    expect(results[0].score_details!.threshold).toBe(0.1);
-  });
 });

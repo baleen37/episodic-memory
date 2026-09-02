@@ -1,21 +1,21 @@
 import type { Database } from 'bun:sqlite';
 import { EmbeddingError, embedQuery } from '../embeddings.js';
 import { log } from '../logger.js';
+import { DEFAULT_SEARCH_LIMIT } from '../constants.js';
 import { assertScoped, buildFilterSql, type Filters } from './filters.js';
 import {
   buildFtsMatchQuery, getBm25Params, lemmatizeForBm25, normalizeBm25, scoreAndRank,
-  type Candidate, type ScoreDetails,
+  type Candidate,
 } from './scoring.js';
 
 const MAX_KNN_K = 4096;
+const DEFAULT_SEARCH_THRESHOLD = 0.1;
 
 export interface SearchArgs {
   db: Database;
   query: string;
   filters: Filters;
   limit?: number;
-  threshold?: number;
-  explain?: boolean;
 }
 
 export interface MultiSearchArgs extends Omit<SearchArgs, 'query'> {
@@ -30,28 +30,15 @@ export interface SearchResultItem {
   score: number;
   created_at: number;
   updated_at: number;
-  score_details?: ScoreDetails;
 }
 
 const PROMOTED_PAYLOAD_KEYS = [
   'user_id', 'agent_id', 'run_id', 'actor_id', 'role', 'attributed_to', 'expiration_date',
 ] as const;
 
-function validateThreshold(threshold: number): void {
-  if (typeof threshold !== 'number' || Number.isNaN(threshold)) {
-    throw new Error('threshold must be a valid number');
-  }
-  if (threshold < 0 || threshold > 1) {
-    throw new Error(`Invalid threshold: ${threshold}. Must be between 0 and 1 (inclusive).`);
-  }
-}
-
 /** Port of main.py:_search_vector_store (v2.0.17). */
 export async function searchMemories(args: SearchArgs): Promise<{ results: SearchResultItem[] }> {
-  const { db, query, filters, limit = 20, explain = false } = args;
-  const threshold = args.threshold ?? 0.1;
-
-  validateThreshold(threshold);
+  const { db, query, filters, limit = DEFAULT_SEARCH_LIMIT } = args;
   assertScoped(filters);
 
   const queryLemmatized = lemmatizeForBm25(query);
@@ -149,9 +136,9 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
     semanticResults: candidates,
     bm25Scores,
     entityBoosts,
-    threshold,
+    threshold: DEFAULT_SEARCH_THRESHOLD,
     topK: limit,
-    explain,
+    explain: false,
   });
 
   const results: SearchResultItem[] = [];
@@ -174,7 +161,6 @@ export async function searchMemories(args: SearchArgs): Promise<{ results: Searc
         (result as unknown as Record<string, unknown>)[key] = metadata[key];
       }
     }
-    if (item.score_details) result.score_details = item.score_details;
     results.push(result);
   }
 
@@ -185,25 +171,13 @@ function mean(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function meanScoreDetails(details: ScoreDetails[]): ScoreDetails {
-  return {
-    semantic_score: mean(details.map(detail => detail.semantic_score)),
-    bm25_score: mean(details.map(detail => detail.bm25_score)),
-    entity_boost: mean(details.map(detail => detail.entity_boost)),
-    raw_score: mean(details.map(detail => detail.raw_score)),
-    max_possible_score: mean(details.map(detail => detail.max_possible_score)),
-    final_score: mean(details.map(detail => detail.final_score)),
-    threshold: details[0].threshold,
-  };
-}
-
 export async function searchMemoriesMulti(
   args: MultiSearchArgs,
 ): Promise<{ results: SearchResultItem[] }> {
-  const { db, filters, queries, limit = 20, threshold, explain = false } = args;
+  const { db, filters, queries, limit = DEFAULT_SEARCH_LIMIT } = args;
   if (queries.length === 0) return { results: [] };
   if (queries.length === 1) {
-    return searchMemories({ db, query: queries[0], filters, limit, threshold, explain });
+    return searchMemories({ db, query: queries[0], filters, limit });
   }
 
   // Oversample each query before intersecting so a shared record is not lost
@@ -215,15 +189,12 @@ export async function searchMemoriesMulti(
       query,
       filters,
       limit: candidateLimit,
-      threshold,
-      explain,
     })),
   );
 
   const byId = new Map<string, {
     item: SearchResultItem;
     scores: number[];
-    details: ScoreDetails[];
   }>();
 
   for (const { results } of perQuery) {
@@ -231,12 +202,10 @@ export async function searchMemoriesMulti(
       const entry = byId.get(result.id);
       if (entry) {
         entry.scores.push(result.score);
-        if (result.score_details) entry.details.push(result.score_details);
       } else {
         byId.set(result.id, {
           item: result,
           scores: [result.score],
-          details: result.score_details ? [result.score_details] : [],
         });
       }
     }
@@ -247,11 +216,7 @@ export async function searchMemoriesMulti(
     if (scores.length !== queries.length) continue;
 
     const score = mean(scores);
-    const result = { ...item, score };
-    if (explain && details.length === queries.length) {
-      result.score_details = meanScoreDetails(details);
-    }
-    results.push(result);
+    results.push({ ...item, score });
   }
 
   results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
