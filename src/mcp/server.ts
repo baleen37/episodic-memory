@@ -7,20 +7,23 @@ import {
 import { openMemoryDb } from '../core/memory/schema.js';
 import {
   SearchInputSchema,
+  ReadInputSchema,
   type SearchInput,
+  type ReadInput,
 } from './schemas.js';
 import {
+  handleRead,
   handleSearch,
 } from './handlers.js';
-import type { SearchResultItem } from '../core/memory/search.js';
+import type { CompactSearchResult, ReadMemoryResult } from './handlers.js';
 import { TOOLS } from './tools.js';
 
 export function handleError(error: unknown): string {
   return error instanceof Error ? `Error: ${error.message}` : `Error: ${String(error)}`;
 }
 
-export { SearchInputSchema };
-export type { SearchInput, SearchResultItem };
+export { SearchInputSchema, ReadInputSchema };
+export type { SearchInput, ReadInput, CompactSearchResult, ReadMemoryResult };
 
 const server = new Server(
   {
@@ -53,7 +56,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(result),
+            },
+          ],
+        };
+      } finally {
+        db.close();
+      }
+    }
+
+    if (name === 'read') {
+      const params = ReadInputSchema.parse(args);
+      const db = openMemoryDb();
+      try {
+        const result = handleRead(params, db);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result),
             },
           ],
         };

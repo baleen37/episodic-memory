@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { SearchInputSchema } from './schemas.js';
+import { ReadInputSchema, SearchInputSchema } from './schemas.js';
 
 async function mockToolCall(toolName: string, args: unknown) {
   try {
@@ -14,6 +14,14 @@ async function mockToolCall(toolName: string, args: unknown) {
       SearchInputSchema.parse(args);
       return {
         content: [{ type: 'text', text: JSON.stringify({ results: [] }, null, 2) }],
+        isError: false,
+      };
+    }
+
+    if (toolName === 'read') {
+      ReadInputSchema.parse(args);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ results: [], missing: [] }, null, 2) }],
         isError: false,
       };
     }
@@ -72,26 +80,14 @@ describe('MCP Server - episodic-memory__search tool', () => {
     });
   });
 
-  describe('Threshold parameter validation', () => {
-    test('accepts threshold within [0,1]', async () => {
-      const result = await mockToolCall('search', { query: 'test', threshold: 0.3 });
+  describe('Read parameter validation', () => {
+    test('accepts a bounded id array', async () => {
+      const result = await mockToolCall('read', { ids: ['e_123'] });
       expect(result.isError).toBe(false);
     });
 
-    test('rejects threshold outside [0,1]', async () => {
-      const result = await mockToolCall('search', { query: 'test', threshold: 1.5 });
-      expect(result.isError).toBe(true);
-    });
-  });
-
-  describe('Explain parameter validation', () => {
-    test('accepts explain boolean', async () => {
-      const result = await mockToolCall('search', { query: 'test', explain: true });
-      expect(result.isError).toBe(false);
-    });
-
-    test('rejects non-boolean explain', async () => {
-      const result = await mockToolCall('search', { query: 'test', explain: 'yes' });
+    test('rejects an empty id array', async () => {
+      const result = await mockToolCall('read', { ids: [] });
       expect(result.isError).toBe(true);
     });
   });
@@ -165,9 +161,12 @@ describe('SearchInput Schema - Direct validation', () => {
     const result = SearchInputSchema.safeParse({
       query: 'test',
       limit: 10,
-      threshold: 0.2,
-      explain: false,
     });
     expect(result.success).toBe(true);
+  });
+
+  test('rejects removed threshold and explain inputs', () => {
+    expect(SearchInputSchema.safeParse({ query: 'test', threshold: 0.2 }).success).toBe(false);
+    expect(SearchInputSchema.safeParse({ query: 'test', explain: false }).success).toBe(false);
   });
 });

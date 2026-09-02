@@ -3,7 +3,8 @@ import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
 import { TOOLS } from './tools.js';
 import * as handlers from './handlers.js';
-import { handleSearch } from './handlers.js';
+import { handleRead, handleSearch } from './handlers.js';
+import { compactMemoryId, expandMemoryId } from './ids.js';
 import { createMemorySchema } from '../core/memory/schema.js';
 import { insertMemories } from '../core/memory/store.js';
 import { LOCAL_USER_ID } from '../core/constants.js';
@@ -11,17 +12,17 @@ import { __setModelForTests } from '../core/embeddings.js';
 
 describe('MCP surface', () => {
   test('exposes search only', () => {
-    expect(TOOLS.map(t => t.name)).toEqual(['search']);
+    expect(TOOLS.map(t => t.name)).toEqual(['search', 'read']);
   });
   test('no fetch handler remains', () => {
     expect('handleFetch' in handlers).toBe(false);
   });
-  test('search schema advertises the mem0 knobs', () => {
+  test('search schema exposes only query and limit', () => {
     const props = TOOLS[0].inputSchema.properties as Record<string, unknown>;
     expect(props.query).toBeDefined();
     expect(props.limit).toBeDefined();
-    expect(props.threshold).toBeDefined();
-    expect(props.explain).toBeDefined();
+    expect(props.threshold).toBeUndefined();
+    expect(props.explain).toBeUndefined();
   });
 
   test('search schema advertises array queries for strict AND search', () => {
@@ -57,7 +58,7 @@ describe('handlers', () => {
     __setModelForTests(null, null);
   });
 
-  test('handleSearch scopes to the local user and returns mem0 search results', async () => {
+  test('handleSearch scopes to the local user and returns compact cards', async () => {
     insertMemories(db, [
       { id: 'm1', memory: 'User adopted a beagle puppy named Max', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(0) },
       { id: 'm2', memory: 'Unrelated fact scoped to a different user', metadata: { user_id: 'someone-else' }, embedding: vec(0) },
@@ -65,19 +66,43 @@ describe('handlers', () => {
 
     const { results } = await handleSearch({ query: 'puppy', limit: 10 }, db);
 
-    expect(results.some(r => r.id === 'm1')).toBe(true);
+    expect(results.some(r => r.id === compactMemoryId('m1'))).toBe(true);
     expect(results.some(r => r.id === 'm2')).toBe(false);
+    expect(results[0]).toEqual(expect.objectContaining({
+      id: compactMemoryId('m1'),
+      text: expect.any(String),
+      date: expect.any(String),
+      score: expect.any(Number),
+    }));
+    expect(results[0]).not.toHaveProperty('metadata');
+    expect(results[0]).not.toHaveProperty('hash');
   });
 
-  test('handleSearch forwards limit, threshold, and explain to searchMemories', async () => {
+  test('handleRead reads multiple local records in requested order', async () => {
     insertMemories(db, [
       { id: 'm1', memory: 'User adopted a beagle puppy named Max', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(0) },
+      { id: 'm2', memory: 'User started pottery classes', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(1.5) },
     ]);
 
-    const { results } = await handleSearch({ query: 'puppy', limit: 1, threshold: 0, explain: true }, db);
+    const result = await handleRead({ ids: [compactMemoryId('m2'), compactMemoryId('m1')] }, db);
 
-    expect(results).toHaveLength(1);
-    expect(results[0].score_details).toBeDefined();
+    expect(result.results.map(row => row.id)).toEqual([compactMemoryId('m2'), compactMemoryId('m1')]);
+    expect(result.results.map(row => row.text)).toEqual([
+      'User started pottery classes',
+      'User adopted a beagle puppy named Max',
+    ]);
+    expect(result.missing).toEqual([]);
+  });
+
+  test('handleRead reports unknown and out-of-scope records as missing', async () => {
+    insertMemories(db, [
+      { id: 'other', memory: 'Private other user record', metadata: { user_id: 'someone-else' }, embedding: vec(0) },
+    ]);
+
+    const result = await handleRead({ ids: ['missing', compactMemoryId('other')] }, db);
+
+    expect(result.results).toEqual([]);
+    expect(result.missing).toEqual(['missing', compactMemoryId('other')]);
   });
 
   test('returns an empty result set when nothing matches the scope', async () => {
@@ -95,6 +120,6 @@ describe('handlers', () => {
     const params = { query: ['puppy', 'pottery'], limit: 10 } as Parameters<typeof handleSearch>[0];
     const { results } = await handleSearch(params, db);
 
-    expect(results.map(result => result.id)).toEqual(['m3']);
+    expect(results.map(result => expandMemoryId(result.id))).toEqual(['m3']);
   });
 });

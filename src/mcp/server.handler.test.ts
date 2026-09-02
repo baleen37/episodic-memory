@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as sqliteVec from 'sqlite-vec';
-import { handleSearch } from './handlers.js';
-import { SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
+import { handleRead, handleSearch } from './handlers.js';
+import { ReadInputSchema, SearchInputSchema, handleError, shouldRunAsEntrypoint } from './server.js';
+import { compactMemoryId } from './ids.js';
 import { createMemorySchema } from '../core/memory/schema.js';
 import { insertMemories } from '../core/memory/store.js';
 import { LOCAL_USER_ID } from '../core/constants.js';
@@ -50,7 +51,10 @@ describe('MCP Server Handlers', () => {
 
       expect(results).toHaveLength(1);
       expect(typeof results[0].id).toBe('string');
-      expect(results[0].memory).toBe('test query content answer text');
+      expect(results[0].text).toBe('test query content answer text');
+      expect(results[0].id).toBe(compactMemoryId('m1'));
+      expect(results[0]).not.toHaveProperty('metadata');
+      expect(results[0]).not.toHaveProperty('hash');
       expect(results[0]).not.toHaveProperty('archive_path');
       expect(results[0]).not.toHaveProperty('source');
       expect(results[0]).not.toHaveProperty('next_action');
@@ -64,15 +68,18 @@ describe('MCP Server Handlers', () => {
       expect(results).toEqual([]);
     });
 
-    test('threshold and explain are optional and forwarded when present', async () => {
+    test('read returns selected records', async () => {
       insertMemories(db, [
         { id: 'm1', memory: 'test query content answer text', metadata: { user_id: LOCAL_USER_ID }, embedding: vec(0) },
       ]);
 
-      const params = SearchInputSchema.parse({ query: 'test query', threshold: 0, explain: true });
-      const { results } = await handleSearch(params, db);
+      const params = ReadInputSchema.parse({ ids: [compactMemoryId('m1')] });
+      const { results } = await handleRead(params, db);
 
-      expect(results[0].score_details).toBeDefined();
+      expect(results).toEqual([expect.objectContaining({
+        id: compactMemoryId('m1'),
+        text: 'test query content answer text',
+      })]);
     });
   });
 

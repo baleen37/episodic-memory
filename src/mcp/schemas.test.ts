@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { SearchInputSchema } from './schemas.js';
+import { ReadInputSchema, SearchInputSchema } from './schemas.js';
 
 describe('MCP schemas', () => {
   test('validates memory search input', () => {
@@ -59,5 +59,14 @@ describe('MCP schemas', () => {
   test('rejects limit outside range', () => {
     expect(() => SearchInputSchema.parse({ query: 'memory search', limit: 0 })).toThrow();
     expect(() => SearchInputSchema.parse({ query: 'memory search', limit: 51 })).toThrow();
+  });
+
+  test('validates a bounded multi-read input', () => {
+    expect(ReadInputSchema.parse({ ids: ['e_123'] })).toEqual({ ids: ['e_123'] });
+    expect(ReadInputSchema.parse({ ids: Array.from({ length: 10 }, (_, i) => `e_${i}`) })).toBeTruthy();
+    expect(() => ReadInputSchema.parse({})).toThrow();
+    expect(() => ReadInputSchema.parse({ ids: [] })).toThrow();
+    expect(() => ReadInputSchema.parse({ ids: Array.from({ length: 11 }, (_, i) => `e_${i}`) })).toThrow();
+    expect(() => ReadInputSchema.parse({ ids: ['e_1'], extra: true })).toThrow();
   });
 });

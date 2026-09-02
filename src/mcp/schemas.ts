@@ -9,4 +9,9 @@ export const SearchInputSchema = z.object({
   limit: z.number().int().min(1).max(50).default(DEFAULT_SEARCH_LIMIT),
 }).strict();
 
+export const ReadInputSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(10),
+}).strict();
+
 export type SearchInput = z.infer<typeof SearchInputSchema>;
+export type ReadInput = z.infer<typeof ReadInputSchema>;
