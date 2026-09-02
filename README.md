@@ -21,7 +21,7 @@ integrated into the Claude Code and Codex plugin ecosystems.
 
 ### `search-conversation`
 
-Search indexed event/fact memory records. The MCP surface exposes one read-only `search` tool that returns stored memory text, metadata, timestamps, and relevance scores.
+Search indexed event/fact memory records. The MCP surface exposes read-only `search` and `read` tools: `search` returns compact cards, and `read` expands selected records.
 
 **The agent automatically:**
 
@@ -61,21 +61,19 @@ See `skills/remembering-conversations/SKILL.md` for complete usage guide.
 
 These tools are exposed for advanced usage.
 
-### `episodic-memory__search`
+### `episodic-memory__search` and `episodic-memory__read`
 
 Search indexed event/fact memory records.
 
 **Parameters:**
 
 - `query` (string | string[], required): Search query. Use a string for normal search, or an array of 2-5 strings for strict AND search; only records matching every query are returned.
-- `limit` (number, optional): Maximum results to return (1-50, default: 20)
-- `threshold` (number, optional): Minimum semantic score from 0 to 1
-- `explain` (boolean, optional): Include the score breakdown
+- `limit` (number, optional): Maximum results to return (1-50, default: 10)
 
 **Example:**
 
 ```javascript
-{ query: "React Router authentication errors", limit: 10, threshold: 0.2 }
+{ query: "React Router authentication errors", limit: 10 }
 ```
 
 For strict multi-query search, pass 2-5 query strings. The results are the
@@ -85,6 +83,16 @@ intersection returns no results; it does not fall back to OR search.
 ```javascript
 { query: ["React Router", "authentication", "JWT"], limit: 10 }
 ```
+
+`search` returns `{ results }` cards with a compact id, text, date, and rounded
+score. Use `read` to retrieve selected records, in the requested order:
+
+```javascript
+{ ids: ["e_...", "e_..."] }
+```
+
+The `read` response is `{ results, missing }`. Canonical UUIDs remain accepted
+for direct compatibility, while public search results use compact aliases.
 
 ## Installation
 

@@ -212,7 +212,7 @@ export async function searchMemoriesMulti(
   }
 
   const results: SearchResultItem[] = [];
-  for (const { item, scores, details } of byId.values()) {
+  for (const { item, scores } of byId.values()) {
     if (scores.length !== queries.length) continue;
 
     const score = mean(scores);

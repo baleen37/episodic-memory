@@ -133,7 +133,7 @@ describe('searchMemories', () => {
   test('does not expose score details', async () => {
     seed();
     const { results } = await searchMemories({ db, query: 'puppy', filters: { user_id: 'alice' } });
-    expect(results[0].score_details).toBeUndefined();
+    expect(results[0]).not.toHaveProperty('score_details');
   });
 
   test('honors limit', async () => {

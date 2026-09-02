@@ -1492,6 +1492,7 @@ import * as sqliteVec from "sqlite-vec";
 
 // src/core/constants.ts
 var EMBEDDING_DIM = 384;
+var DEFAULT_SEARCH_LIMIT = 10;
 var LOCAL_USER_ID = "local";
 
 // src/core/memory/schema.ts
@@ -2314,6 +2315,7 @@ function scoreAndRank(args) {
 
 // src/core/memory/search.ts
 var MAX_KNN_K = 4096;
+var DEFAULT_SEARCH_THRESHOLD = 0.1;
 var PROMOTED_PAYLOAD_KEYS = [
   "user_id",
   "agent_id",
@@ -2323,18 +2325,8 @@ var PROMOTED_PAYLOAD_KEYS = [
   "attributed_to",
   "expiration_date"
 ];
-function validateThreshold(threshold) {
-  if (typeof threshold !== "number" || Number.isNaN(threshold)) {
-    throw new Error("threshold must be a valid number");
-  }
-  if (threshold < 0 || threshold > 1) {
-    throw new Error(`Invalid threshold: ${threshold}. Must be between 0 and 1 (inclusive).`);
-  }
-}
 async function searchMemories(args) {
-  const { db, query, filters, limit = 20, explain = false } = args;
-  const threshold = args.threshold ?? 0.1;
-  validateThreshold(threshold);
+  const { db, query, filters, limit = DEFAULT_SEARCH_LIMIT } = args;
   assertScoped(filters);
   const queryLemmatized = lemmatizeForBm25(query);
   let embedding;
@@ -2411,9 +2403,9 @@ async function searchMemories(args) {
     semanticResults: candidates,
     bm25Scores,
     entityBoosts,
-    threshold,
+    threshold: DEFAULT_SEARCH_THRESHOLD,
     topK: limit,
-    explain
+    explain: false
   });
   const results = [];
   for (const item of scored) {
@@ -2435,8 +2427,6 @@ async function searchMemories(args) {
         result[key] = metadata[key];
       }
     }
-    if (item.score_details)
-      result.score_details = item.score_details;
     results.push(result);
   }
   return { results };
@@ -4157,6 +4147,6 @@ if (__require.main == __require.module) {
   });
 }
 export {
-  getHelpText,
-  parseSearchArgs
+  parseSearchArgs,
+  getHelpText
 };

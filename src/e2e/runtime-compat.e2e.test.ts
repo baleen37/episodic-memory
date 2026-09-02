@@ -192,7 +192,7 @@ describe('hooks.json command runs under each runtime env', () => {
 });
 
 describe('MCP server starts and lists tools under each runtime env', () => {
-  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search only', async (_label, runtimeEnv) => {
+  test.each(RUNTIME_ENVS)('%s env: initialize + tools/list returns search and read', async (_label, runtimeEnv) => {
     const tmpHome = makeTmpHome();
     let client: Client | null = null;
     try {
@@ -210,7 +210,7 @@ describe('MCP server starts and lists tools under each runtime env', () => {
 
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
-      expect(names).toContain('search');
+      expect(names).toEqual(['search', 'read']);
       expect(names).not.toContain('fetch');
     } finally {
       await client?.close();

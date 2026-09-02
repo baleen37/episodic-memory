@@ -67,10 +67,10 @@ bun run cli <sync|search|stats|verify>   # Run built CLI (dist/cli-internal.mjs)
 | `src/cli/verify.ts` | CLI verify command — missing/orphan vector checks over `memories`/`vec_memories` |
 | `src/cli/main.ts` | CLI router exposing `sync`, `search`, `stats`, `verify`, `doctor`, and `mcp` |
 | `src/cli-graceful.mjs` | Bun CLI graceful wrapper built to `bin/episodic-memory` (imports `dist/cli-internal.mjs`) |
-| `src/mcp/server.ts` | MCP server exposing the `search` tool only |
-| `src/mcp/handlers.ts` | MCP handler for `search`, delegating to `searchMemories()` |
-| `src/mcp/schemas.ts` | MCP input schema for `search` (`query`, `limit`, `threshold`, `explain`) |
-| `src/mcp/tools.ts` | MCP tool definition for `search` |
+| `src/mcp/server.ts` | MCP server exposing compact `search` and multi-record `read` tools |
+| `src/mcp/handlers.ts` | MCP handlers for compact `search` and ID-based `read` |
+| `src/mcp/schemas.ts` | MCP input schemas for `search` (`query`, `limit`) and `read` (`ids`) |
+| `src/mcp/tools.ts` | MCP tool definitions for `search` and `read` |
 | `hooks/hooks.json` | SessionStart hook configuration for `episodic-memory sync` |
 | `src/cli/mcp.ts` | `episodic-memory mcp` subcommand: ensures deps/build, then spawns the MCP server bundle |
 | `scripts/build.mjs` | Bun.build bundling script |
@@ -155,12 +155,12 @@ three are unused dead schema.
    spaCy over the query) has no substitute here, matching upstream's own spaCy-unavailable fallback
    of an empty boost map. The `max_possible` divisor still adapts correctly when the boost map is empty.
 4. `scoreAndRank()` combines the terms additively (`semantic + bm25 + entityBoost`), gates on the
-   raw semantic score against `threshold` *before* combining (a below-threshold candidate is
-   dropped even if BM25/entity would have rescued it — this matches upstream behavior), then
+   raw semantic score against the fixed internal threshold `0.1` *before* combining (a
+   below-threshold candidate is dropped even if BM25/entity would have rescued it — this matches
+   upstream behavior), then
    divides by the adaptive `max_possible` (1.0, +1.0 if BM25 ran, +0.5 if entity boosts ran) and
    clamps to `1.0`.
-5. `explain: true` attaches `score_details` (semantic/bm25/entity/raw/max_possible/final/threshold)
-   to each result.
+5. The MCP adapter always uses the compact mode: score explanations are not exposed to callers.
 
 Filters must include at least one of `user_id`/`agent_id`/`run_id` (`assertScoped`); the CLI and
 MCP surfaces always supply `user_id`. Metadata filter operators (`eq`, `ne`, `in`, `nin`, `gt(e)`,
@@ -201,18 +201,19 @@ When adding a provider: implement `LLMProvider`, export it from `index.ts`, and 
 
 ### MCP Surface
 
-MCP exposes only:
+MCP exposes:
 
 - **`search`**: `query` (required string or an array of 2-5 strings for strict AND search), `limit`
-  (default 20, max 50), `threshold` (minimum semantic score 0-1, default 0.1), `explain` (attach
-  `score_details`, default false). Array queries return only records present in every individual
-  result set, ranked by mean score; an empty intersection stays empty. Always scoped to the local
-  `user_id`. Returns flat memory records (`id`, `memory`, `hash`, `metadata`, `score`, `created_at`,
-  `updated_at`, plus any promoted metadata keys).
+  (default 10, max 50). Array queries return only records present in every individual result set,
+  ranked by mean score; an empty intersection stays empty. Always scoped to the local `user_id`.
+  Returns compact cards with `id`, `text`, `date`, and rounded `score`.
+- **`read`**: `ids` (1-10 compact or canonical IDs). Returns `{ results, missing }` with selected
+  memory text, metadata, and timestamps in request order.
 
 There is no `fetch` tool, no omitted-query recency listing, and no `after`/`before` filtering on
 the MCP surface — these existed in the pre-mem0v2 architecture and were removed. There is no
-summary detail or graph layer in the target architecture.
+summary detail or graph layer in the target architecture. `threshold` and `explain` are internal
+ranking policy details, not MCP inputs.
 
 ### Build Output
 
