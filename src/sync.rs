@@ -133,6 +133,20 @@ fn free_generation(paths: &Paths, kind: SourceKind, rel: &Path, from: i64) -> i6
     generation
 }
 
+/// Size of the archive file at `path`; `None` when absent. A non-regular entry (e.g. a directory,
+/// whose reported size is platform dependent) is an error, never an archive.
+fn archive_len(path: &Path) -> io::Result<Option<u64>> {
+    match fs::metadata(path) {
+        Ok(m) if m.is_file() => Ok(Some(m.len())),
+        Ok(_) => Err(io::Error::other(format!(
+            "archive path is not a regular file: {}",
+            path.display()
+        ))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Import rule (spec §5 "기존 아카이브 들여오기", bullet 2) for a source with no `files` row.
 /// Returns `(generation, offset)`: the gen-0 archive is adopted (offset = its size) when the
 /// source is at least as large and their last 4096 bytes match; otherwise the old archive is
@@ -144,10 +158,8 @@ pub fn adopt_existing_archive(
     source: &Path,
 ) -> io::Result<(i64, u64)> {
     let archive = archive_path_for(paths, kind, rel, 0);
-    let archive_len = match fs::metadata(&archive) {
-        Ok(m) => m.len(),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((0, 0)),
-        Err(e) => return Err(e),
+    let Some(archive_len) = archive_len(&archive)? else {
+        return Ok((0, 0));
     };
     let source_len = fs::metadata(source)?.len();
     if source_len >= archive_len && tails_match(source, &archive, archive_len)? {
@@ -162,16 +174,15 @@ pub fn adopt_existing_archive(
 fn reconcile_archive(row: &FileRow) -> Result<bool> {
     let path = Path::new(&row.archive_path);
     let offset = row.offset as u64;
-    match fs::metadata(path) {
-        Ok(m) if m.len() > offset => {
+    match archive_len(path)? {
+        Some(len) if len > offset => {
             let f = fs::OpenOptions::new().write(true).open(path)?;
             f.set_len(offset)?;
             f.sync_all()?;
             Ok(false)
         }
-        Ok(m) => Ok(m.len() < offset),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(offset > 0),
-        Err(e) => Err(e.into()),
+        Some(len) => Ok(len < offset),
+        None => Ok(offset > 0),
     }
 }
 
@@ -950,6 +961,38 @@ mod mirror {
         e.sync();
         assert_eq!(e.exchanges(), before);
     }
+
+    #[test]
+    fn directory_at_archive_path_is_an_error_not_an_archive() {
+        let e = env();
+        let gen0 = archive_path_for(&e.paths, e.f.kind, &e.f.rel, 0);
+        fs::create_dir_all(&gen0).unwrap();
+        // Both a source smaller and larger than any directory size must fail the same way.
+        for body in ["x\n".to_string(), "x\n".repeat(10_000)] {
+            fs::write(&e.src, body).unwrap();
+            let err = adopt_existing_archive(&e.paths, e.f.kind, &e.f.rel, &e.src).unwrap_err();
+            assert!(err.to_string().contains("not a regular file"), "{err}");
+        }
+        let err = archive_len(&gen0).unwrap_err();
+        assert!(err.to_string().contains("not a regular file"), "{err}");
+        let row = FileRow {
+            source_path: path_str(&e.src),
+            source_kind: e.f.kind.as_str().into(),
+            archive_path: path_str(&gen0),
+            generation: 0,
+            offset: 0,
+            reparse_line: 1,
+            session_id: None,
+            cwd: None,
+            project: None,
+            harness: None,
+            is_sidechain: None,
+            user_signal: None,
+            skipped: false,
+        };
+        assert!(reconcile_archive(&row).is_err());
+        assert!(!archive_path_for(&e.paths, e.f.kind, &e.f.rel, 1).exists());
+    }
 }
 
 #[cfg(test)]
@@ -1220,6 +1263,12 @@ mod orchestration {
         fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
         let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
         assert_eq!((stats.errors, stats.files_synced), (1, 1));
+        assert!(e
+            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
+            .is_dir());
+        assert!(!e
+            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 1)
+            .exists());
         let conn = e.conn();
         let last = meta_get(&conn, "last_error").unwrap();
         assert!(last.contains("a.jsonl"), "{last}");
