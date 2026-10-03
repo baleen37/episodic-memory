@@ -77,7 +77,7 @@ Put this in a user message to exclude the whole conversation:
 
 Only user messages are checked. The marker in tool output or replies is ignored, so reading
 this file does not exclude your session. Already indexed turns of that conversation are removed
-at the next sync. There is no masking of other content.
+at the next sync. Such a conversation is also hidden from `read` (any generation). There is no masking of other content.
 
 ### Environment variables
 
