@@ -51,8 +51,8 @@ install_binary() {
   local tmp
   tmp="$(mktemp -d "$BIN_DIR/.install.XXXXXX")" || return 1
 
-  if ! curl -fsSL -o "$tmp/$name.tar.gz" "$url.tar.gz" ||
-    ! curl -fsSL -o "$tmp/$name.tar.gz.sha256" "$url.sha256"; then
+  if ! curl -fsSL --connect-timeout 10 --max-time 300 -o "$tmp/$name.tar.gz" "$url.tar.gz" ||
+    ! curl -fsSL --connect-timeout 10 --max-time 300 -o "$tmp/$name.tar.gz.sha256" "$url.sha256"; then
     echo "episodic-memory: download failed: $url.tar.gz" >&2
     rm -rf "$tmp"
     return 1

@@ -34,8 +34,9 @@ stub_curl() {
   cat >"$STUBS/curl" <<'STUB'
 #!/bin/sh
 out=""; url=""
+echo "$*" >>"$CURL_ARGS"
 while [ $# -gt 0 ]; do
-  case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
+  case "$1" in -o) out="$2"; shift 2 ;; --connect-timeout|--max-time) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
 done
 echo "$url" >>"$CURL_LOG"
 src="$FIXTURES/$(basename "$url")"
@@ -44,6 +45,7 @@ cp "$src" "$out"
 STUB
   chmod +x "$STUBS/curl"
   export CURL_LOG="$T/curl.log"
+  export CURL_ARGS="$T/curl.args"
   export FIXTURES="$T/fixtures"
   mkdir -p "$FIXTURES"
 }
@@ -98,6 +100,8 @@ make_release() { # target [corrupt]
   [ "$output" = "stub mcp" ]
   [ -x "$EPISODIC_MEMORY_DIR/bin/episodic-memory-v$VER" ]
   grep -q "releases/download/v$VER/episodic-memory-v$VER-aarch64-unknown-linux-gnu.tar.gz" "$CURL_LOG"
+  # every download is bounded
+  [ "$(grep -c -- '--connect-timeout 10 --max-time 300' "$CURL_ARGS")" -eq 2 ]
   # temp dirs cleaned up
   [ -z "$(ls -A "$EPISODIC_MEMORY_DIR/bin" | grep '^\.install\.[A-Za-z0-9]' || true)" ]
 }

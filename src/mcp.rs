@@ -7,16 +7,21 @@ use anyhow::Result;
 use chrono::{DateTime, NaiveDate};
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 10;
 const MAX_LIMIT: usize = 50;
 const KEYWORD_ONLY: &str = "(vector search unavailable: model loading — keyword results only)";
+const KEYWORD_ONLY_FAILED: &str =
+    "(vector search unavailable: model unavailable — keyword results only)";
 
 pub struct Ctx {
     pub paths: Paths,
     pub embedder: Arc<RwLock<Option<Arc<dyn Embedder>>>>,
+    /// Model load ended in an error (the daemon will not retry).
+    pub load_failed: AtomicBool,
 }
 
 /// Newline-delimited JSON-RPC 2.0 over `r`/`w` until EOF on `r`.
@@ -191,7 +196,11 @@ fn search_tool(args: &Map<String, Value>, ctx: &Ctx) -> Result<String, String> {
 
     let mut text = String::new();
     if !out.vector_used {
-        text.push_str(KEYWORD_ONLY);
+        text.push_str(if ctx.load_failed.load(Ordering::SeqCst) {
+            KEYWORD_ONLY_FAILED
+        } else {
+            KEYWORD_ONLY
+        });
         text.push('\n');
     }
     if out.hits.is_empty() {
@@ -269,6 +278,7 @@ mod tests {
         let ctx = Ctx {
             paths,
             embedder: Arc::new(RwLock::new(Some(embedder))),
+            load_failed: AtomicBool::new(false),
         };
         (t, ctx)
     }
@@ -353,6 +363,21 @@ mod tests {
             "{body}"
         );
         assert!(body.contains("main.jsonl:"), "{body}");
+    }
+
+    #[test]
+    fn keyword_only_notice_after_failed_load() {
+        let (_t, ctx) = indexed_ctx();
+        *ctx.embedder.write().unwrap() = None;
+        ctx.load_failed.store(true, Ordering::SeqCst);
+        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let body = text(r);
+        assert!(
+            body.starts_with(
+                "(vector search unavailable: model unavailable — keyword results only)\n"
+            ),
+            "{body}"
+        );
     }
 
     struct Broken;

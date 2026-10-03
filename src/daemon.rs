@@ -51,8 +51,6 @@ struct State {
     clients: AtomicUsize,
     /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
     loading: AtomicBool,
-    /// Model load ended in an error; reported by `doctor`.
-    load_failed: AtomicBool,
     last_active: Mutex<Instant>,
 }
 
@@ -64,7 +62,6 @@ impl State {
             wake: Condvar::new(),
             clients: AtomicUsize::new(0),
             loading: AtomicBool::new(false),
-            load_failed: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
         }
     }
@@ -82,7 +79,7 @@ impl State {
     fn status_json(&self) -> Value {
         let model = if self.ctx.embedder.read().unwrap().is_some() {
             "ready"
-        } else if self.load_failed.load(Ordering::SeqCst) {
+        } else if self.ctx.load_failed.load(Ordering::SeqCst) {
             "failed"
         } else {
             "loading"
@@ -138,6 +135,7 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
     let state = Arc::new(State::new(Ctx {
         paths: paths.clone(),
         embedder: Arc::new(RwLock::new(embedder)),
+        load_failed: AtomicBool::new(false),
     }));
     state.request_sync();
 
@@ -149,7 +147,7 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
         std::thread::spawn(move || {
             let models = st.ctx.paths.models();
             let _ = std::fs::create_dir_all(&models);
-            finish_load(&st, E5Embedder::load(&models).map(|e| Arc::new(e) as _));
+            load_model(&st, || E5Embedder::load(&models).map(|e| Arc::new(e) as _));
         });
     }
     let st = state.clone();
@@ -197,6 +195,14 @@ fn scheduler(st: &State) {
     }
 }
 
+/// Runs `load` and finishes loading with its result; a panic counts as a failed load so
+/// `loading` is always cleared.
+fn load_model(st: &State, load: impl FnOnce() -> Result<Arc<dyn Embedder>>) {
+    let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(load))
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("model load panicked")));
+    finish_load(st, loaded);
+}
+
 /// Installs a loaded model (and requests a sync to embed the backlog) or logs the failure.
 /// Either way loading is over: touch, then clear `loading`.
 fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
@@ -206,7 +212,7 @@ fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
             st.request_sync();
         }
         Err(e) => {
-            st.load_failed.store(true, Ordering::SeqCst);
+            st.ctx.load_failed.store(true, Ordering::SeqCst);
             log_line(&st.ctx.paths, &format!("model load failed: {e:#}"));
         }
     }
@@ -272,6 +278,7 @@ mod tests {
         let st = State::new(Ctx {
             paths: Paths::new(t.path().join("data")),
             embedder: Arc::new(RwLock::new(None)),
+            load_failed: AtomicBool::new(false),
         });
         (t, st)
     }
@@ -285,6 +292,15 @@ mod tests {
         finish_load(&st, Err(anyhow::anyhow!("offline")));
         assert!(!st.busy(), "failed load must release busy");
         assert!(st.ctx.embedder.read().unwrap().is_none());
+    }
+
+    #[test]
+    fn panicking_load_counts_as_failed() {
+        let (_t, st) = state();
+        st.loading.store(true, Ordering::SeqCst);
+        load_model(&st, || panic!("synthetic load panic"));
+        assert!(!st.loading.load(Ordering::SeqCst));
+        assert_eq!(st.status_json()["model"], "failed");
     }
 
     #[test]

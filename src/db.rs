@@ -92,7 +92,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     register_vec();
     let mut c = Connection::open(path)?;
     c.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
+        "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
     )?;
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
@@ -295,6 +295,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let c = open(&dir.path().join("episodic.db")).unwrap();
         (dir, c)
+    }
+
+    #[test]
+    fn open_waits_for_a_locked_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("episodic.db");
+        let holder = Connection::open(&p).unwrap();
+        holder
+            .execute_batch("CREATE TABLE t(x); BEGIN EXCLUSIVE; INSERT INTO t VALUES (1);")
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            holder.execute_batch("COMMIT").unwrap();
+        });
+        open(&p).expect("open must wait out the lock, not fail with SQLITE_BUSY");
+        release.join().unwrap();
     }
 
     #[test]
