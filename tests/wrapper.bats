@@ -102,8 +102,25 @@ make_release() { # target [corrupt]
   grep -q "releases/download/v$VER/episodic-memory-v$VER-aarch64-unknown-linux-gnu.tar.gz" "$CURL_LOG"
   # every download is bounded
   [ "$(grep -c -- '--connect-timeout 10 --max-time 300' "$CURL_ARGS")" -eq 2 ]
-  # temp dirs cleaned up
-  [ -z "$(ls -A "$EPISODIC_MEMORY_DIR/bin" | grep '^\.install\.[A-Za-z0-9]' || true)" ]
+  # temp extraction dirs (mktemp .install.XXXXXX) cleaned up; the flock lock
+  # file .install.lock may remain, the mkdir lock dir .install.lock.d must not
+  [ -z "$(ls -A "$EPISODIC_MEMORY_DIR/bin" | grep -E '^\.install\.[A-Za-z0-9]{6}$' || true)" ]
+  [ ! -e "$EPISODIC_MEMORY_DIR/bin/.install.lock.d" ]
+}
+
+@test "downloads and installs via the flock branch (stub flock on PATH)" {
+  printf '#!/bin/sh\nexit 0\n' >"$STUBS/flock"
+  chmod +x "$STUBS/flock"
+  stub_uname Linux aarch64
+  stub_curl
+  make_release aarch64-unknown-linux-gnu
+  PATH="$STUBS:$PATH" run "$WRAPPER" mcp
+  [ "$status" -eq 0 ]
+  [ "$output" = "stub mcp" ]
+  [ -x "$EPISODIC_MEMORY_DIR/bin/episodic-memory-v$VER" ]
+  [ -e "$EPISODIC_MEMORY_DIR/bin/.install.lock" ]
+  [ ! -e "$EPISODIC_MEMORY_DIR/bin/.install.lock.d" ]
+  [ -z "$(ls -A "$EPISODIC_MEMORY_DIR/bin" | grep -E '^\.install\.[A-Za-z0-9]{6}$' || true)" ]
 }
 
 @test "sha256 mismatch: nothing installed, mcp exits 1" {
