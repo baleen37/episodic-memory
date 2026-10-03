@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod db;
 mod log;
 mod paths;
+mod terms;
 
 #[derive(Parser)]
 #[command(name = "episodic-memory", version)]
