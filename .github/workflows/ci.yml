@@ -13,51 +13,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          bun-version: latest
+          components: rustfmt, clippy
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Type check
-        run: bun run typecheck
+      - name: Format
+        run: cargo fmt --check
 
-      - name: Runtime compatibility
-        run: bun run compat:check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
-      # Adds sqlite-vec-linux-x64 to package.json — must run AFTER compat:check,
-      # which asserts the root package.json matches the plugin manifests.
-      - name: Install native sqlite-vec for Linux
-        run: bun add -d sqlite-vec-linux-x64 --ignore-scripts
+      - name: Test
+        run: cargo test
 
-      - name: Build
-        run: bun run build
-
-      - name: Run tests
-        run: bun test --jobs=1
-
-  e2e:
+  embed:
     needs: build
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
         with:
-          bun-version: latest
+          path: ${{ runner.temp }}/fastembed-cache
+          key: fastembed-multilingual-e5-small-v1
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
-
-      - name: Install native sqlite-vec for Linux
-        run: bun add -d sqlite-vec-linux-x64 --ignore-scripts
-
-      - name: Build
-        run: bun run build
-
-      - name: Runtime compatibility e2e
-        run: bun test src/e2e/
+      - name: Embedding tests
+        env:
+          FASTEMBED_CACHE_DIR: ${{ runner.temp }}/fastembed-cache
+        run: cargo test -- --ignored

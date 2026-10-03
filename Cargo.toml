@@ -1,0 +1,27 @@
+[package]
+name = "episodic-memory"
+version = "3.2.0"
+edition = "2021"
+description = "Persistent conversation memory for Claude Code and Codex"
+
+[[bin]]
+name = "episodic-memory"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "*", features = ["bundled"] }
+sqlite-vec = "0.1.9"
+fastembed = "7.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
+chrono = "0.4"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+strip = true
