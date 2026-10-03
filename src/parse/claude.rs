@@ -10,11 +10,13 @@ use std::path::Path;
 struct Exclusions;
 
 impl Exclusions {
-    const TEXT_PREFIXES: [&'static str; 4] = [
+    const TEXT_PREFIXES: [&'static str; 6] = [
         "[Request interrupted by user",
         "<local-command-",
         "<bash-stdout>",
         "<bash-stderr>",
+        "<teammate-message",
+        "Another Claude session sent a message:",
     ];
 
     fn excludes(v: &Value, text: &str) -> bool {
@@ -119,20 +121,29 @@ pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<Pa
         let Some(blocks) = v["message"]["content"].as_array() else {
             continue;
         };
+        let push_text = |c: &mut ParsedExchange, t: &str| {
+            if !c.assistant_message.is_empty() {
+                c.assistant_message.push_str("\n\n");
+            }
+            c.assistant_message.push_str(t);
+        };
         for b in blocks {
             match b["type"].as_str() {
                 Some("text") => {
                     if let Some(t) = b["text"].as_str() {
-                        if !c.assistant_message.is_empty() {
-                            c.assistant_message.push_str("\n\n");
-                        }
-                        c.assistant_message.push_str(t);
+                        push_text(c, t);
                     }
                 }
                 Some("tool_use") => {
                     if let Some(name) = b["name"].as_str() {
                         if !c.tool_names.iter().any(|t| t == name) {
                             c.tool_names.push(name.to_string());
+                        }
+                        // A subagent's final report arrives as this tool's input, not as text.
+                        if name == "SubagentHandback" {
+                            if let Some(t) = b["input"]["message"].as_str() {
+                                push_text(c, t);
+                            }
                         }
                     }
                 }
@@ -247,9 +258,20 @@ mod tests {
         assert_eq!(out.exchanges[0].user_message, "Real one");
         assert_eq!(
             (out.exchanges[0].line_start, out.exchanges[0].line_end),
-            (2, 10)
+            (2, 12)
         );
-        assert_eq!(out.exchanges[1].line_start, 11);
+        assert_eq!(out.exchanges[0].assistant_message, "ok\n\ndone");
+        assert_eq!(out.exchanges[1].line_start, 13);
+    }
+
+    #[test]
+    fn subagent_handback_is_assistant_text() {
+        let out = parse(SUB, 1);
+        assert_eq!(out.exchanges.len(), 1);
+        let e = &out.exchanges[0];
+        assert_eq!(e.assistant_message, "Found it.\n\nSynthetic final report.");
+        assert_eq!(e.tool_names, vec!["SubagentHandback"]);
+        assert_eq!((e.line_start, e.line_end), (1, 3));
     }
 
     #[test]

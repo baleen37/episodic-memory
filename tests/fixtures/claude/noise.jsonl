@@ -8,5 +8,7 @@
 {"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:07.000Z","message":{"role":"user","content":"truncated
 {"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:08.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t9","content":"<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>"}]}}
 {"type":"assistant","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:09.100Z","message":{"role":"user","content":"<teammate-message teammate_id=\"t1\">synthetic note</teammate-message>"}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:09.200Z","message":{"role":"user","content":"Another Claude session sent a message:\n<note>synthetic</note>"}}
 {"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:10.000Z","message":{"role":"user","content":"Second real"}}
 {"type":"assistant","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:11.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok2"}]}}

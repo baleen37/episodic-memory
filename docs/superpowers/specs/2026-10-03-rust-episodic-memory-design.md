@@ -138,15 +138,15 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 |---|---|---|
 | 세션 정보 | 줄의 `sessionId`, `cwd`, `timestamp` | **첫 번째** `session_meta`의 `payload.id`, `payload.cwd`. fork된 rollout의 두 번째 `session_meta`(부모)는 무시 |
 | exchange 시작 메시지 | `type=user`이고 `tool_result`가 아닌 항목 중 제외 대상이 아닌 것 | 1순위: `event_msg`의 `item_completed`에서 `item.type=UserMessage`. 이 이벤트가 없는 옛 rollout은 `event_msg`의 `user_message`, 그것도 없으면 `response_item`의 `message`, `role=user` 중 제외 대상이 아닌 것 |
-| 제외 대상 | `isMeta=true`, `isCompactSummary=true`, `origin.kind`가 있고 `human`이 아님(task-notification, peer 등. 값이 없으면 제외하지 않는다), 내용이 `[Request interrupted by user`, `<local-command-`, `<bash-stdout>`, `<bash-stderr>`로 시작 | (fallback일 때만) `# AGENTS.md instructions`, `<environment_context>`, `<codex_internal_context>`, `<user_instructions>`, `<recommended_plugins>`, `<skill>`로 시작 |
+| 제외 대상 | `isMeta=true`, `isCompactSummary=true`, `origin.kind`가 있고 `human`이 아님(task-notification, peer 등. 값이 없으면 제외하지 않는다), 내용이 `[Request interrupted by user`, `<local-command-`, `<bash-stdout>`, `<bash-stderr>`, `<teammate-message`, `Another Claude session sent a message:`로 시작 | (fallback일 때만) `# AGENTS.md instructions`, `<environment_context>`, `<codex_internal_context>`, `<user_instructions>`, `<recommended_plugins>`, `<skill>`로 시작 |
 | 서브에이전트 시작 메시지 | (위와 같음. 서브에이전트 첫 프롬프트는 `origin`이 없다) | `source.subagent`가 있는 파일은 자기 `agent_path` 앞으로 온 `response_item`의 `agent_message`에서 시작한다. 그보다 앞의 `role=user` 항목(부모에게서 물려받은 맥락)은 무시한다 |
-| 답변 | `type=assistant`의 `text` 블록 | `response_item`의 `message`, `role=assistant` |
+| 답변 | `type=assistant`의 `text` 블록, 그리고 `SubagentHandback` `tool_use`의 `input.message`(서브에이전트 최종 보고) | `response_item`의 `message`, `role=assistant` |
 | 도구 | `tool_use` ↔ 다음 user의 `tool_result`(`tool_use_id`로 짝) | `function_call`·`custom_tool_call`·`local_shell_call` ↔ 각 `*_output`(`call_id`로 짝) |
 | sidechain | `isSidechain=true` 또는 경로가 `subagents/` 아래 | `session_meta.payload.source.subagent`가 있음 |
 
 제외 규칙은 코드의 상수 한 곳에 두고, 실제 transcript 픽스처로 테스트한다.
 
-**project**: `files.cwd`로 `git -C <cwd> rev-parse --git-common-dir`을 실행해 그 상위 디렉터리 이름을 쓴다. 실패하거나 디렉터리가 없으면 `cwd`의 basename. `cwd`가 없으면 `unknown`. 파일당 한 번만 계산한다.
+**project**: `files.cwd`로 `git -C <cwd> rev-parse --git-common-dir`을 실행해 그 상위 디렉터리 이름을 쓴다. 실패하거나 디렉터리가 없으면 `cwd`의 basename. `cwd`가 없으면 `unknown`. 파일당 한 번 계산하되, `cwd`를 아직 못 읽었으면(파일 머리가 `mode`·`last-prompt` 같은 cwd 없는 줄뿐이면) 다음 sync에서 세션 정보를 다시 읽고 다시 계산한다.
 
 **기존 아카이브 들여오기** (데몬 첫 기동 때 자동, 그리고 1번의 새 원본 등록 때)
 - 아카이브 디렉터리는 `claude-code-projects`, `claude-code-transcripts`, `codex-sessions`만 본다. 레거시 `claude-projects/`는 무시한다(실측상 모든 파일이 `claude-code-projects/`에 같은 상대경로로 있다). 이전 세대 파일(`*.gen-*.jsonl`)도 들여오지 않는다.
