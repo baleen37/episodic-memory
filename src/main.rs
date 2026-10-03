@@ -1,9 +1,12 @@
 use clap::{Parser, Subcommand};
 
+mod archive;
 mod db;
 mod log;
 mod parse;
 mod paths;
+mod project;
+mod sync;
 mod terms;
 
 #[derive(Parser)]
