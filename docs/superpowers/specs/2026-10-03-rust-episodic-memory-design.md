@@ -69,7 +69,6 @@ exchanges(id INTEGER PRIMARY KEY,
           archive_path TEXT NOT NULL,
           line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
           session_id TEXT,
-          git_branch TEXT,                 -- 2단계 필터용. 1단계부터 채운다
           project TEXT NOT NULL,
           harness TEXT NOT NULL,           -- claude | codex
           is_sidechain INTEGER NOT NULL DEFAULT 0,
@@ -88,11 +87,9 @@ tool_calls(id INTEGER PRIMARY KEY,
 
 CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   embedding float[384],
-  project TEXT, ts INTEGER, is_sidechain INTEGER,
-  session_id TEXT, git_branch TEXT);   -- rowid = exchanges.id. 마지막 두 컬럼은 2단계 필터용
+  project TEXT, ts INTEGER, is_sidechain INTEGER);   -- rowid = exchanges.id
 ```
 
-- vec0는 나중에 메타데이터 컬럼을 추가할 수 없으므로 2단계 필터 컬럼(`session_id`, `git_branch`)도 1단계부터 넣고 채운다.
 
 - `PRAGMA foreign_keys=ON`. vec0는 FK를 지원하지 않으므로 exchange를 지울 때 같은 트랜잭션에서 `vec_exchanges` 행도 지운다.
 - 스키마 버전은 `PRAGMA user_version`. 마이그레이션은 추가만 한다.
@@ -121,8 +118,8 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
 **exchange 경계**
 - 사용자가 입력한 메시지(도구 결과가 아닌 user 항목)에서 시작해, 다음 사용자 메시지 직전에서 끝난다.
 - 사이의 답변 텍스트는 `assistant_message`에, 도구 호출과 결과는 `tool_calls`에 넣는다.
-- Claude: `isSidechain`이 참이거나 경로가 `subagents/` 아래면 `is_sidechain=1`. `sessionId`, `cwd`, `gitBranch`, `timestamp`를 줄에서 읽는다.
-- Codex: rollout의 `session_meta`에서 세션 id, `cwd`, git branch를 읽고, `response_item`의 user/assistant 메시지와 함수 호출·결과(`local_shell_call_output` 포함)를 짝짓는다.
+- Claude: `isSidechain`이 참이거나 경로가 `subagents/` 아래면 `is_sidechain=1`. `sessionId`, `cwd`, `timestamp`를 줄에서 읽는다.
+- Codex: rollout의 `session_meta`에서 세션 id와 `cwd`를 읽고, `response_item`의 user/assistant 메시지와 함수 호출·결과(`local_shell_call_output` 포함)를 짝짓는다.
 - 파싱할 수 없는 줄은 건너뛰고 로그를 남긴다.
 
 **project**: 파일에서 처음 나온 `cwd`로 `git -C <cwd> rev-parse --git-common-dir`을 실행해 그 상위 디렉터리 이름을 쓴다. 실패하거나 디렉터리가 없으면 `cwd`의 basename. `cwd`가 없으면 `unknown`.
@@ -216,7 +213,7 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
 
 ## 10. 2단계
 
-1단계 E2E가 통과한 뒤 진행한다. 세 항목은 서로 독립이라 순서를 바꿔도 된다.
+1단계 E2E가 통과한 뒤 진행한다. 두 항목은 서로 독립이라 순서를 바꿔도 된다.
 
 ### 10.1 FTS5 + lindera + RRF
 
@@ -263,10 +260,3 @@ ALTER TABLE exchanges ADD COLUMN fts_indexed INTEGER NOT NULL DEFAULT 0;
 - 데몬 상태는 새 연결 종류 `{"client":"status"}`로 받는다. 데몬은 JSON 한 줄을 돌려주고 연결을 닫는다. 데몬이 없으면 `warn`(띄우지 않는다).
 - 마지막 sync 시각과 에러는 데몬이 DB의 `meta(key TEXT PRIMARY KEY, value TEXT)` 테이블에 남긴다.
 - 스킬 `doctor`를 다시 만든다: 검색이 비거나 업그레이드 직후 `doctor`를 실행하고 결과를 해석하라는 내용.
-
-### 10.3 `session_id`, `git_branch` 검색 필터
-
-- `search` 입력에 `session_id`, `git_branch`(둘 다 정확히 일치, 선택)를 추가한다.
-- 컬럼은 1단계부터 `exchanges`와 `vec_exchanges`에 채워져 있으므로(§4) 스키마 변경이 없다. 벡터는 KNN 메타데이터 조건으로, 텍스트(LIKE 또는 FTS)는 `exchanges` WHERE로 건다.
-- 출력에 `session_id`를 추가해, 찾은 세션으로 다시 좁혀 검색할 수 있게 한다.
-- 테스트: 필터별 결과가 해당 값만 포함하는지, 필터와 `project`·날짜 조합.
