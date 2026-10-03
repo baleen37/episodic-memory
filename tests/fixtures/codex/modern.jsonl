@@ -1,0 +1,16 @@
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"session_meta","payload":{"id":"codex-modern","cwd":"/work/demo","source":"cli"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work/demo"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"Q1 how do I list files?","text_elements":[]}]}}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Q1 how do I list files?"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":[]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"exec","input":"ls"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":"a b"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Use ls."}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u2","content":[{"type":"text","text":"Q2 show the config","text_elements":[]}]}}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Q2 show the config"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c2","name":"apply_patch","input":"x"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c2","output":"ok"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c3","name":"exec","input":"cat cfg"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c3","output":"cfg"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Looking."}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here it is."}]}}

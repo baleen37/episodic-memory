@@ -1,8 +1,6 @@
-use super::{FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX};
+use super::{read_file_lines, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX};
 use anyhow::Result;
 use serde_json::Value;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 /// User messages that never start (and never break) an exchange.
@@ -28,35 +26,6 @@ impl Exclusions {
         let t = text.trim_start();
         Self::TEXT_PREFIXES.iter().any(|p| t.starts_with(p))
     }
-}
-
-type Line = (i64, Option<Value>);
-
-/// Yields (1-based line number, parsed JSON or None when the line is bad). Blank lines are skipped.
-/// I/O errors are yielded as `Err`; invalid UTF-8 or JSON is a bad line, not an error.
-fn read_lines<R: BufRead>(mut reader: R) -> impl Iterator<Item = Result<Line>> {
-    let mut n = 0i64;
-    let mut buf = Vec::new();
-    std::iter::from_fn(move || loop {
-        buf.clear();
-        match reader.read_until(b'\n', &mut buf) {
-            Ok(0) => return None,
-            Err(e) => return Some(Err(e.into())),
-            Ok(_) => {
-                n += 1;
-                let parsed = std::str::from_utf8(&buf).ok().map(str::trim);
-                if parsed == Some("") {
-                    continue;
-                }
-                let v = parsed.and_then(|s| serde_json::from_str::<Value>(s).ok());
-                return Some(Ok((n, v)));
-            }
-        }
-    })
-}
-
-fn read_file_lines(path: &Path) -> Result<impl Iterator<Item = Result<Line>>> {
-    Ok(read_lines(BufReader::new(File::open(path)?)))
 }
 
 /// Text of a user start message, or None when the line cannot start an exchange.
@@ -127,10 +96,7 @@ pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<Pa
             if !Exclusions::excludes(&v, &text) {
                 out.exchanges.extend(cur.take());
                 out.do_not_index |= text.contains(DO_NOT_INDEX);
-                let ts = v["timestamp"]
-                    .as_str()
-                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                    .map_or(0, |d| d.timestamp_millis());
+                let ts = ts_ms(&v);
                 cur = Some(ParsedExchange {
                     line_start: n,
                     line_end: n,
@@ -178,7 +144,9 @@ pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::read_lines;
     use crate::paths::SourceKind;
+    use std::io::BufReader;
 
     const K: SourceKind = SourceKind::ClaudeCodeProjects;
     const MAIN: &str = concat!(
