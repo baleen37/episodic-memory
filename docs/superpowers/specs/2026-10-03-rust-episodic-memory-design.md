@@ -6,6 +6,7 @@
 - 플러그인 이름, 데이터 디렉터리, 아카이브는 그대로 쓴다. 새 버전은 4.0.0(breaking)이다.
 - episodic 축만 다룬다. 지난 세션의 대화를 exchange 단위로 남기고 검색한다. LLM 추출·요약, semantic memory는 없다.
 - **성공 기준**: 세션 1에서 한 작업을 세션 2(Claude Code 또는 Codex)에서 `search`로 찾고, `read`로 원문을 읽을 수 있다.
+- **단계**: 1단계는 §3~§9(4.0.0 릴리스). 2단계는 §10(1단계 E2E 통과 후, 4.x 마이너 릴리스).
 
 ## 2. 참고와 결정
 
@@ -68,6 +69,7 @@ exchanges(id INTEGER PRIMARY KEY,
           archive_path TEXT NOT NULL,
           line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
           session_id TEXT,
+          git_branch TEXT,                 -- 2단계 필터용. 1단계부터 채운다
           project TEXT NOT NULL,
           harness TEXT NOT NULL,           -- claude | codex
           is_sidechain INTEGER NOT NULL DEFAULT 0,
@@ -86,8 +88,11 @@ tool_calls(id INTEGER PRIMARY KEY,
 
 CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   embedding float[384],
-  project TEXT, ts INTEGER, is_sidechain INTEGER);   -- rowid = exchanges.id
+  project TEXT, ts INTEGER, is_sidechain INTEGER,
+  session_id TEXT, git_branch TEXT);   -- rowid = exchanges.id. 마지막 두 컬럼은 2단계 필터용
 ```
+
+- vec0는 나중에 메타데이터 컬럼을 추가할 수 없으므로 2단계 필터 컬럼(`session_id`, `git_branch`)도 1단계부터 넣고 채운다.
 
 - `PRAGMA foreign_keys=ON`. vec0는 FK를 지원하지 않으므로 exchange를 지울 때 같은 트랜잭션에서 `vec_exchanges` 행도 지운다.
 - 스키마 버전은 `PRAGMA user_version`. 마이그레이션은 추가만 한다.
@@ -116,8 +121,8 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
 **exchange 경계**
 - 사용자가 입력한 메시지(도구 결과가 아닌 user 항목)에서 시작해, 다음 사용자 메시지 직전에서 끝난다.
 - 사이의 답변 텍스트는 `assistant_message`에, 도구 호출과 결과는 `tool_calls`에 넣는다.
-- Claude: `isSidechain`이 참이거나 경로가 `subagents/` 아래면 `is_sidechain=1`. `sessionId`, `cwd`, `timestamp`를 줄에서 읽는다.
-- Codex: rollout의 `session_meta`에서 세션 id와 `cwd`를 읽고, `response_item`의 user/assistant 메시지와 함수 호출·결과(`local_shell_call_output` 포함)를 짝짓는다.
+- Claude: `isSidechain`이 참이거나 경로가 `subagents/` 아래면 `is_sidechain=1`. `sessionId`, `cwd`, `gitBranch`, `timestamp`를 줄에서 읽는다.
+- Codex: rollout의 `session_meta`에서 세션 id, `cwd`, git branch를 읽고, `response_item`의 user/assistant 메시지와 함수 호출·결과(`local_shell_call_output` 포함)를 짝짓는다.
 - 파싱할 수 없는 줄은 건너뛰고 로그를 남긴다.
 
 **project**: 파일에서 처음 나온 `cwd`로 `git -C <cwd> rev-parse --git-common-dir`을 실행해 그 상위 디렉터리 이름을 쓴다. 실패하거나 디렉터리가 없으면 `cwd`의 basename. `cwd`가 없으면 `unknown`.
@@ -209,8 +214,59 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
 
 **배포 검증**: 4.0.0 Release 후 `EPISODIC_MEMORY_BIN` 없이 래퍼를 실행해 다운로드 → 체크섬 검증 → 실행까지 되는지 확인한다.
 
-## 10. 나중에 할 것
+## 10. 2단계
 
-- 텍스트 검색을 FTS5 + lindera(ko-dic) 형태소 분석 + BM25로 바꾸고, 벡터와 가중 RRF(K=60, BM25 0.4 / 벡터 0.6, agentmemory `hybrid-search.ts`)로 합친다.
-- `doctor` 진단 명령.
-- `session_id`, `git_branch` 검색 필터.
+1단계 E2E가 통과한 뒤 진행한다. 세 항목은 서로 독립이라 순서를 바꿔도 된다.
+
+### 10.1 FTS5 + lindera + RRF
+
+`LIKE` 텍스트 검색을 형태소 분석 BM25로 바꾸고, 벡터와 가중 RRF로 합친다.
+
+**스키마 추가**
+```sql
+CREATE VIRTUAL TABLE fts_exchanges USING fts5(terms, content='', contentless_delete=1,
+       tokenize='porter unicode61 remove_diacritics 2');   -- rowid = exchanges.id
+ALTER TABLE exchanges ADD COLUMN fts_indexed INTEGER NOT NULL DEFAULT 0;
+```
+- **terms**: `user_message`와 `assistant_message`를 이어, 한글 구간은 lindera + ko-dic으로 형태소를 나눠 공백으로 잇고 나머지는 그대로 둔 문자열. 영어 어간은 FTS5 porter가 처리한다. 원문 대신 terms만 색인한다.
+- **색인 시점**: sync가 exchange를 넣는 같은 트랜잭션에서 terms를 계산해 넣고 `fts_indexed=1`. 모델이 필요 없다.
+- **기존 행 백필**: 마이그레이션 직후 데몬이 `fts_indexed=0`인 행을 500개씩 백그라운드로 채운다. 그동안 그 행은 `LIKE`로 찾는다.
+- **삭제**: exchange를 지우는 모든 경로에서 `fts_exchanges`의 같은 rowid도 지운다(§4의 vec0와 같은 방식).
+
+**검색** (§6의 1~3을 대체)
+1. query를 terms와 같은 방식으로 나눈다. 토큰마다 `"…"`로 감싸고(안의 `"`는 `""`) OR로 이어 `bm25()` 상위 50. 따옴표 덕분에 `C++`, `foo-bar`, `a:b`가 FTS5 문법 오류를 내지 않는다.
+2. 벡터 KNN 상위 50(§6과 같은 필터).
+3. 가중 RRF: `score = 0.4/(60+rank_bm25) + 0.6/(60+rank_vec)`(agentmemory `hybrid-search.ts:20,30-31`). 한쪽에만 있으면 그쪽 항만 더한다.
+4. sidechain은 RRF 점수에 0.9를 곱한다.
+5. 상위 `limit`개. 출력 점수는 RRF 점수를 상위 1등 기준 0~1로 나눈 값.
+- 배열 query: 개념마다 1~5를 돌려 교집합을 RRF 점수 평균으로 정렬한다.
+- 모델 준비 전: BM25 순위만 쓴다.
+- `LIKE` 검색 코드는 백필이 끝난 다음 릴리스에서 지운다.
+
+**사전 측정**: `embed-ko-dic`으로 사전을 바이너리에 넣었을 때 크기 증가분. 50MB를 넘으면 모델처럼 첫 실행 때 `models/`로 받는다.
+
+**테스트**: "검색을"로 "검색"이 있는 exchange가 찾아지는지, "검색추천"으로 "추천"이 찾아지는지, 특수문자 query, RRF 계산(한쪽만 있는 경우 포함), sidechain 0.9, 백필 중 혼합 검색.
+
+### 10.2 `doctor`
+
+`episodic-memory doctor` 서브커맨드. 각 항목을 `ok` / `warn` / `fail`로 한 줄씩 출력하고, `fail`이 하나라도 있으면 exit 1.
+
+| 항목 | 확인 |
+|---|---|
+| 바이너리 | 버전, 실행 경로 |
+| 데몬 | 소켓 연결 여부, 데몬 버전, 연결된 클라이언트 수, sync 진행 여부 |
+| DB | 경로, `user_version`, files·exchanges 수, 임베딩 대기 수, FTS 대기 수, skipped 파일 수 |
+| 모델 | 다운로드·로드 여부 |
+| 원본 루트 | §5의 루트 3개 존재 여부 |
+| 최근 sync | 마지막 sync 시각, 마지막 에러(로그 마지막 줄) |
+
+- 데몬 상태는 새 연결 종류 `{"client":"status"}`로 받는다. 데몬은 JSON 한 줄을 돌려주고 연결을 닫는다. 데몬이 없으면 `warn`(띄우지 않는다).
+- 마지막 sync 시각과 에러는 데몬이 DB의 `meta(key TEXT PRIMARY KEY, value TEXT)` 테이블에 남긴다.
+- 스킬 `doctor`를 다시 만든다: 검색이 비거나 업그레이드 직후 `doctor`를 실행하고 결과를 해석하라는 내용.
+
+### 10.3 `session_id`, `git_branch` 검색 필터
+
+- `search` 입력에 `session_id`, `git_branch`(둘 다 정확히 일치, 선택)를 추가한다.
+- 컬럼은 1단계부터 `exchanges`와 `vec_exchanges`에 채워져 있으므로(§4) 스키마 변경이 없다. 벡터는 KNN 메타데이터 조건으로, 텍스트(LIKE 또는 FTS)는 `exchanges` WHERE로 건다.
+- 출력에 `session_id`를 추가해, 찾은 세션으로 다시 좁혀 검색할 수 있게 한다.
+- 테스트: 필터별 결과가 해당 값만 포함하는지, 필터와 `project`·날짜 조합.
