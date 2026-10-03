@@ -1,8 +1,14 @@
 #![allow(dead_code)] // not yet used by main; wired in later tasks
 
 use crate::archive::{append_tail, archive_path_for, tails_match};
-use crate::db::{delete_exchanges_from, get_file, upsert_file, FileRow};
+use crate::db::{
+    delete_exchanges_from, get_file, insert_exchange, upsert_file, FileRow, NewExchange,
+};
+use crate::log::log_line;
+use crate::parse::{parse_from, read_meta, FileMeta};
 use crate::paths::{Paths, SourceKind};
+use crate::project::resolve_project;
+use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
 use std::fs;
@@ -24,9 +30,92 @@ pub enum FileOutcome {
     Skipped,
 }
 
-/// Spec §5 steps 6–9. Placeholder until Task 8: indexes nothing.
-pub fn index_file(_tx: &Transaction, _row: &mut FileRow, _kind: SourceKind) -> Result<usize> {
-    Ok(0)
+/// Exchanges larger than this (either message, UTF-8 bytes) are not indexed (obra#139).
+const MAX_MESSAGE_BYTES: usize = 262_144;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct IndexStats {
+    inserted: usize,
+    oversize: usize,
+    bad_lines: usize,
+}
+
+/// Spec §5 steps 6–9. Returns the number of exchanges inserted.
+pub fn index_file(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Result<usize> {
+    Ok(index_file_stats(tx, row, kind)?.inserted)
+}
+
+fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Result<IndexStats> {
+    let mut stats = IndexStats::default();
+    if row.skipped {
+        return Ok(stats);
+    }
+    let archive = PathBuf::from(&row.archive_path);
+
+    // Session info is read once per file (first parse of a non-empty archive) and persisted.
+    // Codex subagent parsing needs `agent_path`, which `files` does not store, so Codex
+    // re-reads the head on every call; Claude reuses the persisted values. The archive path
+    // keeps the source's relative path, so "subagents" detection works on it directly.
+    let first_parse = row.harness.is_none() && row.offset > 0;
+    let fresh = if first_parse || kind == SourceKind::CodexSessions {
+        Some(read_meta(kind, &archive, &row.archive_path)?)
+    } else {
+        None
+    };
+    if first_parse {
+        let m = fresh.as_ref().expect("read above");
+        row.session_id = m.session_id.clone();
+        row.cwd = m.cwd.clone();
+        row.is_sidechain = Some(m.is_sidechain);
+        row.user_signal = m.user_signal.clone();
+        row.harness = Some(kind.harness().to_string());
+        row.project = Some(resolve_project(m.cwd.as_deref()));
+    }
+    let meta = fresh.unwrap_or_else(|| FileMeta {
+        session_id: row.session_id.clone(),
+        cwd: row.cwd.clone(),
+        is_sidechain: row.is_sidechain.unwrap_or(false),
+        agent_path: None,
+        user_signal: row.user_signal.clone(),
+    });
+
+    delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
+    let out = parse_from(kind, &archive, row.reparse_line, &meta)?;
+    stats.bad_lines = out.bad_lines;
+    if out.do_not_index {
+        row.skipped = true;
+        delete_exchanges_from(tx, &row.archive_path, 1)?;
+        return Ok(stats);
+    }
+
+    let project = row.project.clone().unwrap_or_else(|| "unknown".into());
+    for e in &out.exchanges {
+        if e.user_message.len() > MAX_MESSAGE_BYTES || e.assistant_message.len() > MAX_MESSAGE_BYTES
+        {
+            stats.oversize += 1;
+            continue;
+        }
+        let terms = to_terms(&format!("{}\n{}", e.user_message, e.assistant_message));
+        let new = NewExchange {
+            archive_path: row.archive_path.clone(),
+            line_start: e.line_start,
+            line_end: e.line_end,
+            session_id: row.session_id.clone(),
+            project: project.clone(),
+            harness: kind.harness().to_string(),
+            is_sidechain: row.is_sidechain.unwrap_or(false),
+            ts: e.ts,
+            user_message: e.user_message.clone(),
+            assistant_message: e.assistant_message.clone(),
+            tool_names: e.tool_names.join(","),
+        };
+        insert_exchange(tx, &new, &terms)?;
+        stats.inserted += 1;
+    }
+    if let Some(last) = out.exchanges.last() {
+        row.reparse_line = last.line_start;
+    }
+    Ok(stats)
 }
 
 fn path_str(p: &Path) -> String {
@@ -149,6 +238,7 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
         reconcile_archive(&row)?;
     }
 
+    let old_offset = row.offset;
     let new_offset = append_tail(
         &f.source_path,
         Path::new(&row.archive_path),
@@ -157,9 +247,24 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
 
     let tx = conn.transaction()?;
     row.offset = new_offset as i64;
-    let new_exchanges = index_file(&tx, &mut row, f.kind)?;
+    // Nothing new to parse unless the append moved the offset or the first parse is pending.
+    let stats = if row.offset != old_offset || row.harness.is_none() {
+        index_file_stats(&tx, &mut row, f.kind)?
+    } else {
+        IndexStats::default()
+    };
     upsert_file(&tx, &row)?;
     tx.commit()?;
+    if stats.bad_lines > 0 || stats.oversize > 0 {
+        log_line(
+            paths,
+            &format!(
+                "index {}: {} unparsable line(s), {} oversize exchange(s) skipped",
+                row.archive_path, stats.bad_lines, stats.oversize
+            ),
+        );
+    }
+    let new_exchanges = stats.inserted;
 
     Ok(if row.skipped {
         FileOutcome::Skipped
@@ -470,5 +575,147 @@ mod mirror {
         e.f.size = 999;
         assert!(sync_file(&mut e.conn, &e.paths, &e.f).is_err());
         assert_eq!(e.archive(0), lines(0..1));
+    }
+
+    // ---- Task 8: indexing ----
+
+    fn user(text: &str) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
+                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
+                "message":{"role":"user","content":text}})
+        )
+    }
+
+    fn assistant(text: &str) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"assistant","message":{"role":"assistant",
+                "content":[{"type":"text","text":text}]}})
+        )
+    }
+
+    fn turn(q: &str, a: &str) -> String {
+        user(q) + &assistant(a)
+    }
+
+    impl Env {
+        fn exchanges(&self) -> Vec<(i64, i64, String)> {
+            self.conn
+                .prepare("SELECT id, line_start, user_message FROM exchanges ORDER BY line_start")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        }
+        fn fts_hits(&self, term: &str) -> i64 {
+            self.conn
+                .query_row(
+                    "SELECT count(*) FROM fts_exchanges WHERE fts_exchanges MATCH ?",
+                    [term],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn indexes_fresh_file_and_fills_session_info() {
+        let mut e = env();
+        e.write(&(turn("alpha question", "alpha answer") + &turn("beta q", "beta a")));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
+        let row = e.row();
+        assert_eq!(row.session_id.as_deref(), Some("s1"));
+        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.project.as_deref(), Some("demo"));
+        assert_eq!(row.harness.as_deref(), Some("claude"));
+        assert_eq!(row.is_sidechain, Some(false));
+        assert_eq!(row.reparse_line, 3);
+        assert_eq!(e.exchanges().len(), 2);
+    }
+
+    #[test]
+    fn reindexes_only_last_exchange() {
+        let mut e = env();
+        e.write(&(turn("q1", "a1") + &turn("q2", "a2") + &turn("q3", "a3")));
+        e.sync();
+        let before = e.exchanges();
+        assert_eq!(before.len(), 3);
+        e.append(&turn("q4", "a4"));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
+        let after = e.exchanges();
+        assert_eq!(after.len(), 4);
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[1], before[1]);
+        assert_ne!(after[2].0, before[2].0);
+        assert_eq!(after[2].2, "q3");
+        assert_eq!(after[3].2, "q4");
+    }
+
+    #[test]
+    fn do_not_index_skips_and_purges() {
+        let mut e = env();
+        e.write(&(turn("q1", "a1") + &turn("q2", "a2")));
+        e.sync();
+        assert_eq!(e.exchanges().len(), 2);
+        e.append(&turn(crate::parse::DO_NOT_INDEX, "ok"));
+        assert_eq!(e.sync(), FileOutcome::Skipped);
+        assert_eq!(e.exchanges().len(), 0);
+        assert_eq!(e.fts_hits("q1"), 0);
+        assert!(e.row().skipped);
+        e.append(&turn("q5", "a5"));
+        assert_eq!(e.sync(), FileOutcome::Skipped);
+        assert_eq!(e.exchanges().len(), 0);
+        assert!(e.archive(0).contains("q5"));
+    }
+
+    #[test]
+    fn oversize_exchange_skipped() {
+        let mut e = env();
+        let big = "x".repeat(300 * 1024);
+        e.write(&(turn("small one", "a1") + &turn(&big, "a2") + &turn("small two", "a3")));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
+        let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
+        assert_eq!(users, vec!["small one", "small two"]);
+        let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(log.contains("1 oversize"));
+    }
+
+    #[test]
+    fn fts_row_per_exchange() {
+        let mut e = env();
+        e.write(&(turn("alpha", "one") + &turn("bravo", "two") + &turn("charlie", "three")));
+        e.sync();
+        for w in ["alpha", "bravo", "charlie"] {
+            assert_eq!(e.fts_hits(w), 1, "{w}");
+        }
+        let n: i64 = e
+            .conn
+            .query_row("SELECT count(*) FROM fts_exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 3);
+    }
+
+    #[test]
+    fn bad_line_does_not_abort() {
+        let mut e = env();
+        e.write(&(turn("q1", "a1") + "{not json\n" + &turn("q2", "a2")));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
+        assert_eq!(e.exchanges().len(), 2);
+        let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(log.contains("1 unparsable"));
+    }
+
+    #[test]
+    fn incomplete_tail_does_not_reparse() {
+        let mut e = env();
+        e.write(&turn("q1", "a1"));
+        e.sync();
+        let before = e.exchanges();
+        e.append("{\"type\":\"user\",\"mess");
+        e.sync();
+        assert_eq!(e.exchanges(), before);
     }
 }
