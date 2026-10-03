@@ -53,17 +53,19 @@ fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Re
     }
     let archive = PathBuf::from(&row.archive_path);
 
-    // Session info is read once per file (first parse of a non-empty archive) and persisted.
-    // Codex subagent parsing needs `agent_path`, which `files` does not store, so Codex
-    // re-reads the head on every call; Claude reuses the persisted values. The archive path
-    // keeps the source's relative path, so "subagents" detection works on it directly.
-    let first_parse = row.harness.is_none() && row.offset > 0;
-    let fresh = if first_parse || kind == SourceKind::CodexSessions {
+    // Session info is read on the first parse of a non-empty archive and persisted. Claude
+    // transcripts often open with lines lacking `cwd` (`mode`, `last-prompt`, ...), so it is
+    // re-read (and the project recomputed) until a `cwd` is known. Codex subagent parsing needs
+    // `agent_path`, which `files` does not store, so Codex re-reads the head on every call;
+    // Claude otherwise reuses the persisted values. The archive path keeps the source's
+    // relative path, so "subagents" detection works on it directly.
+    let read_session = row.offset > 0 && (row.harness.is_none() || row.cwd.is_none());
+    let fresh = if read_session || kind == SourceKind::CodexSessions {
         Some(read_meta(kind, &archive, &row.archive_path)?)
     } else {
         None
     };
-    if first_parse {
+    if read_session {
         let m = fresh.as_ref().expect("read above");
         row.session_id = m.session_id.clone();
         row.cwd = m.cwd.clone();
@@ -877,6 +879,26 @@ mod mirror {
         assert_eq!(row.is_sidechain, Some(false));
         assert_eq!(row.reparse_line, 3);
         assert_eq!(e.exchanges().len(), 2);
+    }
+
+    #[test]
+    fn session_info_reread_until_cwd_known() {
+        let mut e = env();
+        e.write("{\"type\":\"mode\",\"mode\":\"default\",\"sessionId\":\"s1\"}\n");
+        e.sync();
+        let row = e.row();
+        assert!(row.cwd.is_none());
+        assert_eq!(row.project.as_deref(), Some("unknown"));
+        e.append(&turn("q1", "a1"));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
+        let row = e.row();
+        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.project.as_deref(), Some("demo"));
+        let project: String = e
+            .conn
+            .query_row("SELECT project FROM exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(project, "demo");
     }
 
     #[test]
