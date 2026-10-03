@@ -193,7 +193,7 @@ fn counts(c: &Connection) -> rusqlite::Result<Counts> {
 }
 
 /// The DB check plus the checks that read from it. Never creates the DB.
-fn db_checks(paths: &Paths) -> Vec<Check> {
+fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
     let db = paths.db();
     if !db.exists() {
         return vec![
@@ -205,13 +205,23 @@ fn db_checks(paths: &Paths) -> Vec<Check> {
             sync_check(None, None),
         ];
     }
-    let opened = open_readonly(&db).map_err(|e| e.to_string()).and_then(|c| {
-        let n = counts(&c).map_err(|e| e.to_string())?;
-        Ok((c, n))
-    });
-    match opened {
-        Err(e) => vec![check("db", Level::Fail, format!("{}: {e}", db.display()))],
-        Ok((c, n)) => vec![
+    // immutable is unsafe against a concurrent writer; without a daemon nobody writes.
+    let c = match open_readonly(&db, !daemon_up) {
+        Ok(c) => c,
+        Err(e) => {
+            return vec![check("db", Level::Fail, format!("{}: {e}", db.display()))];
+        }
+    };
+    let sync = sync_check(
+        meta_get(&c, "last_sync").as_deref(),
+        meta_get(&c, "last_error").as_deref(),
+    );
+    match counts(&c) {
+        Err(e) => vec![
+            check("db", Level::Fail, format!("{}: {e}", db.display())),
+            sync,
+        ],
+        Ok(n) => vec![
             check(
                 "db",
                 Level::Ok,
@@ -225,10 +235,7 @@ fn db_checks(paths: &Paths) -> Vec<Check> {
                 ),
             ),
             pending_check(n.pending),
-            sync_check(
-                meta_get(&c, "last_sync").as_deref(),
-                meta_get(&c, "last_error").as_deref(),
-            ),
+            sync,
         ],
     }
 }
@@ -250,7 +257,7 @@ pub fn run_checks(paths: &Paths) -> Vec<Check> {
         ),
         daemon_check(status.as_ref()),
     ];
-    out.extend(db_checks(paths));
+    out.extend(db_checks(paths, status.is_some()));
     out.push(model_check(status.as_ref()));
     out.push(roots_check(&roots));
     out
@@ -339,10 +346,39 @@ mod tests {
     fn missing_db_warns_and_is_not_created() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().join("data"));
-        let checks = db_checks(&paths);
+        let checks = db_checks(&paths, false);
         assert_eq!(checks[0].level, Level::Warn);
         assert!(!paths.db().exists());
         assert!(!paths.data.exists());
+    }
+
+    #[test]
+    fn no_daemon_doctor_leaves_the_data_dir_untouched() {
+        let t = tempfile::tempdir().unwrap();
+        let paths = Paths::new(t.path().to_path_buf());
+        {
+            let c = crate::db::open(&paths.db()).unwrap();
+            c.execute(
+                "INSERT INTO files(source_path, source_kind, archive_path) VALUES ('a','b','c')",
+                [],
+            )
+            .unwrap();
+            crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();
+        }
+        let listing = || {
+            let mut v: Vec<_> = std::fs::read_dir(t.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            v.sort();
+            v
+        };
+        let before = listing();
+        let checks = db_checks(&paths, false);
+        assert_eq!(listing(), before, "doctor wrote to the data dir");
+        assert_eq!(checks[0].level, Level::Ok);
+        assert!(checks[0].detail.contains("1 files"), "{}", checks[0].detail);
+        assert_eq!(checks[2].level, Level::Ok);
     }
 
     #[test]
@@ -350,7 +386,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
         std::fs::write(paths.db(), b"not a database, just text").unwrap();
-        assert_eq!(db_checks(&paths)[0].level, Level::Fail);
+        assert_eq!(db_checks(&paths, false)[0].level, Level::Fail);
     }
 
     #[test]
@@ -362,7 +398,7 @@ mod tests {
             crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();
             crate::db::meta_set(&c, "last_error", "bad file").unwrap();
         }
-        let checks = db_checks(&paths);
+        let checks = db_checks(&paths, false);
         assert_eq!(checks[0].level, Level::Ok);
         assert!(checks[0].detail.contains("user_version 1"));
         assert_eq!(checks[1].level, Level::Ok);

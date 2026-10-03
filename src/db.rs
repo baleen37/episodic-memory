@@ -107,10 +107,26 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(c)
 }
 
-/// Opens an existing DB without creating or migrating anything.
-pub fn open_readonly(path: &Path) -> Result<Connection> {
+/// Opens an existing DB without creating or migrating anything. With `immutable` (only safe
+/// when no process is writing) SQLite touches no `-wal`/`-shm` sidecars.
+pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
     register_vec();
-    let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let c = if immutable {
+        let mut uri = String::from("file:");
+        for b in path.to_string_lossy().bytes() {
+            match b {
+                b'%' | b'?' | b'#' | b' ' => uri.push_str(&format!("%{b:02X}")),
+                _ => uri.push(b as char),
+            }
+        }
+        uri.push_str("?immutable=1");
+        Connection::open_with_flags(
+            uri,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?
+    } else {
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?
+    };
     c.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(c)
 }
