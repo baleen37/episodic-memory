@@ -14,8 +14,8 @@ reply, and tool names.
 |-----------|------|----------|---------|-------------|
 | `query` | `string \| string[]` | Yes | - | String for normal search, or 2-5 strings for strict AND search |
 | `limit` | `number` | No | `10` | Max results, from 1 to 50 |
-| `after` | `string` | No | - | Only turns on or after this date (`YYYY-MM-DD`) |
-| `before` | `string` | No | - | Only turns on or before this date (`YYYY-MM-DD`) |
+| `after` | `string` | No | - | Only turns on or after this date (`YYYY-MM-DD`, local time) |
+| `before` | `string` | No | - | Only turns on or before this date (`YYYY-MM-DD`, local time) |
 | `project` | `string` | No | - | Exact project name (git repository directory name) |
 
 ### Usage

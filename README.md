@@ -40,8 +40,12 @@ and exits 0; the MCP server fails to start.
 |---|---|
 | `query` | string, or 2-5 strings (strict AND per conversation) |
 | `limit` | default 10, max 50 |
-| `after`, `before` | `YYYY-MM-DD` |
+| `after`, `before` | `YYYY-MM-DD`, interpreted in local time; result dates are local too |
 | `project` | exact project name (git repository directory name) |
+
+Ranking fuses keyword and semantic ranks, with a small bonus for the top three keyword hits so
+an exact keyword match outranks a purely semantic one. With an array query, each concept
+considers its top 300 candidates per side before the per-conversation AND.
 
 Each result ends with `<archive_path>:<start>-<end>`. While the model is still loading, only
 keyword ranking is used and the output says so.

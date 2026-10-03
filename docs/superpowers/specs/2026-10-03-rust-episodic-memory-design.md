@@ -18,7 +18,7 @@
 | 원본 | 아카이브가 원본. `read`는 아카이브 원문을 보여준다. 아카이브는 덮어쓰지 않는다 | obra는 원본이 바뀌면 아카이브를 덮어쓴다. 호스트가 30일 뒤 transcript를 지우므로 아카이브가 유일한 사본이다 |
 | 아카이브 복사 | 파일 전체가 아니라 offset 이후 추가분만 append | obra는 mtime이 바뀌면 파일 전체를 다시 복사한다(`sync.ts:146-162`) |
 | 텍스트 검색 | FTS5 + 한글 bigram terms, BM25 | obra는 `LIKE` AND. `LIKE`는 행 수에 비례해 느리고 순위가 없다. 형태소 사전(lindera)은 쓰지 않는다(§6) |
-| 결과 합치기 | 가중 RRF(K=60, BM25 0.4 / 벡터 0.6) | agentmemory `hybrid-search.ts:20,30-31`. obra는 벡터 결과 뒤에 텍스트 결과를 붙인다 |
+| 결과 합치기 | 가중 RRF(K=60, BM25 0.4 / 벡터 0.6) + BM25 상위 3등 가산점 | agentmemory `hybrid-search.ts:20,30-31`. obra는 벡터 결과 뒤에 텍스트 결과를 붙인다 |
 | 벡터 필터 | sqlite-vec 메타데이터 컬럼으로 KNN 안에서 건다 | obra는 KNN 뒤에 필터해 결과가 빌 수 있어 over-fetch로 우회한다 |
 | 임베딩 모델 | multilingual-e5-small(384차원, fp32) | obra의 bge-small-en-v1.5는 영어 전용이다. 지금 레포가 쓰는 모델이다 |
 | 런타임 | 상주 데몬 1개가 모델·검색·sync를 맡는다 | obra는 세션마다 MCP 서버가 모델을 따로 올린다 |
@@ -164,19 +164,21 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 |---|---|
 | `query` | 문자열, 또는 문자열 2~5개 배열(AND) |
 | `limit` | 기본 10, 최대 50 |
-| `after`, `before` | `YYYY-MM-DD`, 선택 |
+| `after`, `before` | `YYYY-MM-DD`, 선택. 로컬 시간대 기준 날짜 |
 | `project` | 정확히 일치, 선택 |
 
 `N = max(50, limit * 3)`
 
 1. **BM25**: query를 terms와 같은 방식으로 바꾸고, 토큰마다 `"…"`로 감싸(안의 `"`는 `""`) OR로 잇는다. 한 글자 한글 구간은 prefix 쿼리 `"검"*`로 바꾼다. `fts_vocab`에서 문서 빈도가 전체 exchange의 20%를 넘는 토큰("니다", "합니" 같은 어미)은 뺀다. 다 빠지면 가장 드문 토큰 하나를 남긴다. `fts_exchanges`를 `exchanges`와 rowid로 조인해 같은 필터를 걸고 `bm25()` 상위 N개. 따옴표 덕분에 `C++`, `foo-bar`, `a:b`가 FTS5 문법 오류를 내지 않는다.
 2. **벡터**: `query: <query>`를 임베딩해 `vec_exchanges`에서 KNN N개. `project`, `after`/`before`는 메타데이터 조건으로 KNN 안에 건다.
-3. **RRF**: `score = 0.4/(60+rank_bm25) + 0.6/(60+rank_vec)`. 한쪽에만 있으면 그쪽 항만 더한다. sidechain은 점수에 0.9를 곱한다.
+3. **RRF**: `score = 0.4/(60+rank_bm25) + 0.6/(60+rank_vec)`. 한쪽에만 있으면 그쪽 항만 더한다. 그 뒤 BM25 순위 보너스를 더한다(1등 +0.01, 2등 +0.005, 3등 +0.0025, 4등 이하 0). 그래서 BM25에서만 1등인 정확한 키워드 일치(0.4/61 + 0.01 ≈ 0.0166)가 벡터에서만 1등인 결과(0.6/61 ≈ 0.0098)보다 위에 온다. 마지막으로 sidechain은 점수에 0.9를 곱한다.
 4. 상위 `limit`개. 출력 점수는 1등 점수로 나눠 0~1로 맞춘 값이다.
-5. **배열 query**(obra 방식): 개념마다 1~3을 `limit * 5`개로 돌린다. 대화(`archive_path`) 단위로 묶어 모든 개념이 나온 대화만 남기고, 개념별 최고 점수의 평균 순으로 정렬한다. 대화마다 가장 점수가 높은 exchange 하나를 보여준다. 교집합이 비면 빈 결과.
+5. **배열 query**(obra 방식): 개념마다 1~3을 BM25 300개, KNN 300개 후보로 돌린다(단일 query의 N과 별개). 같은 대화 안의 개념이 상위 `limit * 5` 밖으로 밀려 교집합이 사라지는 일을 막는다. 대화(`archive_path`) 단위로 묶어 모든 개념이 나온 대화만 남기고, 개념별 최고 점수의 평균 순으로 정렬한다. 대화마다 가장 점수가 높은 exchange 하나를 보여준다. 교집합이 비면 빈 결과.
 6. **모델 준비 전**: BM25 순위만 쓰고 결과 첫 줄에 그 사실을 적는다.
 
-출력(결과마다): `project`, 날짜, 점수, 사용자 메시지 앞 200자, 답변 앞 200자, `archive_path:line_start-line_end`.
+**날짜와 시간대**: 결과의 날짜는 로컬 시간대(`chrono::Local`)로 표시한다. `after`는 그 날짜 로컬 00:00 이상(`ts >=`), `before`는 날짜+1일 로컬 00:00 미만(`ts <`)이며 둘 다 UTC 밀리초로 바꿔 쓴다. DST로 자정이 겹치면 이른 쪽을, 자정이 없으면 늦은 쪽을, 둘 다 없으면 UTC 자정을 쓴다.
+
+출력(결과마다): `project`, 날짜(로컬), 점수, 사용자 메시지 앞 200자, 답변 앞 200자, `archive_path:line_start-line_end`.
 
 **`read`**
 
