@@ -1,13 +1,15 @@
 use crate::embed::Embedder;
 use crate::terms::build_match_query;
 use anyhow::{bail, Result};
-use chrono::{Days, NaiveDate};
+use chrono::{Days, Local, NaiveDate, TimeZone};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params_from_iter, Connection};
 use std::collections::{HashMap, HashSet};
 
 const MAX_LIMIT: usize = 50;
 const SNIPPET_CHARS: usize = 200;
+/// Candidates fetched per side (BM25 and vector) for each concept of an array query.
+const MULTI_CONCEPT_CANDIDATES: usize = 300;
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchParams {
@@ -38,11 +40,18 @@ pub struct SearchOutput {
 }
 
 /// Reciprocal-rank fusion: `0.4/(60+r_bm25) + 0.6/(60+r_vec)` with 1-based ranks, a missing
-/// side adding nothing, sidechain ids scaled by 0.9. Sorted by score desc, ties newer id first.
+/// side adding nothing, plus a BM25 top-rank bonus (+0.01 / +0.005 / +0.0025 for ranks 1-3)
+/// so an exact keyword hit outranks a vector-only rank-1 hit, then sidechain ids scaled by 0.9. Sorted by score desc, ties newer id first.
 pub fn rrf(bm25: &[i64], vec: &[i64], sidechain: &HashSet<i64>) -> Vec<(i64, f64)> {
     let mut scores: HashMap<i64, f64> = HashMap::new();
     for (i, id) in bm25.iter().enumerate() {
-        *scores.entry(*id).or_default() += 0.4 / (60.0 + (i + 1) as f64);
+        let bonus = match i {
+            0 => 0.01,
+            1 => 0.005,
+            2 => 0.0025,
+            _ => 0.0,
+        };
+        *scores.entry(*id).or_default() += 0.4 / (60.0 + (i + 1) as f64) + bonus;
     }
     for (i, id) in vec.iter().enumerate() {
         *scores.entry(*id).or_default() += 0.6 / (60.0 + (i + 1) as f64);
@@ -63,8 +72,18 @@ struct Filters {
 }
 
 impl Filters {
-    fn new(p: &SearchParams) -> Filters {
-        let day_ms = |d: NaiveDate| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+    /// Date bounds are midnights of `tz`: `after` is that day's 00:00, `before` the next day's.
+    fn new_in<Tz: TimeZone>(p: &SearchParams, tz: &Tz) -> Filters {
+        let day_ms = |d: NaiveDate| {
+            let midnight = d.and_hms_opt(0, 0, 0).unwrap();
+            tz.from_local_datetime(&midnight)
+                .earliest()
+                .or_else(|| tz.from_local_datetime(&midnight).latest())
+                .map_or_else(
+                    || midnight.and_utc().timestamp_millis(),
+                    |t| t.timestamp_millis(),
+                )
+        };
         Filters {
             project: p.project.clone(),
             ts_from: p.after.map(day_ms),
@@ -154,14 +173,15 @@ fn sidechain_set(conn: &Connection, all: &[&[i64]]) -> Result<HashSet<i64>> {
 }
 
 /// One concept's fused ranking (best first), cut to `limit`.
+/// `n` candidates are fetched per side.
 fn concept(
     conn: &Connection,
     e: Option<&dyn Embedder>,
     query: &str,
     f: &Filters,
     limit: usize,
+    n: usize,
 ) -> Result<Vec<(i64, f64)>> {
-    let n = 50.max(limit * 3);
     let bm = bm25_ids(conn, query, f, n)?;
     let ve = match e {
         Some(e) => vec_ids(conn, e, query, f, n)?,
@@ -208,11 +228,21 @@ pub fn search(
     e: Option<&dyn Embedder>,
     p: &SearchParams,
 ) -> Result<SearchOutput> {
+    search_in(conn, e, p, &Local)
+}
+
+/// `search` with date filters interpreted in `tz`.
+fn search_in<Tz: TimeZone>(
+    conn: &Connection,
+    e: Option<&dyn Embedder>,
+    p: &SearchParams,
+    tz: &Tz,
+) -> Result<SearchOutput> {
     if p.queries.is_empty() || p.queries.len() > 5 {
         bail!("query must be 1 to 5 strings");
     }
     let limit = p.limit.clamp(1, MAX_LIMIT);
-    let f = Filters::new(p);
+    let f = Filters::new_in(p, tz);
     // The vector side runs whenever an embedder is present, unless a query is pure noise.
     if p.queries
         .iter()
@@ -224,13 +254,13 @@ pub fn search(
 
     // (exchange id, score) best first, already normalized by the caller below.
     let ranked: Vec<(i64, f64)> = if p.queries.len() == 1 {
-        concept(conn, e, &p.queries[0], &f, limit)?
+        concept(conn, e, &p.queries[0], &f, limit, 50.max(limit * 3))?
     } else {
-        let wide = limit * 5;
+        let n = MULTI_CONCEPT_CANDIDATES;
         // path -> per-concept best (score, id)
         let mut by_path: HashMap<String, Vec<Option<(f64, i64)>>> = HashMap::new();
         for (ci, q) in p.queries.iter().enumerate() {
-            for (id, score) in concept(conn, e, q, &f, wide)? {
+            for (id, score) in concept(conn, e, q, &f, 2 * n, n)? {
                 let slot = by_path
                     .entry(archive_path_of(conn, id)?)
                     .or_insert_with(|| vec![None; p.queries.len()]);
@@ -344,22 +374,23 @@ mod tests {
     #[test]
     fn rrf_weights() {
         let r = rrf(&[1, 2], &[2, 3], &HashSet::new());
-        assert_eq!(r.iter().map(|x| x.0).collect::<Vec<_>>(), vec![2, 3, 1]);
+        // BM25 bonus (+0.01 rank 1, +0.005 rank 2) lifts id 1 above vector-only id 3.
+        assert_eq!(r.iter().map(|x| x.0).collect::<Vec<_>>(), vec![2, 1, 3]);
         let s = |id| r.iter().find(|x| x.0 == id).unwrap().1;
-        assert!((s(2) - (0.4 / 62.0 + 0.6 / 61.0)).abs() < 1e-12);
+        assert!((s(2) - (0.4 / 62.0 + 0.005 + 0.6 / 61.0)).abs() < 1e-12);
         assert!((s(3) - 0.6 / 62.0).abs() < 1e-12);
-        assert!((s(1) - 0.4 / 61.0).abs() < 1e-12);
+        assert!((s(1) - (0.4 / 61.0 + 0.01)).abs() < 1e-12);
     }
 
     #[test]
     fn rrf_ties_prefer_newer_id() {
         let r = rrf(&[5], &[9], &HashSet::new());
-        // 0.4/61 < 0.6/61, so the vector-only id wins outright; equal scores order by id desc.
-        assert_eq!(r[0].0, 9);
+        // BM25-only rank 1 (0.4/61 + 0.01) beats vector-only rank 1 (0.6/61).
+        assert_eq!(r[0].0, 5);
         let r = rrf(&[1, 2], &[], &HashSet::new());
         assert_eq!(r[0].0, 1);
         let r = rrf(&[7], &[], &HashSet::from([7]));
-        assert!((r[0].1 - 0.9 * 0.4 / 61.0).abs() < 1e-12);
+        assert!((r[0].1 - 0.9 * (0.4 / 61.0 + 0.01)).abs() < 1e-12);
     }
 
     #[test]
@@ -367,10 +398,11 @@ mod tests {
         let side = HashSet::from([1]);
         let r = rrf(&[1, 2], &[], &side);
         let s1 = r.iter().find(|x| x.0 == 1).unwrap().1;
-        assert!((s1 - 0.9 * 0.4 / 61.0).abs() < 1e-12);
-        // Penalty can flip the order: id 1 is rank 1 but sidechain, id 2 is rank 1 in vec.
-        let r = rrf(&[1], &[2], &HashSet::from([2]));
-        assert_eq!(r[0].0, 2); // 0.9*0.6/61 > 0.4/61
+        assert!((s1 - 0.9 * (0.4 / 61.0 + 0.01)).abs() < 1e-12);
+        // Penalty can flip the order: id 1 is BM25 rank 1 (0.0166) but sidechain (0.0149);
+        // id 2 is BM25 rank 2 + vec rank 1 on the main thread (0.0213).
+        let r = rrf(&[1, 2], &[2], &HashSet::from([1]));
+        assert_eq!(r[0].0, 2);
         let r = rrf(&[1, 2], &[2, 1], &HashSet::from([2]));
         assert_eq!(r[0].0, 1);
     }
@@ -428,7 +460,10 @@ mod tests {
         c.project = "alpha";
         c.ts = T0 + 2 * DAY;
         let (_t, conn) = db_with(&[a, b, c], true);
+        use chrono::Utc;
         let d = |s: &str| Some(NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap());
+        let search =
+            |c: &Connection, e: Option<&dyn Embedder>, p: &SearchParams| search_in(c, e, p, &Utc);
         for e in [None, Some(&FakeEmbedder as &dyn Embedder)] {
             let mut p = params(&["zebra"]);
             p.project = Some("alpha".into());
@@ -436,7 +471,7 @@ mod tests {
             got.sort();
             assert_eq!(got, vec![1, 3]);
 
-            // "before" includes the whole day; "after" starts at 00:00 UTC.
+            // "before" includes the whole day; "after" starts at 00:00 (UTC here).
             let mut p = params(&["zebra"]);
             p.after = d("2026-01-11");
             p.before = d("2026-01-11");
@@ -545,9 +580,98 @@ mod tests {
         let mut side = ex("/a/1", 1, "quokka report");
         side.side = true;
         let main = ex("/a/2", 1, "quokka report");
-        let (_t, conn) = db_with(&[side, main], true);
+        // The BM25 rank-1 bonus (+0.01) outweighs the 0.9 penalty, so the tie must not
+        // hand the sidechain row rank 1: insert the main-thread row first.
+        let (_t, conn) = db_with(&[main, side], true);
         let o = search(&conn, Some(&FakeEmbedder), &params(&["quokka report"])).unwrap();
-        assert_eq!(ids_of(&o), vec![2, 1]);
+        assert_eq!(ids_of(&o), vec![1, 2]);
         assert!(o.hits[1].score < 1.0);
+    }
+
+    #[test]
+    fn rrf_bm25_top_rank_bonus() {
+        let r = rrf(&[1, 2, 3, 4], &[], &HashSet::new());
+        let s = |id| r.iter().find(|x| x.0 == id).unwrap().1;
+        assert!((s(1) - (0.4 / 61.0 + 0.01)).abs() < 1e-12);
+        assert!((s(2) - (0.4 / 62.0 + 0.005)).abs() < 1e-12);
+        assert!((s(3) - (0.4 / 63.0 + 0.0025)).abs() < 1e-12);
+        assert!((s(4) - 0.4 / 64.0).abs() < 1e-12);
+        // Bonus applies before the sidechain multiplier.
+        let r = rrf(&[1], &[], &HashSet::from([1]));
+        assert!((r[0].1 - 0.9 * (0.4 / 61.0 + 0.01)).abs() < 1e-12);
+        // A BM25-only rank-1 hit beats a vector-only rank-1 hit.
+        let r = rrf(&[5], &[9], &HashSet::new());
+        assert_eq!(r[0].0, 5);
+    }
+
+    #[test]
+    fn bm25_only_exact_match_ranks_first_among_vector_hits() {
+        // Fillers dominate the vector side (N = 50); the lone zorblax exchange is
+        // only found by BM25 and must still come out on top.
+        let long = format!(
+            "zorblax {}",
+            (0..30)
+                .map(|i| format!("w{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let fillers: Vec<String> = (0..60).map(|i| format!("filler note{i}")).collect();
+        let mut rows = vec![ex("/a/z", 1, &long)];
+        rows.extend(
+            fillers
+                .iter()
+                .enumerate()
+                .map(|(i, u)| ex("/a/f", i as i64 * 2 + 1, u)),
+        );
+        let (_t, conn) = db_with(&rows, true);
+        let o = search(&conn, Some(&FakeEmbedder), &params(&["zorblax filler"])).unwrap();
+        assert_eq!(o.hits[0].exchange_id, 1);
+    }
+
+    #[test]
+    fn multi_concept_uses_300_candidates_per_side() {
+        // For each concept, 10 rivals outrank the shared conversation's exchange, which
+        // falls outside limit*5 = 5 but well inside 300 candidates.
+        for concepts in [
+            vec!["quokka", "walrus", "narwhal"],
+            vec!["quokka", "walrus", "narwhal", "ocelot"],
+        ] {
+            let mut texts: Vec<(String, String)> = Vec::new();
+            for c in &concepts {
+                for i in 0..10 {
+                    texts.push((format!("/a/rival-{c}-{i}"), format!("{c} {c} {c} {c}")));
+                }
+            }
+            let mut rows: Vec<Ex> = texts.iter().map(|(p, u)| ex(p, 1, u)).collect();
+            for (i, c) in concepts.iter().enumerate() {
+                rows.push(ex("/a/same", i as i64 * 2 + 1, c));
+            }
+            let (_t, conn) = db_with(&rows, false);
+            let mut p = params(&concepts);
+            p.limit = 1;
+            let o = search(&conn, None, &p).unwrap();
+            assert_eq!(o.hits.len(), 1, "{concepts:?}");
+            assert_eq!(o.hits[0].archive_path, "/a/same");
+        }
+    }
+
+    #[test]
+    fn date_filters_use_the_given_timezone() {
+        use chrono::{FixedOffset, Utc};
+        let d = |s: &str| Some(NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap());
+        let p = SearchParams {
+            after: d("2026-01-11"),
+            before: d("2026-01-11"),
+            ..SearchParams::default()
+        };
+        // +09:00: local midnight 2026-01-11 is 2026-01-10T15:00:00Z.
+        let kst = FixedOffset::east_opt(9 * 3600).unwrap();
+        let f = Filters::new_in(&p, &kst);
+        assert_eq!(f.ts_from, Some(1_768_057_200_000));
+        assert_eq!(f.ts_to, Some(1_768_057_200_000 + DAY));
+        // UTC: plain UTC midnights.
+        let f = Filters::new_in(&p, &Utc);
+        assert_eq!(f.ts_from, Some(1_768_089_600_000));
+        assert_eq!(f.ts_to, Some(1_768_089_600_000 + DAY));
     }
 }

@@ -4,7 +4,7 @@ use crate::paths::Paths;
 use crate::read::read_archive;
 use crate::search::{search, Hit, SearchParams};
 use anyhow::Result;
-use chrono::{DateTime, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -222,8 +222,16 @@ fn one_line(s: &str) -> String {
 }
 
 fn card(n: usize, h: &Hit) -> String {
+    card_in(n, h, &Local)
+}
+
+/// Result card with the date shown in `tz`.
+fn card_in<Tz: TimeZone>(n: usize, h: &Hit, tz: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
     let day = DateTime::from_timestamp_millis(h.ts)
-        .map(|d| d.format("%Y-%m-%d").to_string())
+        .map(|d| d.with_timezone(tz).format("%Y-%m-%d").to_string())
         .unwrap_or_default();
     format!(
         "{n}. [{}, {day}, score {:.2}]\n   User: {}\n   Assistant: {}\n   {}:{}-{}",
@@ -299,6 +307,26 @@ mod tests {
         json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})
     }
 
+    #[test]
+    fn card_date_uses_given_timezone() {
+        use chrono::{FixedOffset, Utc};
+        let h = Hit {
+            exchange_id: 1,
+            project: "demo".into(),
+            // 2026-01-02T20:00:00Z
+            ts: 1_767_384_000_000,
+            score: 1.0,
+            user_snippet: "u".into(),
+            assistant_snippet: "a".into(),
+            archive_path: "/p".into(),
+            line_start: 1,
+            line_end: 2,
+        };
+        assert!(card_in(1, &h, &Utc).starts_with("1. [demo, 2026-01-02,"));
+        let kst = FixedOffset::east_opt(9 * 3600).unwrap();
+        assert!(card_in(1, &h, &kst).starts_with("1. [demo, 2026-01-03,"));
+    }
+
     fn text(resp: &Value) -> &str {
         resp["result"]["content"][0]["text"].as_str().unwrap()
     }
@@ -336,13 +364,19 @@ mod tests {
         assert_eq!(resps[2]["id"], 3);
         assert_ne!(resps[2]["result"]["isError"], true);
         let body = text(&resps[2]);
+        // Fixture ts is 2026-01-02T03:04:05Z; the card shows the machine-local date.
+        let local_day = DateTime::from_timestamp_millis(1_767_323_045_000)
+            .unwrap()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d")
+            .to_string();
         let archive = ctx.paths.archive_root();
         assert!(
             body.contains(&*archive.to_string_lossy()),
             "no archive path in: {body}"
         );
         assert!(
-            body.starts_with("1. [demo, 2026-01-02, score 1.00]"),
+            body.starts_with(&format!("1. [demo, {local_day}, score 1.00]")),
             "{body}"
         );
         assert!(
