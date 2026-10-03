@@ -30,15 +30,18 @@ impl Exclusions {
     }
 }
 
+type Line = (i64, Option<Value>);
+
 /// Yields (1-based line number, parsed JSON or None when the line is bad). Blank lines are skipped.
-fn read_lines(path: &Path) -> Result<impl Iterator<Item = (i64, Option<Value>)>> {
-    let mut reader = BufReader::new(File::open(path)?);
+/// I/O errors are yielded as `Err`; invalid UTF-8 or JSON is a bad line, not an error.
+fn read_lines<R: BufRead>(mut reader: R) -> impl Iterator<Item = Result<Line>> {
     let mut n = 0i64;
     let mut buf = Vec::new();
-    Ok(std::iter::from_fn(move || loop {
+    std::iter::from_fn(move || loop {
         buf.clear();
         match reader.read_until(b'\n', &mut buf) {
-            Ok(0) | Err(_) => return None,
+            Ok(0) => return None,
+            Err(e) => return Some(Err(e.into())),
             Ok(_) => {
                 n += 1;
                 let parsed = std::str::from_utf8(&buf).ok().map(str::trim);
@@ -46,10 +49,14 @@ fn read_lines(path: &Path) -> Result<impl Iterator<Item = (i64, Option<Value>)>>
                     continue;
                 }
                 let v = parsed.and_then(|s| serde_json::from_str::<Value>(s).ok());
-                return Some((n, v));
+                return Some(Ok((n, v)));
             }
         }
-    }))
+    })
+}
+
+fn read_file_lines(path: &Path) -> Result<impl Iterator<Item = Result<Line>>> {
+    Ok(read_lines(BufReader::new(File::open(path)?)))
 }
 
 /// Text of a user start message, or None when the line cannot start an exchange.
@@ -79,7 +86,8 @@ pub fn read_meta(archive: &Path, rel_path: &str) -> Result<FileMeta> {
         ..FileMeta::default()
     };
     let mut sidechain_seen = false;
-    for (_, v) in read_lines(archive)? {
+    for line in read_file_lines(archive)? {
+        let (_, v) = line?;
         let Some(v) = v else { continue };
         if meta.session_id.is_none() {
             meta.session_id = v["sessionId"].as_str().map(String::from);
@@ -103,7 +111,8 @@ pub fn read_meta(archive: &Path, rel_path: &str) -> Result<FileMeta> {
 pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<ParseOutput> {
     let mut out = ParseOutput::default();
     let mut cur: Option<ParsedExchange> = None;
-    for (n, v) in read_lines(archive)? {
+    for line in read_file_lines(archive)? {
+        let (n, v) = line?;
         if n < from_line {
             continue;
         }
@@ -252,5 +261,31 @@ mod tests {
         let by_path =
             crate::parse::read_meta(K, Path::new(MAIN), "x/subagents/agent-1.jsonl").unwrap();
         assert!(by_path.is_sidechain);
+    }
+
+    #[test]
+    fn io_error_propagates() {
+        struct Failing(bool);
+        impl std::io::Read for Failing {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::other("boom"));
+                }
+                self.0 = true;
+                let data = b"{\"type\":\"user\"}\n";
+                buf[..data.len()].copy_from_slice(data);
+                Ok(data.len())
+            }
+        }
+        let mut it = read_lines(BufReader::new(Failing(false)));
+        assert!(it.next().unwrap().is_ok());
+        assert!(it.next().unwrap().is_err());
+    }
+
+    #[test]
+    fn invalid_utf8_is_bad_line_not_error() {
+        let items: Vec<_> = read_lines(&b"\xff\xfe\n{}\n"[..]).collect();
+        assert!(matches!(items[0], Ok((1, None))));
+        assert!(matches!(items[1], Ok((2, Some(_)))));
     }
 }
