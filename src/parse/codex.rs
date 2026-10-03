@@ -1,4 +1,7 @@
-use super::{read_file_lines, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX};
+use super::{
+    read_file_lines, truncate_bytes, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX,
+    TEXT_MAX, TOOL_MAX,
+};
 use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
@@ -165,6 +168,42 @@ pub fn parse_from(archive: &Path, from_line: i64, meta: &FileMeta) -> Result<Par
     }
     out.exchanges.extend(cur);
     Ok(out)
+}
+
+/// Renders `response_item` lines only; `event_msg` duplicates them.
+pub fn render_line(v: &Value) -> Vec<String> {
+    if v["type"] != "response_item" {
+        return Vec::new();
+    }
+    let p = &v["payload"];
+    let text = |role: &str, kind: &str| {
+        block_texts(&p["content"], &[kind], "\n\n")
+            .map(|t| vec![format!("**{role}:** {}", truncate_bytes(&t, TEXT_MAX))])
+            .unwrap_or_default()
+    };
+    let tool = |name: &str, input: String| {
+        vec![format!(
+            "**Tool {name}:** {}",
+            truncate_bytes(&input, TOOL_MAX)
+        )]
+    };
+    let as_text = |x: &Value| match x {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    match p["type"].as_str() {
+        Some("message") if p["role"] == "user" => text("User", "input_text"),
+        Some("message") if p["role"] == "assistant" => text("Assistant", "output_text"),
+        Some("function_call") => tool(p["name"].as_str().unwrap_or("?"), as_text(&p["arguments"])),
+        Some("custom_tool_call") => tool(p["name"].as_str().unwrap_or("?"), as_text(&p["input"])),
+        Some("local_shell_call") => tool(LOCAL_SHELL, as_text(&p["action"])),
+        Some("function_call_output" | "custom_tool_call_output") => vec![format!(
+            "**Result:** {}",
+            truncate_bytes(&as_text(&p["output"]), TOOL_MAX)
+        )],
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]

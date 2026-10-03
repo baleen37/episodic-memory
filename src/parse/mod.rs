@@ -76,6 +76,33 @@ pub(crate) fn ts_ms(v: &Value) -> i64 {
         .map_or(0, |d| d.timestamp_millis())
 }
 
+const TRUNCATED: &str = "…[truncated]";
+pub(crate) const TEXT_MAX: usize = 16384;
+pub(crate) const TOOL_MAX: usize = 4096;
+
+/// Cuts `s` to at most `max` bytes on a char boundary and appends a marker when cut.
+pub(crate) fn truncate_bytes(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{TRUNCATED}", &s[..end])
+}
+
+/// Markdown items for one archive line (`**User:**`, `**Assistant:**`, `**Tool <name>:**`,
+/// `**Result:**`); empty when the line has nothing to show.
+pub fn render_line(kind: SourceKind, value: &Value) -> Vec<String> {
+    match kind {
+        SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => {
+            claude::render_line(value)
+        }
+        SourceKind::CodexSessions => codex::render_line(value),
+    }
+}
+
 /// Reads file-level metadata from the head of the archive file.
 pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
     match kind {

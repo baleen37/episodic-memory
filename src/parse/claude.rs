@@ -1,4 +1,7 @@
-use super::{read_file_lines, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX};
+use super::{
+    read_file_lines, truncate_bytes, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX,
+    TEXT_MAX, TOOL_MAX,
+};
 use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
@@ -139,6 +142,48 @@ pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<Pa
     }
     out.exchanges.extend(cur);
     Ok(out)
+}
+
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| b["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+pub fn render_line(v: &Value) -> Vec<String> {
+    let role = match v["type"].as_str() {
+        Some("user") => "User",
+        Some("assistant") => "Assistant",
+        _ => return Vec::new(),
+    };
+    let text = |t: &str| format!("**{role}:** {}", truncate_bytes(t, TEXT_MAX));
+    match &v["message"]["content"] {
+        Value::String(s) if !s.is_empty() => vec![text(s)],
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| match b["type"].as_str()? {
+                "text" => b["text"].as_str().filter(|t| !t.is_empty()).map(text),
+                "tool_use" => Some(format!(
+                    "**Tool {}:** {}",
+                    b["name"].as_str().unwrap_or("?"),
+                    truncate_bytes(&b["input"].to_string(), TOOL_MAX)
+                )),
+                "tool_result" => Some(format!(
+                    "**Result:** {}",
+                    truncate_bytes(&result_text(&b["content"]), TOOL_MAX)
+                )),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]

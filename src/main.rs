@@ -7,6 +7,8 @@ mod log;
 mod parse;
 mod paths;
 mod project;
+mod read;
+mod search;
 mod sync;
 mod terms;
 
