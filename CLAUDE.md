@@ -46,7 +46,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `bin/episodic-memory` | Bash wrapper: finds or downloads the versioned binary, then execs it |
 | `scripts/sync-versions.sh` | Writes the release version into Cargo.toml, Cargo.lock, both plugin.json |
 | `hooks/hooks.json` | SessionStart (`startup\|resume\|clear\|compact`) runs `episodic-memory sync` |
-| `.github/workflows/release.yml` | semantic-release, then per-target build and asset upload |
+| `.github/workflows/release.yml` | semantic-release, then per-target build and asset upload, then marketplace notify |
 
 ## Data Flow
 
