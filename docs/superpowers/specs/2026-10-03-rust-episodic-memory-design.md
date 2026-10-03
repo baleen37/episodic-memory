@@ -86,11 +86,6 @@ exchanges(id INTEGER PRIMARY KEY AUTOINCREMENT,   -- 지운 id를 재사용하�
 CREATE INDEX exchanges_file ON exchanges(archive_path, line_start);
 CREATE INDEX exchanges_pending ON exchanges(id) WHERE embedded = 0;
 
-tool_calls(id INTEGER PRIMARY KEY,
-           exchange_id INTEGER NOT NULL REFERENCES exchanges(id) ON DELETE CASCADE,
-           tool_name TEXT NOT NULL, tool_input TEXT, tool_result TEXT,
-           is_error INTEGER NOT NULL DEFAULT 0)
-
 CREATE VIRTUAL TABLE fts_exchanges USING fts5(terms, content='', contentless_delete=1,
        tokenize='porter unicode61 remove_diacritics 2');   -- rowid = exchanges.id
 
@@ -101,9 +96,11 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
 meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 ```
 
-- **exchange 삭제**는 한 함수로만 한다. 같은 트랜잭션에서 `fts_exchanges`, `vec_exchanges`의 같은 rowid를 먼저 지운 뒤 `exchanges`를 지운다(`tool_calls`는 cascade). 두 가상 테이블은 FK를 지원하지 않기 때문이다.
+- **exchange 삭제**는 한 함수로만 한다. 같은 트랜잭션에서 `fts_exchanges`, `vec_exchanges`의 같은 rowid를 먼저 지운 뒤 `exchanges`를 지운다. 두 가상 테이블은 FK를 지원하지 않기 때문이다.
 - `contentless_delete=1`은 SQLite 3.43+가 필요하다. rusqlite `bundled`를 쓴다.
 - sqlite-vec는 0.1.9 이상(그 미만은 TEXT 메타데이터 행 DELETE 버그). `sqlite3_auto_extension`으로 등록한다.
+- 도구 입력·결과는 DB에 저장하지 않는다. 도구 이름만 `tool_names`에 두고, 원문은 `read`가 아카이브에서 렌더링한다.
+- `fts_vocab`: `CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row)`. 검색어 토큰의 문서 빈도를 볼 때 쓴다(§6).
 - 스키마 버전은 `PRAGMA user_version`. 마이그레이션은 추가만 한다.
 
 ## 5. sync
@@ -116,12 +113,13 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 | claude-code-transcripts | `~/.claude/transcripts` (있을 때만) |
 | codex-sessions | `$CODEX_HOME/sessions` 또는 `~/.codex/sessions` |
 
-**파일 하나 처리** — 원본 크기가 `offset`과 다를 때만 처리한다. 같으면 건너뛴다.
+**파일 하나 처리** — 원본 크기가 `offset`과 다를 때만 처리한다. 같으면 건너뛴다. 따라서 크기가 같은 채로 내용만 다시 써진 파일은 감지하지 않는다(호스트 transcript는 append 전용이라 실제로 생기지 않는다).
 
 1. **새 원본**(`files`에 없음): 아카이브 경로에 파일이 이미 있으면 아래 "기존 아카이브 들여오기" 규칙으로 등록한다. 없으면 `offset=0`으로 등록한다.
-2. **불변식 맞추기**: 아카이브 크기가 `offset`보다 크면(지난번 append 뒤 커밋 전에 죽은 경우) `offset`으로 잘라낸다.
+2. **불변식 맞추기**: 아카이브 크기가 `offset`보다 크면(지난번 append 뒤 커밋 전에 죽은 경우) `offset`으로 잘라낸다. 아카이브가 `offset`보다 작거나 없으면(외부에서 지워짐) 3번의 새 세대로 간다.
 3. **다시 써졌는지 확인**: `offset > 0`이면 원본의 `[offset-4KB, offset)` 구간이 아카이브의 같은 구간과 같은지 비교한다. 원본 크기가 `offset`보다 작거나 구간이 다르면 다시 써진 것이다.
-   - 기존 아카이브를 `<name>.gen-<N>.jsonl`로 이름을 바꿔 보존하고, `generation`을 올리고 새 아카이브를 `offset=0`, `reparse_line=1`로 시작한다. 그 파일의 기존 exchange는 지운다. 다시 써진 파일은 대개 이전 내용을 포함하므로 두 세대를 모두 색인하면 결과가 중복된다. 보존된 세대 파일은 디스크에 남아 복구할 수 있다.
+   - **새 세대**: 기존 아카이브 파일은 이름도 내용도 건드리지 않는다. 한 트랜잭션에서 그 파일의 exchange를 지우고, `generation`을 1 올리고, `archive_path`를 `<name>.gen-<generation>.jsonl`로, `offset=0`, `reparse_line=1`로 바꿔 **커밋한 뒤** 4번으로 간다. 새 경로에 남은 부분 파일이 있으면 2번 불변식이 0으로 잘라낸다.
+   - 이전 세대의 exchange를 지우는 이유: 다시 써진 파일은 대개 이전 내용을 포함하므로 두 세대를 모두 색인하면 결과가 중복된다. 이전 세대 파일은 디스크에 남아 복구할 수 있다.
 4. **append**: `offset`부터 원본의 마지막 개행까지를 아카이브에 append하고 fsync한다. 미완결 마지막 줄은 다음 sync로 넘긴다.
 5. **트랜잭션 시작**. `offset`을 새 크기로 올린다.
 6. `skipped=1`이면 커밋하고 끝낸다.
@@ -132,25 +130,26 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 
 **임베딩**: 모든 파일을 처리한 뒤, 같은 sync 작업 안에서 `embedded=0`인 exchange를 32개씩 임베딩해 `vec_exchanges`에 넣고 `embedded=1`로 바꾼다. 모델이 준비되지 않았으면 건너뛴다. 문서 텍스트는 `passage: User: <user>\n\nAssistant: <assistant>\n\nTools: <tool_names>`를 2000자에서 자른 것이다. 스레드는 `with_intra_threads(2)`.
 
-**FTS terms**: `user_message`와 `assistant_message`를 이은 텍스트에서, 한글 음절이 연속된 구간은 2글자씩 겹쳐 자른 bigram("검색추천" → "검색 색추 추천")으로 바꾸고, 한 글자짜리 한글 구간은 그대로 둔다. 나머지 문자는 그대로 둔다. 영어 토큰화·어간은 FTS5 `porter unicode61`이 처리한다.
+**FTS terms**: `user_message`와 `assistant_message`를 이은 텍스트에서, 한글 음절이 연속된 구간을 2글자씩 겹쳐 자른 bigram("검색추천" → "검색 색추 추천")으로 바꾸고 **구간 양옆에 공백을 넣는다**. "API검색"을 unicode61이 `api검색` 한 토큰으로 묶지 않게 하려는 것이다("API검색" → "API 검색"). 한 글자짜리 한글 구간은 그대로 둔다. 나머지 문자는 그대로 둔다. 영어 토큰화·어간은 FTS5 `porter unicode61`이 처리한다.
 
-**exchange 경계**: 사람이 입력한 사용자 메시지에서 시작해 다음 사용자 메시지 직전에서 끝난다. 사이의 답변 텍스트는 `assistant_message`에, 도구 호출과 결과는 `tool_calls`에 넣는다. 파싱할 수 없는 줄은 건너뛰고 로그를 남긴다.
+**exchange 경계**: exchange 시작 메시지(아래 표)에서 시작해 다음 시작 메시지 직전에서 끝난다. 사이의 답변 텍스트는 `assistant_message`에, 도구 이름은 `tool_names`에 넣는다. 파싱할 수 없는 줄은 건너뛰고 로그를 남긴다.
 
 | | Claude | Codex |
 |---|---|---|
 | 세션 정보 | 줄의 `sessionId`, `cwd`, `timestamp` | **첫 번째** `session_meta`의 `payload.id`, `payload.cwd`. fork된 rollout의 두 번째 `session_meta`(부모)는 무시 |
-| 사용자 메시지 | `type=user`이고 `tool_result`가 아닌 항목 | `response_item`의 `message`, `role=user` |
-| 사람이 입력하지 않은 것(제외) | `isMeta=true`, `[Request interrupted by user`로 시작, `<local-command-`로 시작 | `# AGENTS.md instructions`, `<environment_context>`, `<codex_internal_context>`, `<user_instructions>`로 시작 |
+| exchange 시작 메시지 | `type=user`이고 `tool_result`가 아닌 항목 중 제외 대상이 아닌 것 | 1순위: `event_msg`의 `item_completed`에서 `item.type=UserMessage`. 이 이벤트가 없는 옛 rollout은 `event_msg`의 `user_message`, 그것도 없으면 `response_item`의 `message`, `role=user` 중 제외 대상이 아닌 것 |
+| 제외 대상 | `isMeta=true`, `isCompactSummary=true`, `origin.kind`가 있고 `human`이 아님(task-notification, peer 등. 값이 없으면 제외하지 않는다), 내용이 `[Request interrupted by user`, `<local-command-`, `<bash-stdout>`, `<bash-stderr>`로 시작 | (fallback일 때만) `# AGENTS.md instructions`, `<environment_context>`, `<codex_internal_context>`, `<user_instructions>`, `<recommended_plugins>`, `<skill>`로 시작 |
+| 서브에이전트 시작 메시지 | (위와 같음. 서브에이전트 첫 프롬프트는 `origin`이 없다) | `source.subagent`가 있는 파일은 자기 `agent_path` 앞으로 온 `response_item`의 `agent_message`에서 시작한다. 그보다 앞의 `role=user` 항목(부모에게서 물려받은 맥락)은 무시한다 |
 | 답변 | `type=assistant`의 `text` 블록 | `response_item`의 `message`, `role=assistant` |
 | 도구 | `tool_use` ↔ 다음 user의 `tool_result`(`tool_use_id`로 짝) | `function_call`·`custom_tool_call`·`local_shell_call` ↔ 각 `*_output`(`call_id`로 짝) |
 | sidechain | `isSidechain=true` 또는 경로가 `subagents/` 아래 | `session_meta.payload.source.subagent`가 있음 |
 
-제외 접두어 목록은 코드의 상수 하나로 두고, 실제 transcript 픽스처로 테스트한다.
+제외 규칙은 코드의 상수 한 곳에 두고, 실제 transcript 픽스처로 테스트한다.
 
 **project**: `files.cwd`로 `git -C <cwd> rev-parse --git-common-dir`을 실행해 그 상위 디렉터리 이름을 쓴다. 실패하거나 디렉터리가 없으면 `cwd`의 basename. `cwd`가 없으면 `unknown`. 파일당 한 번만 계산한다.
 
 **기존 아카이브 들여오기** (데몬 첫 기동 때 자동, 그리고 1번의 새 원본 등록 때)
-- 아카이브 디렉터리는 `claude-code-projects`, `claude-code-transcripts`, `codex-sessions`만 본다. 레거시 `claude-projects/`는 들여오지 않는다. 그 안의 파일은 `claude-code-projects/`에 같은 상대경로로 모두 들어 있다. 같은 상대경로가 없는 파일만 `claude-code-projects/` 아래로 옮겨 들여온다.
+- 아카이브 디렉터리는 `claude-code-projects`, `claude-code-transcripts`, `codex-sessions`만 본다. 레거시 `claude-projects/`는 무시한다(실측상 모든 파일이 `claude-code-projects/`에 같은 상대경로로 있다). 이전 세대 파일(`*.gen-*.jsonl`)도 들여오지 않는다.
 - 원본이 있고, 원본이 아카이브보다 크거나 같고, 아카이브의 마지막 4KB가 원본의 같은 위치와 같으면 `offset` = 아카이브 크기. 아니면 3번처럼 기존 아카이브를 세대로 보존하고 새로 시작한다.
 - 원본이 없으면 `source_path`에 원본이 있었을 경로를 넣고 `offset` = 아카이브 크기로 등록한 뒤 아카이브만 파싱한다.
 - 약 1만 개, 9.7GB 규모다. 파일마다 커밋하므로 중간에 데몬이 종료돼도 이어서 한다.
@@ -170,7 +169,7 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 
 `N = max(50, limit * 3)`
 
-1. **BM25**: query를 terms와 같은 방식으로 바꾸고, 토큰마다 `"…"`로 감싸(안의 `"`는 `""`) OR로 잇는다. `fts_exchanges`를 `exchanges`와 rowid로 조인해 같은 필터를 걸고 `bm25()` 상위 N개. 따옴표 덕분에 `C++`, `foo-bar`, `a:b`가 FTS5 문법 오류를 내지 않는다.
+1. **BM25**: query를 terms와 같은 방식으로 바꾸고, 토큰마다 `"…"`로 감싸(안의 `"`는 `""`) OR로 잇는다. 한 글자 한글 구간은 prefix 쿼리 `"검"*`로 바꾼다. `fts_vocab`에서 문서 빈도가 전체 exchange의 20%를 넘는 토큰("니다", "합니" 같은 어미)은 뺀다. 다 빠지면 가장 드문 토큰 하나를 남긴다. `fts_exchanges`를 `exchanges`와 rowid로 조인해 같은 필터를 걸고 `bm25()` 상위 N개. 따옴표 덕분에 `C++`, `foo-bar`, `a:b`가 FTS5 문법 오류를 내지 않는다.
 2. **벡터**: `query: <query>`를 임베딩해 `vec_exchanges`에서 KNN N개. `project`, `after`/`before`는 메타데이터 조건으로 KNN 안에 건다.
 3. **RRF**: `score = 0.4/(60+rank_bm25) + 0.6/(60+rank_vec)`. 한쪽에만 있으면 그쪽 항만 더한다. sidechain은 점수에 0.9를 곱한다.
 4. 상위 `limit`개. 출력 점수는 1등 점수로 나눠 0~1로 맞춘 값이다.
@@ -188,7 +187,8 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 
 - 아카이브 원문을 마크다운으로 보여준다: 사용자 메시지, 답변, 도구 호출(입력과 결과).
 - `path`를 정규화한 결과가 아카이브 디렉터리 밖이면 에러.
-- 출력은 최대 200KB. 범위가 없거나 범위가 이를 넘으면 200KB에서 자르고, 마지막 줄에 이어 읽을 `startLine`을 적는다.
+- 도구 입력과 결과는 항목마다 4KB에서 자른다.
+- 출력은 최대 60KB(약 2만 토큰. Claude Code MCP 출력 기본 한도 25,000 토큰 아래). 넘으면 그 직전 줄에서 끊고, 마지막 줄에 이어 읽을 `startLine`을 적는다. 항목마다 잘리므로 한 줄은 항상 상한 안에 들어가고, 이어 읽기는 매번 최소 한 줄 앞으로 나간다.
 
 ## 7. 패키징
 
@@ -219,16 +219,18 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 
 **사전 준비** (구현 첫 단계): 이 기기에 Rust 툴체인이 없다. 설치한 뒤 `fastembed` 7.1 + `sqlite-vec` 0.1.9 + rusqlite bundled로 빈 바이너리가 빌드되고, e5-small 임베딩 1건과 메타데이터 필터 KNN 1건이 도는지 확인한다.
 
+**성능 측정** (들여오기 구현 후): 실제 아카이브 전체를 들여온 DB에서 한글·영어·섞인 query 각 10개의 `search` p95 지연을 잰다. 목표는 500ms 이하(검색어 임베딩 포함). 넘으면 BM25·KNN 후보 수 N과 흔한 토큰 기준(20%)을 조정한다.
+
 **단위 테스트**
-- 파서: 실제 Claude·Codex transcript 샘플을 픽스처로 두고 exchange 경계, 제외 규칙, 도구 짝짓기(`custom_tool_call` 포함), sidechain(Claude·Codex), fork의 첫 `session_meta`, DO NOT INDEX(사용자 메시지에서만)를 확인한다.
-- terms: "검색을"로 "검색"이 든 exchange가, "검색추천"으로 "추천"이 든 exchange가 찾아지는지. 한 글자 구간, 영어·한글 섞임.
+- 파서: 실제 Claude·Codex transcript 샘플을 픽스처로 두고 exchange 경계, 제외 규칙(Claude `origin.kind`·`isCompactSummary`·bash 출력, Codex `UserMessage` 이벤트와 fallback), 도구 이름(`custom_tool_call` 포함), sidechain(Claude·Codex), Codex 서브에이전트(`agent_message` 시작, 물려받은 `role=user` 무시, fork 포함), fork의 첫 `session_meta`, DO NOT INDEX(사용자 메시지에서만)를 확인한다.
+- terms: "검색을"로 "검색"이 든 exchange가, "검색추천"으로 "추천"이 든 exchange가, "API검색"이 든 exchange가 "검색"으로 찾아지는지. 한 글자 query(prefix), 흔한 bigram 제외와 전부 빠졌을 때의 처리.
 - 검색: 특수문자 query, RRF(한쪽만 있는 경우 포함), sidechain 0.9, 배열 query 대화 단위 교집합.
-- `read`: 마크다운 렌더링, 줄 범위, 200KB 상한과 이어 읽기 안내, 아카이브 밖 경로 거부.
+- `read`: 마크다운 렌더링, 줄 범위, 60KB 상한, 항목별 4KB 자르기, 거대한 한 줄에서도 이어 읽기가 앞으로 나가는지, 아카이브 밖 경로 거부.
 
 **통합 테스트**
 - sync: 늘어난 부분만 append, 미완결 마지막 줄, 크기 같으면 건너뜀, 마지막 exchange 다시 만들기, 256KB 초과 건너뛰기.
 - 불변식: append 후 커밋 전 중단을 흉내 내고(아카이브만 늘림) 다음 sync가 잘라내고 한 번만 붙이는지.
-- 다시 써진 파일: 작아진 경우, 크기는 같거나 크지만 내용이 다른 경우 → 이전 세대 파일 보존, 그 파일의 exchange는 새 세대 기준으로 다시 만들어짐.
+- 다시 써진 파일: 작아진 경우, 커졌지만 꼬리 4KB가 다른 경우 → 이전 세대 파일 그대로, 새 경로에 새 세대, exchange는 새 세대 기준. 새 세대 커밋 뒤 append 전 중단 → 다음 sync가 이어서 처리하고 이전 세대 파일은 그대로인지.
 - 기존 아카이브 들여오기: 원본 있음(꼬리 같음/다름), 원본 없음, 레거시 `claude-projects/` 중복 건너뜀.
 - 데몬: 클라이언트 3개 동시 기동 시 데몬 1개, sync 요청이 겹칠 때 한 번으로 합침, 버전이 다른 데몬 2개에서 sync 1개만, 유휴 종료.
 - MCP 왕복: `initialize` → `tools/list`(도구 2개) → `tools/call`을 `mcp` 파이프를 거쳐 확인한다.
