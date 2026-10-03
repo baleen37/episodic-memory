@@ -1,7 +1,7 @@
 ---
 name: remembering-conversations
-description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches conversation history using indexed event/fact memory records.
-version: 1.0.0
+description: Use when user asks 'how should I...' or 'what's the best approach...' after exploring code, OR when you've tried to solve something and are stuck, OR for unfamiliar workflows, OR when user references past work. Searches past Claude Code and Codex conversations (hybrid keyword and semantic search).
+version: 2.0.0
 ---
 
 # Remembering Conversations
@@ -25,19 +25,20 @@ Task tool:
 
 The agent will:
 
-1. Search indexed event/fact memory records with `search`.
-2. Synthesize concise findings from the returned memory records.
-3. Return actionable insights, citing the record `id` for each claim.
+1. Run `search` to find matching conversation turns.
+2. Run `read` on the most relevant `archive_path:start-end` results for detail.
+3. Return a concise synthesis, citing `archive_path:start-end` for each claim.
 
 ## When to Use
 
-Search memory after you understand the task in these situations:
+Search after you understand the task in these situations:
 
 - User asks "how should I..." or "what's the best approach..."
 - You've explored the current codebase and need architectural context
 - You're stuck after investigating a problem
 - You need to follow an unfamiliar workflow or process
 - User references past work: "last time", "before", "we discussed", "do you remember"
+
 ## Don't Search First
 
 - For current codebase structure; use file search/read tools first.
@@ -48,30 +49,30 @@ Search memory after you understand the task in these situations:
 
 Prefer the search-conversation agent. If direct MCP access is necessary:
 
-### Search
+```json
+{ "query": "React Router authentication errors", "limit": 10, "project": "my-repo", "after": "2026-01-01" }
+```
 
-```typescript
-{
-  query: "React Router authentication errors",
-  limit: 10,
-  threshold: 0.2,
-  explain: false
-}
+Then open a result with `read`, passing the result's `archive_path` as `path`
+and its line range as `startLine` / `endLine`:
+
+```json
+{ "path": "/home/me/.config/episodic-memory/conversation-archive/claude-code-projects/x/abc.jsonl", "startLine": 120, "endLine": 148 }
 ```
 
 ## Search Strategy
 
-1. Start broad, then narrow with additional query terms.
-2. Put exact IDs, error codes, and file names directly in the query.
-3. Use `threshold` to reduce weak semantic matches.
-4. Use `explain` when the score breakdown is relevant.
-5. Synthesize decisions, gotchas, and reusable patterns.
+1. Start broad, then narrow with more specific terms.
+2. Put exact error codes, file names, and identifiers in the query.
+3. Pass 2-5 concepts as an array for a strict AND search across a conversation.
+4. Narrow with `project`, `after`, `before` (`YYYY-MM-DD`) when the scope is known.
+5. `read` a result's line range before relying on its snippet.
 
 ## Important Notes
 
-- Always cite the record `id` you relied on.
+- Cite `archive_path:start-end` for the sources you relied on.
 - Past decisions may not apply directly; explain context before recommending reuse.
-- Search cards contain the memory text and metadata used for synthesis.
+- A leading note in search output means the semantic model is still loading and only keyword ranking was used.
 
 ## Further Reading
 

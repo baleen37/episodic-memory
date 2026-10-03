@@ -1,7 +1,7 @@
 {
   "name": "episodic-memory",
   "version": "3.2.0",
-  "description": "Episodic Memory - Conversation memory with semantic search across Claude Code and Codex sessions",
+  "description": "Episodic Memory - Search past Claude Code and Codex conversations with hybrid keyword and semantic search",
   "author": {
     "name": "Baleen"
   },
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Episodic Memory",
     "shortDescription": "Search indexed Claude Code and Codex transcripts.",
-    "longDescription": "Episodic Memory archives local Claude Code and Codex transcripts, extracts source-linked event/fact memory records, and exposes compact memory search plus archive line reading through MCP tools and skills.",
+    "longDescription": "Episodic Memory archives local Claude Code and Codex transcripts, indexes them by conversation turn, and exposes hybrid keyword and semantic search plus archive line reading through MCP tools and skills.",
     "developerName": "Baleen",
     "category": "Productivity",
     "capabilities": [

@@ -28,6 +28,12 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Wrapper tests
+        run: bats tests/wrapper.bats
+
   embed:
     needs: build
     runs-on: ubuntu-latest
