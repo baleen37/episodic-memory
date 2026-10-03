@@ -352,10 +352,11 @@ mod tests {
         assert!(!paths.data.exists());
     }
 
-    #[test]
-    fn no_daemon_doctor_leaves_the_data_dir_untouched() {
+    fn untouched_dir_check(dir_name: &str) {
         let t = tempfile::tempdir().unwrap();
-        let paths = Paths::new(t.path().to_path_buf());
+        let dir = t.path().join(dir_name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = Paths::new(dir.clone());
         {
             let c = crate::db::open(&paths.db()).unwrap();
             c.execute(
@@ -366,7 +367,7 @@ mod tests {
             crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();
         }
         let listing = || {
-            let mut v: Vec<_> = std::fs::read_dir(t.path())
+            let mut v: Vec<_> = std::fs::read_dir(&dir)
                 .unwrap()
                 .map(|e| e.unwrap().file_name())
                 .collect();
@@ -376,9 +377,19 @@ mod tests {
         let before = listing();
         let checks = db_checks(&paths, false);
         assert_eq!(listing(), before, "doctor wrote to the data dir");
-        assert_eq!(checks[0].level, Level::Ok);
+        assert_eq!(checks[0].level, Level::Ok, "{}", checks[0].detail);
         assert!(checks[0].detail.contains("1 files"), "{}", checks[0].detail);
         assert_eq!(checks[2].level, Level::Ok);
+    }
+
+    #[test]
+    fn no_daemon_doctor_leaves_the_data_dir_untouched() {
+        untouched_dir_check("data");
+    }
+
+    #[test]
+    fn no_daemon_doctor_handles_non_ascii_and_special_paths() {
+        untouched_dir_check("한글 경로 100% a?b#c");
     }
 
     #[test]

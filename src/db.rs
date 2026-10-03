@@ -113,10 +113,12 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
     register_vec();
     let c = if immutable {
         let mut uri = String::from("file:");
-        for b in path.to_string_lossy().bytes() {
+        for &b in std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()) {
             match b {
-                b'%' | b'?' | b'#' | b' ' => uri.push_str(&format!("%{b:02X}")),
-                _ => uri.push(b as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                    uri.push(b as char)
+                }
+                _ => uri.push_str(&format!("%{b:02X}")),
             }
         }
         uri.push_str("?immutable=1");
