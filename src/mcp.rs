@@ -95,7 +95,7 @@ fn tools() -> Value {
     json!([
         {
             "name": "search",
-            "description": "Gives you memory across sessions. You don't automatically remember past Claude Code and Codex conversations - this tool restores context by searching them. Use BEFORE every task to recover decisions, solutions, and avoid reinventing work. Single string for hybrid semantic and keyword search, or array of 2-5 concepts for precise AND matching (conversations containing every concept). Subagent (sidechain) conversations are included, de-ranked below main-thread matches. Returns ranked results with project, date, snippets, and archive paths with line ranges to pass to read.",
+            "description": "Gives you memory across sessions. You don't automatically remember past Claude Code and Codex conversations - this tool restores context by searching them. Use BEFORE every task to recover decisions, solutions, and avoid reinventing work. Single string for hybrid semantic and keyword search, or array of 2-5 concepts for precise AND matching (conversations containing every concept). Subagent (sidechain) conversations are included, de-ranked on ties with main-thread matches (an exact keyword hit can still rank first). Returns ranked results with project, date, snippets, and archive paths with line ranges to pass to read.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -106,8 +106,8 @@ fn tools() -> Value {
                     ]},
                     "limit": {"type": "number", "minimum": 1, "maximum": MAX_LIMIT,
                               "default": DEFAULT_LIMIT},
-                    "after": date_schema("Only conversations on or after this date (YYYY-MM-DD)"),
-                    "before": date_schema("Only conversations on or before this date (YYYY-MM-DD)"),
+                    "after": date_schema("Only conversations on or after this local date (YYYY-MM-DD)"),
+                    "before": date_schema("Only conversations on or before this local date (YYYY-MM-DD)"),
                     "project": {"type": "string", "minLength": 1,
                                 "description": "Filter by project name (exact match)"},
                 },

@@ -20,6 +20,7 @@ chrono = "0.4"
 anyhow = "1"
 
 [dev-dependencies]
+chrono-tz = "0.10.4"
 tempfile = "3"
 
 [profile.release]

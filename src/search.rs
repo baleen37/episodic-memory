@@ -1,7 +1,7 @@
 use crate::embed::Embedder;
 use crate::terms::build_match_query;
 use anyhow::{bail, Result};
-use chrono::{Days, Local, NaiveDate, TimeZone};
+use chrono::{Days, Duration, Local, NaiveDate, TimeZone};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params_from_iter, Connection};
 use std::collections::{HashMap, HashSet};
@@ -73,12 +73,16 @@ struct Filters {
 
 impl Filters {
     /// Date bounds are midnights of `tz`: `after` is that day's 00:00, `before` the next day's.
+    /// A skipped midnight resolves to the first valid 15-minute step within 3 hours, else UTC midnight.
     fn new_in<Tz: TimeZone>(p: &SearchParams, tz: &Tz) -> Filters {
         let day_ms = |d: NaiveDate| {
             let midnight = d.and_hms_opt(0, 0, 0).unwrap();
-            tz.from_local_datetime(&midnight)
-                .earliest()
-                .or_else(|| tz.from_local_datetime(&midnight).latest())
+            // A DST gap can skip local midnight: use the first valid instant of that day.
+            (0..=12)
+                .find_map(|step| {
+                    let t = midnight + Duration::minutes(15 * step);
+                    tz.from_local_datetime(&t).earliest()
+                })
                 .map_or_else(
                     || midnight.and_utc().timestamp_millis(),
                     |t| t.timestamp_millis(),
@@ -673,5 +677,22 @@ mod tests {
         let f = Filters::new_in(&p, &Utc);
         assert_eq!(f.ts_from, Some(1_768_089_600_000));
         assert_eq!(f.ts_to, Some(1_768_089_600_000 + DAY));
+    }
+
+    #[test]
+    fn skipped_midnight_uses_first_valid_instant_of_the_day() {
+        // America/Sao_Paulo 2018-11-04: clocks jumped 00:00 -> 01:00 (-02:00 DST), so the
+        // day starts at 01:00 local = 03:00Z.
+        let tz = chrono_tz::America::Sao_Paulo;
+        let d = |s: &str| Some(NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap());
+        let day_start = 1_541_300_400_000; // 2018-11-04T03:00:00Z
+        let p = SearchParams {
+            after: d("2018-11-04"),
+            before: d("2018-11-03"),
+            ..SearchParams::default()
+        };
+        let f = Filters::new_in(&p, &tz);
+        assert_eq!(f.ts_from, Some(day_start));
+        assert_eq!(f.ts_to, Some(day_start));
     }
 }
