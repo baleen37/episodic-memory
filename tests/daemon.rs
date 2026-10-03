@@ -93,7 +93,16 @@ impl Env {
             .unwrap_or(0)
     }
 
+    /// A started and initialized `mcp` client.
     fn mcp(&self) -> Mcp {
+        let mut m = self.spawn_mcp();
+        let id = m.send_initialize();
+        m.check_initialize(id);
+        m
+    }
+
+    /// An `mcp` process with nothing sent yet.
+    fn spawn_mcp(&self) -> Mcp {
         let mut child = self
             .fast("mcp")
             .stdin(Stdio::piped())
@@ -111,18 +120,12 @@ impl Env {
                 }
             }
         });
-        let mut m = Mcp {
+        Mcp {
             child,
             stdin,
             rx,
             next_id: 1,
-        };
-        let init = m.request(
-            "initialize",
-            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
-        );
-        assert_eq!(init["result"]["serverInfo"]["name"], "episodic-memory");
-        m
+        }
     }
 }
 
@@ -147,11 +150,32 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn request(&mut self, method: &str, params: Value) -> Value {
+    fn send(&mut self, method: &str, params: Value) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         let msg = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
         writeln!(self.stdin, "{msg}").unwrap();
+        id
+    }
+
+    fn send_initialize(&mut self) -> i64 {
+        self.send(
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
+        )
+    }
+
+    fn check_initialize(&mut self, id: i64) {
+        let init = self.recv(id);
+        assert_eq!(init["result"]["serverInfo"]["name"], "episodic-memory");
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        let id = self.send(method, params);
+        self.recv(id)
+    }
+
+    fn recv(&mut self, id: i64) -> Value {
         let line = self
             .rx
             .recv_timeout(Duration::from_secs(15))
@@ -211,9 +235,15 @@ fn wait_child(c: &mut Child, limit: Duration) -> Option<std::process::ExitStatus
 #[test]
 fn three_mcp_clients_one_daemon() {
     let env = Env::new();
-    let handles: Vec<_> = (0..3)
-        .map(|_| {
-            let mut m = env.mcp();
+    // All three race to find (or spawn) the daemon before any of them talks to it.
+    let mut clients: Vec<Mcp> = (0..3).map(|_| env.spawn_mcp()).collect();
+    let ids: Vec<i64> = clients.iter_mut().map(|m| m.send_initialize()).collect();
+    for (m, id) in clients.iter_mut().zip(ids) {
+        m.check_initialize(id);
+    }
+    let handles: Vec<_> = clients
+        .into_iter()
+        .map(|mut m| {
             let r = m.request("tools/list", json!({}));
             let names: Vec<String> = r["result"]["tools"]
                 .as_array()

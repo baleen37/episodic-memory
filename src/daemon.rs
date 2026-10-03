@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -49,10 +49,23 @@ struct State {
     wake: Condvar,
     /// MCP connections from accept until EOF.
     clients: AtomicUsize,
+    /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
+    loading: AtomicBool,
     last_active: Mutex<Instant>,
 }
 
 impl State {
+    fn new(ctx: Ctx) -> State {
+        State {
+            ctx,
+            sched: Mutex::new(Sched::default()),
+            wake: Condvar::new(),
+            clients: AtomicUsize::new(0),
+            loading: AtomicBool::new(false),
+            last_active: Mutex::new(Instant::now()),
+        }
+    }
+
     fn request_sync(&self) {
         self.sched.lock().unwrap().pending = true;
         self.wake.notify_one();
@@ -64,7 +77,10 @@ impl State {
 
     fn busy(&self) -> bool {
         let s = self.sched.lock().unwrap();
-        s.running || s.pending || self.clients.load(Ordering::SeqCst) > 0
+        s.running
+            || s.pending
+            || self.loading.load(Ordering::SeqCst)
+            || self.clients.load(Ordering::SeqCst) > 0
     }
 }
 
@@ -98,23 +114,22 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
     } else {
         None
     };
-    let state = Arc::new(State {
-        ctx: Ctx {
-            paths: paths.clone(),
-            embedder: Arc::new(RwLock::new(embedder)),
-        },
-        sched: Mutex::new(Sched::default()),
-        wake: Condvar::new(),
-        clients: AtomicUsize::new(0),
-        last_active: Mutex::new(Instant::now()),
-    });
+    let state = Arc::new(State::new(Ctx {
+        paths: paths.clone(),
+        embedder: Arc::new(RwLock::new(embedder)),
+    }));
     state.request_sync();
 
     let st = state.clone();
     std::thread::spawn(move || scheduler(&st));
     if !opts.fake_embedder {
+        state.loading.store(true, Ordering::SeqCst);
         let st = state.clone();
-        std::thread::spawn(move || load_model(&st));
+        std::thread::spawn(move || {
+            let models = st.ctx.paths.models();
+            let _ = std::fs::create_dir_all(&models);
+            finish_load(&st, E5Embedder::load(&models).map(|e| Arc::new(e) as _));
+        });
     }
     let st = state.clone();
     let idle = Duration::from_secs(opts.idle_secs);
@@ -126,7 +141,10 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
                 let st = state.clone();
                 std::thread::spawn(move || handle_conn(stream, &st));
             }
-            Err(e) => log_line(&paths, &format!("daemon accept: {e}")),
+            Err(e) => {
+                log_line(&paths, &format!("daemon accept: {e}"));
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
     }
     Ok(())
@@ -152,21 +170,24 @@ fn scheduler(st: &State) {
             Ok(Err(e)) => log_line(paths, &format!("sync: {e:#}")),
             Err(_) => log_line(paths, "sync: panicked"),
         }
-        st.sched.lock().unwrap().running = false;
+        // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
+        st.sched.lock().unwrap().running = false;
     }
 }
 
-fn load_model(st: &State) {
-    let paths = &st.ctx.paths;
-    let _ = std::fs::create_dir_all(paths.models());
-    match E5Embedder::load(&paths.models()) {
+/// Installs a loaded model (and requests a sync to embed the backlog) or logs the failure.
+/// Either way loading is over: touch, then clear `loading`.
+fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
+    match loaded {
         Ok(e) => {
-            *st.ctx.embedder.write().unwrap() = Some(Arc::new(e));
+            *st.ctx.embedder.write().unwrap() = Some(e);
             st.request_sync();
         }
-        Err(e) => log_line(paths, &format!("model load failed: {e:#}")),
+        Err(e) => log_line(&st.ctx.paths, &format!("model load failed: {e:#}")),
     }
+    st.touch();
+    st.loading.store(false, Ordering::SeqCst);
 }
 
 /// Exits the process once nothing has been going on for `idle`. Holds the daemon lock until then.
@@ -211,5 +232,40 @@ fn handle_conn(stream: UnixStream, st: &State) {
         }
         Some("sync") => st.request_sync(),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> (tempfile::TempDir, State) {
+        let t = tempfile::tempdir().unwrap();
+        let st = State::new(Ctx {
+            paths: Paths::new(t.path().join("data")),
+            embedder: Arc::new(RwLock::new(None)),
+        });
+        (t, st)
+    }
+
+    #[test]
+    fn loading_counts_as_busy_until_load_finishes() {
+        let (_t, st) = state();
+        assert!(!st.busy());
+        st.loading.store(true, Ordering::SeqCst);
+        assert!(st.busy(), "model loading must block idle exit");
+        finish_load(&st, Err(anyhow::anyhow!("offline")));
+        assert!(!st.busy(), "failed load must release busy");
+        assert!(st.ctx.embedder.read().unwrap().is_none());
+    }
+
+    #[test]
+    fn successful_load_installs_model_and_requests_sync() {
+        let (_t, st) = state();
+        st.loading.store(true, Ordering::SeqCst);
+        finish_load(&st, Ok(Arc::new(FakeEmbedder)));
+        assert!(!st.loading.load(Ordering::SeqCst));
+        assert!(st.ctx.embedder.read().unwrap().is_some());
+        assert!(st.sched.lock().unwrap().pending);
     }
 }
