@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"sess-sub","cwd":"/work/demo","isSidechain":true,"agentId":"a1","timestamp":"2026-03-01T00:00:00.000Z","message":{"role":"user","content":"Explore the repo"}}
+{"type":"assistant","sessionId":"sess-sub","isSidechain":true,"timestamp":"2026-03-01T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Found it."}]}}

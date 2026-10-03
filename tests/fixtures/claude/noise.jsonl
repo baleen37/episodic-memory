@@ -1,0 +1,12 @@
+{"type":"user","sessionId":"sess-noise","cwd":"/work/noise","isMeta":true,"timestamp":"2026-02-01T00:00:00.000Z","message":{"role":"user","content":"Caveat: synthetic meta"}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:01.000Z","origin":{"kind":"human"},"message":{"role":"user","content":"Real one"}}
+{"type":"assistant","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}
+{"type":"user","sessionId":"sess-noise","isCompactSummary":true,"timestamp":"2026-02-01T00:00:03.000Z","message":{"role":"user","content":"Summary of earlier work"}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:04.000Z","origin":{"kind":"task-notification"},"message":{"role":"user","content":"task finished"}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:06.000Z","message":{"role":"user","content":"<bash-stdout>hi</bash-stdout>"}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:07.000Z","message":{"role":"user","content":"truncated
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:08.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t9","content":"<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>"}]}}
+{"type":"assistant","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+{"type":"user","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:10.000Z","message":{"role":"user","content":"Second real"}}
+{"type":"assistant","sessionId":"sess-noise","timestamp":"2026-02-01T00:00:11.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok2"}]}}
