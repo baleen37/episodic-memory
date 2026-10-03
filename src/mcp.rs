@@ -500,6 +500,32 @@ mod tests {
     }
 
     #[test]
+    fn read_tool_refuses_do_not_index() {
+        let (t, ctx) = indexed_ctx();
+        let src = t.path().join("claude/projects/demo/secret.jsonl");
+        std::fs::write(
+            &src,
+            json!({"type":"user","sessionId":"s9","message":{"role":"user","content":
+                "<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>"}})
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let roots = vec![SourceRoot {
+            kind: SourceKind::ClaudeCodeProjects,
+            root: t.path().join("claude/projects"),
+        }];
+        run_sync_with_roots(&ctx.paths, Some(&FakeEmbedder), &roots).unwrap();
+        let path = ctx
+            .paths
+            .archive_root()
+            .join("claude-code-projects/demo/secret.jsonl");
+        let r = exchange(&ctx, &[call(1, "read", json!({"path": path}))]);
+        assert_eq!(r[0]["result"]["isError"], true, "{}", r[0]);
+        assert_eq!(text(&r[0]), "conversation is marked DO NOT INDEX");
+    }
+
+    #[test]
     fn protocol_errors() {
         let (_t, ctx) = indexed_ctx();
         let input = "not json\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"nope\"}\n{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"ping\"}\n";

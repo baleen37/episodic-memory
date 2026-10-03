@@ -124,7 +124,7 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 5. **트랜잭션 시작**. `offset`을 새 크기로 올린다.
 6. `skipped=1`이면 커밋하고 끝낸다.
 7. **파싱**: 아카이브를 `reparse_line`부터 끝까지 파싱한다. `files`의 세션 정보가 비어 있으면 파일 머리부터 읽어 채운다. 그 파일에서 `line_start >= reparse_line`인 exchange를 지운 뒤, 파싱한 exchange를 넣는다(FTS terms 포함). 마지막 exchange의 `line_start`를 새 `reparse_line`으로 둔다. 마지막 exchange는 진행 중일 수 있어 다음에 파일이 커지면 다시 만든다.
-8. 사용자 메시지에 `<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>`가 있으면 `skipped=1`로 바꾸고 그 파일의 exchange를 모두 지운다. 도구 출력이나 답변에 나온 표시는 무시한다.
+8. 사용자 메시지에 `<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>`가 있으면 `skipped=1`로 바꾸고 그 파일의 exchange를 모두 지운다. 도구 출력이나 답변에 나온 표시는 무시한다. `read`도 `skipped=1`인 파일(모든 generation)을 `conversation is marked DO NOT INDEX` 오류로 거부한다.
 9. `user_message`나 `assistant_message`가 256KB를 넘는 exchange는 넣지 않고 개수만 로그에 남긴다(obra#139).
 10. **커밋**.
 
@@ -188,6 +188,7 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 | `startLine`, `endLine` | 1부터, 선택 |
 
 - 아카이브 원문을 마크다운으로 보여준다: 사용자 메시지, 답변, 도구 호출(입력과 결과).
+- `files.skipped=1`인 대화(DO NOT INDEX)는 읽기 전용 DB 조회로 확인해 `conversation is marked DO NOT INDEX` 오류로 거부한다. DB가 없으면 허용하고, 조회가 실패하면 내용을 보여주지 않고 오류를 낸다(fail closed).
 - `path`를 정규화한 결과가 아카이브 디렉터리 밖이면 에러.
 - 도구 입력과 결과는 항목마다 4KB에서 자른다.
 - 출력은 최대 60KB(약 2만 토큰. Claude Code MCP 출력 기본 한도 25,000 토큰 아래). 넘으면 그 직전 줄에서 끊고, 마지막 줄에 이어 읽을 `startLine`을 적는다. 항목마다 잘리므로 한 줄은 항상 상한 안에 들어가고, 이어 읽기는 매번 최소 한 줄 앞으로 나간다.

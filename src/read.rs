@@ -1,5 +1,7 @@
+use crate::db::open_readonly;
 use crate::parse::{read_file_lines, render_line};
 use crate::paths::{Paths, SourceKind};
+use crate::sync::is_generation_name;
 use anyhow::{anyhow, bail, Result};
 use std::path::{Component, Path};
 
@@ -20,6 +22,41 @@ fn cut(s: &str, max: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+/// `<stem>.gen-N.jsonl` -> `<stem>.jsonl`; other names are unchanged.
+fn generation_base(p: &Path) -> std::path::PathBuf {
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
+    match name.as_deref() {
+        Some(n) if is_generation_name(n) => {
+            let stem = n.strip_suffix(".jsonl").unwrap_or(n);
+            let head = stem.rsplit_once(".gen-").map_or(stem, |(h, _)| h);
+            p.with_file_name(format!("{head}.jsonl"))
+        }
+        _ => p.to_path_buf(),
+    }
+}
+
+/// True when the index marks this archive file (any generation of its source) DO NOT INDEX.
+/// `Ok(false)` only when no DB exists yet; every other failure is an error (fail closed).
+fn is_skipped(paths: &Paths, full: &Path) -> Result<bool> {
+    let db = paths.db();
+    if !db.exists() {
+        return Ok(false);
+    }
+    let c = open_readonly(&db, false)
+        .map_err(|e| anyhow!("cannot check DO NOT INDEX status: {e:#}"))?;
+    let check = || -> rusqlite::Result<Vec<String>> {
+        let mut stmt = c.prepare("SELECT archive_path FROM files WHERE skipped = 1")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect()
+    };
+    let archive_paths = check().map_err(|e| anyhow!("cannot check DO NOT INDEX status: {e}"))?;
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let target = generation_base(full);
+    Ok(archive_paths
+        .iter()
+        .any(|a| generation_base(&canon(Path::new(a))) == target))
 }
 
 /// Renders an archive file as markdown, `L<line> `-prefixed per item, from `start` to `end`
@@ -52,6 +89,9 @@ pub fn read_archive(
     let kind = kind_of(&first.to_string_lossy())?;
     if !full.is_file() {
         bail!("file not found: {path}");
+    }
+    if is_skipped(paths, &full)? {
+        bail!("conversation is marked DO NOT INDEX");
     }
 
     let (start, end) = (
@@ -302,6 +342,81 @@ mod tests {
         .unwrap();
         let err = read_archive(&e.paths, "claude-code-projects/l", None, None).unwrap_err();
         assert_eq!(err.to_string(), "path outside archive");
+    }
+
+    fn synced_with_marker() -> (tempfile::TempDir, Paths) {
+        use crate::paths::SourceRoot;
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("src/projects");
+        fs::create_dir_all(root.join("p")).unwrap();
+        let ok = [user("normal talk")];
+        let bad = [user(
+            "<INSTRUCTIONS-TO-EPISODIC-MEMORY>DO NOT INDEX THIS CHAT</INSTRUCTIONS-TO-EPISODIC-MEMORY>",
+        )];
+        fs::write(root.join("p/ok.jsonl"), ok.join("\n") + "\n").unwrap();
+        fs::write(root.join("p/bad.jsonl"), bad.join("\n") + "\n").unwrap();
+        let paths = Paths::new(t.path().join("data"));
+        let roots = vec![SourceRoot {
+            kind: SourceKind::ClaudeCodeProjects,
+            root,
+        }];
+        crate::sync::run_sync_with_roots(&paths, None, &roots).unwrap();
+        (t, paths)
+    }
+
+    #[test]
+    fn do_not_index_conversation_is_refused() {
+        let (_t, paths) = synced_with_marker();
+        let dir = paths.archive_root().join("claude-code-projects/p");
+        let bad = dir.join("bad.jsonl");
+        assert!(bad.exists(), "archive mirrors skipped files");
+        for p in [bad.to_str().unwrap(), "claude-code-projects/p/bad.jsonl"] {
+            let err = read_archive(&paths, p, None, None).unwrap_err();
+            assert_eq!(err.to_string(), "conversation is marked DO NOT INDEX");
+        }
+        // Older generation of a skipped source is refused too.
+        let old = dir.join("bad.gen-0.jsonl");
+        fs::copy(&bad, &old).unwrap();
+        let err = read_archive(&paths, old.to_str().unwrap(), None, None).unwrap_err();
+        assert_eq!(err.to_string(), "conversation is marked DO NOT INDEX");
+        // Lookalike names are different conversations and stay readable.
+        for name in ["bad2.jsonl", "bad.gen-x.jsonl"] {
+            fs::write(dir.join(name), user("lookalike") + "\n").unwrap();
+            let out = read_archive(&paths, dir.join(name).to_str().unwrap(), None, None).unwrap();
+            assert!(out.contains("lookalike"), "{name}: {out}");
+        }
+        let out = read_archive(&paths, dir.join("ok.jsonl").to_str().unwrap(), None, None).unwrap();
+        assert!(out.contains("normal talk"), "{out}");
+    }
+
+    #[test]
+    fn unqueryable_db_fails_closed_and_missing_db_allows() {
+        let e = env();
+        let p = e.put("claude-code-projects/p/s.jsonl", &[user("visible")]);
+        // No DB file yet: nothing can be marked, read works.
+        let out = read_archive(&e.paths, &p, None, None).unwrap();
+        assert!(out.contains("visible"));
+        // A DB that exists but cannot be queried: refuse rather than expose content.
+        fs::write(
+            e.paths.db(),
+            "this is not a sqlite database, just garbage bytes",
+        )
+        .unwrap();
+        let err = read_archive(&e.paths, &p, None, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("cannot check DO NOT INDEX status"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn generation_base_strips_only_numeric_gen_suffix() {
+        let g = |s: &str| generation_base(Path::new(s));
+        assert_eq!(g("/a/x.gen-12.jsonl"), Path::new("/a/x.jsonl"));
+        assert_eq!(g("/a/x.gen-.jsonl"), Path::new("/a/x.gen-.jsonl"));
+        assert_eq!(g("/a/x.gen-1a.jsonl"), Path::new("/a/x.gen-1a.jsonl"));
+        assert_eq!(g("/a/x.jsonl"), Path::new("/a/x.jsonl"));
     }
 
     #[test]

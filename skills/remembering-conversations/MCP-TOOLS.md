@@ -57,6 +57,7 @@ and result) for a file and line range.
 | `endLine` | `number` | No | Last line |
 
 - Paths outside the archive directory are rejected.
+- Conversations marked `DO NOT INDEX` are refused with `conversation is marked DO NOT INDEX`.
 - Tool inputs and results are truncated to 4KB each.
 - Output blocks are prefixed `L<line>`. Output is capped at 60KB; when cut, the
   last line gives the `startLine` to continue from.
