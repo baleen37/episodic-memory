@@ -188,7 +188,7 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 | `startLine`, `endLine` | 1부터, 선택 |
 
 - 아카이브 원문을 마크다운으로 보여준다: 사용자 메시지, 답변, 도구 호출(입력과 결과).
-- `files.skipped=1`인 대화(DO NOT INDEX)는 읽기 전용 DB 조회로 확인해 `conversation is marked DO NOT INDEX` 오류로 거부한다. DB가 없으면 허용한다.
+- `files.skipped=1`인 대화(DO NOT INDEX)는 읽기 전용 DB 조회로 확인해 `conversation is marked DO NOT INDEX` 오류로 거부한다. DB가 없으면 허용하고, 조회가 실패하면 내용을 보여주지 않고 오류를 낸다(fail closed).
 - `path`를 정규화한 결과가 아카이브 디렉터리 밖이면 에러.
 - 도구 입력과 결과는 항목마다 4KB에서 자른다.
 - 출력은 최대 60KB(약 2만 토큰. Claude Code MCP 출력 기본 한도 25,000 토큰 아래). 넘으면 그 직전 줄에서 끊고, 마지막 줄에 이어 읽을 `startLine`을 적는다. 항목마다 잘리므로 한 줄은 항상 상한 안에 들어가고, 이어 읽기는 매번 최소 한 줄 앞으로 나간다.

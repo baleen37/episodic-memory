@@ -1,6 +1,7 @@
 use crate::db::open_readonly;
 use crate::parse::{read_file_lines, render_line};
 use crate::paths::{Paths, SourceKind};
+use crate::sync::is_generation_name;
 use anyhow::{anyhow, bail, Result};
 use std::path::{Component, Path};
 
@@ -26,40 +27,36 @@ fn cut(s: &str, max: usize) -> &str {
 /// `<stem>.gen-N.jsonl` -> `<stem>.jsonl`; other names are unchanged.
 fn generation_base(p: &Path) -> std::path::PathBuf {
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
-    let base = name.as_deref().and_then(|n| {
-        let stem = n.strip_suffix(".jsonl")?;
-        let (head, gen) = stem.rsplit_once(".gen-")?;
-        (!gen.is_empty() && gen.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| format!("{head}.jsonl"))
-    });
-    match base {
-        Some(b) => p.with_file_name(b),
-        None => p.to_path_buf(),
+    match name.as_deref() {
+        Some(n) if is_generation_name(n) => {
+            let stem = n.strip_suffix(".jsonl").unwrap_or(n);
+            let head = stem.rsplit_once(".gen-").map_or(stem, |(h, _)| h);
+            p.with_file_name(format!("{head}.jsonl"))
+        }
+        _ => p.to_path_buf(),
     }
 }
 
 /// True when the index marks this archive file (any generation of its source) DO NOT INDEX.
-/// Opens the DB read-only; a missing or unreadable DB means nothing is marked.
-fn is_skipped(paths: &Paths, full: &Path) -> bool {
+/// `Ok(false)` only when no DB exists yet; every other failure is an error (fail closed).
+fn is_skipped(paths: &Paths, full: &Path) -> Result<bool> {
     let db = paths.db();
     if !db.exists() {
-        return false;
+        return Ok(false);
     }
-    let Ok(c) = open_readonly(&db, false) else {
-        return false;
+    let c = open_readonly(&db, false)
+        .map_err(|e| anyhow!("cannot check DO NOT INDEX status: {e:#}"))?;
+    let check = || -> rusqlite::Result<Vec<String>> {
+        let mut stmt = c.prepare("SELECT archive_path FROM files WHERE skipped = 1")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect()
     };
-    let Ok(mut stmt) = c.prepare("SELECT archive_path FROM files WHERE skipped = 1") else {
-        return false;
-    };
-    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
-        return false;
-    };
+    let archive_paths = check().map_err(|e| anyhow!("cannot check DO NOT INDEX status: {e}"))?;
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let target = generation_base(full);
-    let hit = rows
-        .flatten()
-        .any(|a| generation_base(&canon(Path::new(&a))) == target);
-    hit
+    Ok(archive_paths
+        .iter()
+        .any(|a| generation_base(&canon(Path::new(a))) == target))
 }
 
 /// Renders an archive file as markdown, `L<line> `-prefixed per item, from `start` to `end`
@@ -93,7 +90,7 @@ pub fn read_archive(
     if !full.is_file() {
         bail!("file not found: {path}");
     }
-    if is_skipped(paths, &full) {
+    if is_skipped(paths, &full)? {
         bail!("conversation is marked DO NOT INDEX");
     }
 
@@ -382,8 +379,35 @@ mod tests {
         fs::copy(&bad, &old).unwrap();
         let err = read_archive(&paths, old.to_str().unwrap(), None, None).unwrap_err();
         assert_eq!(err.to_string(), "conversation is marked DO NOT INDEX");
+        // Lookalike names are different conversations and stay readable.
+        for name in ["bad2.jsonl", "bad.gen-x.jsonl"] {
+            fs::write(dir.join(name), user("lookalike") + "\n").unwrap();
+            let out = read_archive(&paths, dir.join(name).to_str().unwrap(), None, None).unwrap();
+            assert!(out.contains("lookalike"), "{name}: {out}");
+        }
         let out = read_archive(&paths, dir.join("ok.jsonl").to_str().unwrap(), None, None).unwrap();
         assert!(out.contains("normal talk"), "{out}");
+    }
+
+    #[test]
+    fn unqueryable_db_fails_closed_and_missing_db_allows() {
+        let e = env();
+        let p = e.put("claude-code-projects/p/s.jsonl", &[user("visible")]);
+        // No DB file yet: nothing can be marked, read works.
+        let out = read_archive(&e.paths, &p, None, None).unwrap();
+        assert!(out.contains("visible"));
+        // A DB that exists but cannot be queried: refuse rather than expose content.
+        fs::write(
+            e.paths.db(),
+            "this is not a sqlite database, just garbage bytes",
+        )
+        .unwrap();
+        let err = read_archive(&e.paths, &p, None, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("cannot check DO NOT INDEX status"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -391,6 +415,7 @@ mod tests {
         let g = |s: &str| generation_base(Path::new(s));
         assert_eq!(g("/a/x.gen-12.jsonl"), Path::new("/a/x.jsonl"));
         assert_eq!(g("/a/x.gen-.jsonl"), Path::new("/a/x.gen-.jsonl"));
+        assert_eq!(g("/a/x.gen-1a.jsonl"), Path::new("/a/x.gen-1a.jsonl"));
         assert_eq!(g("/a/x.jsonl"), Path::new("/a/x.jsonl"));
     }
 

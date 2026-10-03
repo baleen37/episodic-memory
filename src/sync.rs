@@ -289,7 +289,7 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
 
 // ---- Task 9: discovery, archive import, sync orchestration ----
 
-fn is_generation_name(name: &str) -> bool {
+pub(crate) fn is_generation_name(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".jsonl") else {
         return false;
     };
