@@ -9,7 +9,7 @@ name = "episodic-memory"
 path = "src/main.rs"
 
 [dependencies]
-rusqlite = { version = "*", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 sqlite-vec = "0.1.9"
 fastembed = "7.1"
 serde = { version = "1", features = ["derive"] }

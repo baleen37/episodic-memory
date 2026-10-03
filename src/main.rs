@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod db;
 mod log;
 mod paths;
 
