@@ -2,14 +2,17 @@
 
 use crate::archive::{append_tail, archive_path_for, tails_match};
 use crate::db::{
-    delete_exchanges_from, get_file, insert_exchange, upsert_file, FileRow, NewExchange,
+    delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set, upsert_file, FileRow,
+    NewExchange,
 };
+use crate::embed::{embed_pending, Embedder};
 use crate::log::log_line;
 use crate::parse::{parse_from, read_meta, FileMeta};
-use crate::paths::{Paths, SourceKind};
+use crate::paths::{candidate_roots_from_env, source_roots, Paths, SourceKind, SourceRoot};
 use crate::project::resolve_project;
 use crate::terms::to_terms;
 use anyhow::Result;
+use fs2::FileExt;
 use rusqlite::{Connection, Transaction};
 use std::fs;
 use std::io;
@@ -271,6 +274,235 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
     } else {
         FileOutcome::Synced { new_exchanges }
     })
+}
+
+// ---- Task 9: discovery, archive import, sync orchestration ----
+
+fn is_generation_name(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".jsonl") else {
+        return false;
+    };
+    match stem.rsplit_once(".gen-") {
+        Some((_, digits)) => !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
+/// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
+/// Broken links and unreadable entries are skipped. Returns `(path relative to root, size)`.
+fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.ends_with(".jsonl") && !is_generation_name(&name) {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        out.push((rel.to_path_buf(), meta.len()));
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+pub fn discover_in(roots: &[SourceRoot]) -> Vec<DiscoveredFile> {
+    let mut out = Vec::new();
+    for r in roots {
+        for (rel, size) in walk_jsonl(&r.root) {
+            out.push(DiscoveredFile {
+                kind: r.kind,
+                source_path: r.root.join(&rel),
+                rel,
+                size,
+            });
+        }
+    }
+    out
+}
+
+/// Source files under the real host roots.
+pub fn discover() -> Vec<DiscoveredFile> {
+    discover_in(&source_roots())
+}
+
+/// Spec §5 "기존 아카이브 들여오기". `candidates` supplies the (possibly missing) source root
+/// per kind. Returns the number of files registered; sets `meta.imported` only when no file failed.
+pub fn import_archive_with_roots(
+    conn: &mut Connection,
+    paths: &Paths,
+    candidates: &[SourceRoot],
+) -> Result<usize> {
+    let mut registered = 0;
+    let mut failures = 0;
+    for kind in SourceKind::ALL {
+        let Some(root) = candidates.iter().find(|r| r.kind == kind) else {
+            continue;
+        };
+        let archive_dir = paths.archive_root().join(kind.as_str());
+        for (rel, _) in walk_jsonl(&archive_dir) {
+            match import_one(conn, paths, kind, &root.root, &rel) {
+                Ok(true) => registered += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    failures += 1;
+                    log_line(
+                        paths,
+                        &format!("import {}/{}: {e:#}", kind.as_str(), rel.display()),
+                    );
+                }
+            }
+        }
+    }
+    if failures == 0 {
+        meta_set(conn, "imported", "1")?;
+    }
+    Ok(registered)
+}
+
+pub fn import_archive(conn: &mut Connection, paths: &Paths) -> Result<usize> {
+    import_archive_with_roots(conn, paths, &candidate_roots_from_env())
+}
+
+/// Registers one archive file; false if it already has a `files` row.
+fn import_one(
+    conn: &mut Connection,
+    paths: &Paths,
+    kind: SourceKind,
+    root: &Path,
+    rel: &Path,
+) -> Result<bool> {
+    let archive0 = path_str(&archive_path_for(paths, kind, rel, 0));
+    let source = root.join(rel);
+    let source_key = path_str(&source);
+    let known: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM files WHERE archive_path = ?1 OR source_path = ?2)",
+        [&archive0, &source_key],
+        |r| r.get(0),
+    )?;
+    if known {
+        return Ok(false);
+    }
+    let (generation, offset) = if source.exists() {
+        adopt_existing_archive(paths, kind, rel, &source)?
+    } else {
+        (0, fs::metadata(&archive0)?.len())
+    };
+    let mut row = FileRow {
+        source_path: source_key,
+        source_kind: kind.as_str().into(),
+        archive_path: path_str(&archive_path_for(paths, kind, rel, generation)),
+        generation,
+        offset: offset as i64,
+        reparse_line: 1,
+        session_id: None,
+        cwd: None,
+        project: None,
+        harness: None,
+        is_sidechain: None,
+        user_signal: None,
+        skipped: false,
+    };
+    let tx = conn.transaction()?;
+    upsert_file(&tx, &row)?;
+    if row.offset > 0 {
+        index_file(&tx, &mut row, kind)?;
+        upsert_file(&tx, &row)?;
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SyncStats {
+    pub skipped: bool,
+    pub files_synced: usize,
+    pub new_exchanges: usize,
+    pub errors: usize,
+    pub embedded: usize,
+}
+
+impl SyncStats {
+    pub fn skipped() -> SyncStats {
+        SyncStats {
+            skipped: true,
+            ..SyncStats::default()
+        }
+    }
+}
+
+pub fn run_sync(paths: &Paths, embedder: Option<&dyn Embedder>) -> Result<SyncStats> {
+    run_sync_with_roots(paths, embedder, &candidate_roots_from_env())
+}
+
+/// `roots` are the candidate roots per kind; missing ones are ignored for discovery.
+pub fn run_sync_with_roots(
+    paths: &Paths,
+    embedder: Option<&dyn Embedder>,
+    roots: &[SourceRoot],
+) -> Result<SyncStats> {
+    fs::create_dir_all(&paths.data)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths.sync_lock())?;
+    if lock.try_lock_exclusive().is_err() {
+        return Ok(SyncStats::skipped());
+    }
+    // `lock` stays alive until the end of the run.
+    let mut conn = crate::db::open(&paths.db())?;
+    if meta_get(&conn, "imported").is_none() {
+        import_archive_with_roots(&mut conn, paths, roots)?;
+    }
+
+    let mut stats = SyncStats::default();
+    let mut last_error = String::new();
+    for f in discover_in(roots) {
+        match sync_file(&mut conn, paths, &f) {
+            Ok(FileOutcome::Synced { new_exchanges }) => {
+                stats.files_synced += 1;
+                stats.new_exchanges += new_exchanges;
+            }
+            Ok(FileOutcome::Unchanged | FileOutcome::Skipped) => {}
+            Err(e) => {
+                stats.errors += 1;
+                last_error = format!("{}: {e:#}", f.source_path.display());
+                log_line(paths, &format!("sync {last_error}"));
+            }
+        }
+    }
+    if let Some(e) = embedder {
+        match embed_pending(&mut conn, e) {
+            Ok(n) => stats.embedded = n,
+            Err(err) => {
+                stats.errors += 1;
+                last_error = format!("embedding: {err:#}");
+                log_line(paths, &last_error);
+            }
+        }
+    }
+
+    meta_set(&conn, "last_sync", &chrono::Utc::now().to_rfc3339())?;
+    let count: i64 = meta_get(&conn, "sync_count")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    meta_set(&conn, "sync_count", &(count + 1).to_string())?;
+    meta_set(&conn, "last_error", &last_error)?;
+    drop(lock);
+    Ok(stats)
 }
 
 #[cfg(test)]
@@ -717,5 +949,281 @@ mod mirror {
         e.append("{\"type\":\"user\",\"mess");
         e.sync();
         assert_eq!(e.exchanges(), before);
+    }
+}
+
+#[cfg(test)]
+mod orchestration {
+    use super::*;
+    use crate::embed::FakeEmbedder;
+
+    struct Env {
+        _t: tempfile::TempDir,
+        paths: Paths,
+        root: PathBuf,
+        roots: Vec<SourceRoot>,
+    }
+
+    fn env() -> Env {
+        let t = tempfile::tempdir().unwrap();
+        let paths = Paths::new(t.path().join("data"));
+        fs::create_dir_all(&paths.data).unwrap();
+        let root = t.path().join("src-root");
+        let roots = vec![SourceRoot {
+            kind: SourceKind::ClaudeCodeProjects,
+            root: root.clone(),
+        }];
+        Env {
+            _t: t,
+            paths,
+            root,
+            roots,
+        }
+    }
+
+    fn put(path: &Path, body: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    fn turn(q: &str, a: &str) -> String {
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
+                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
+                "message":{"role":"user","content":q}}),
+            serde_json::json!({"type":"assistant","message":{"role":"assistant",
+                "content":[{"type":"text","text":a}]}})
+        )
+    }
+
+    impl Env {
+        fn archive(&self, kind: SourceKind, rel: &str, generation: i64) -> PathBuf {
+            archive_path_for(&self.paths, kind, Path::new(rel), generation)
+        }
+        fn conn(&self) -> Connection {
+            crate::db::open(&self.paths.db()).unwrap()
+        }
+        fn row(&self, conn: &Connection, rel: &str) -> FileRow {
+            get_file(conn, self.root.join(rel).to_str().unwrap())
+                .unwrap()
+                .unwrap()
+        }
+        fn import(&self, conn: &mut Connection) -> usize {
+            import_archive_with_roots(conn, &self.paths, &self.roots).unwrap()
+        }
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn import_registers_existing_archive() {
+        let e = env();
+        let k = SourceKind::ClaudeCodeProjects;
+        // Source present, archive is a matching prefix: adopt at archive size, then sync only the tail.
+        let first = turn("q1", "a1");
+        put(&e.archive(k, "p/match.jsonl", 0), &first);
+        put(
+            &e.root.join("p/match.jsonl"),
+            &(first.clone() + &turn("q2", "a2")),
+        );
+        // Source present, tail differs: old archive kept, new generation.
+        put(&e.archive(k, "p/diff.jsonl", 0), &first);
+        put(
+            &e.root.join("p/diff.jsonl"),
+            &turn("different long question", "different long answer"),
+        );
+        // Source missing: archive only.
+        put(&e.archive(k, "p/gone.jsonl", 0), &first);
+
+        let mut conn = e.conn();
+        assert_eq!(e.import(&mut conn), 3);
+        assert_eq!(meta_get(&conn, "imported").as_deref(), Some("1"));
+
+        let m = e.row(&conn, "p/match.jsonl");
+        assert_eq!((m.generation, m.offset), (0, first.len() as i64));
+        assert_eq!(
+            count(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM exchanges WHERE archive_path = '{}'",
+                    m.archive_path
+                )
+            ),
+            1
+        );
+
+        let d = e.row(&conn, "p/diff.jsonl");
+        assert_eq!((d.generation, d.offset), (1, 0));
+        assert!(d.archive_path.ends_with("p/diff.gen-1.jsonl"));
+        assert_eq!(
+            fs::read_to_string(e.archive(k, "p/diff.jsonl", 0)).unwrap(),
+            first
+        );
+
+        let g = e.row(&conn, "p/gone.jsonl");
+        assert_eq!((g.generation, g.offset), (0, first.len() as i64));
+        assert_eq!(
+            count(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM exchanges WHERE archive_path = '{}'",
+                    g.archive_path
+                )
+            ),
+            1
+        );
+        assert_eq!(count(&conn, "SELECT count(*) FROM exchanges"), 2);
+
+        // Importing again registers nothing.
+        assert_eq!(e.import(&mut conn), 0);
+
+        // A later sync of the matching source appends only the tail.
+        let df = discover_in(&e.roots);
+        let f = df
+            .iter()
+            .find(|f| f.rel == Path::new("p/match.jsonl"))
+            .unwrap();
+        // The last (possibly in-progress) exchange is re-parsed, so q1 is rebuilt along with q2.
+        assert_eq!(
+            sync_file(&mut conn, &e.paths, f).unwrap(),
+            FileOutcome::Synced { new_exchanges: 2 }
+        );
+        assert_eq!(
+            count(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM exchanges WHERE archive_path = '{}'",
+                    m.archive_path
+                )
+            ),
+            2
+        );
+        assert_eq!(
+            fs::read_to_string(e.archive(k, "p/match.jsonl", 0)).unwrap(),
+            first + &turn("q2", "a2")
+        );
+        // And the mismatched one mirrors into gen-1.
+        let f = df
+            .iter()
+            .find(|f| f.rel == Path::new("p/diff.jsonl"))
+            .unwrap();
+        sync_file(&mut conn, &e.paths, f).unwrap();
+        assert_eq!(
+            fs::metadata(e.archive(k, "p/diff.jsonl", 1)).unwrap().len(),
+            f.size
+        );
+    }
+
+    #[test]
+    fn import_skips_legacy_and_generations() {
+        let e = env();
+        let body = turn("q", "a");
+        put(
+            &e.paths.archive_root().join("claude-projects/a.jsonl"),
+            &body,
+        );
+        put(
+            &e.paths
+                .archive_root()
+                .join("claude-code-projects/b.gen-1.jsonl"),
+            &body,
+        );
+        put(
+            &e.paths.archive_root().join("claude-code-projects/c.jsonl"),
+            &body,
+        );
+        let mut conn = e.conn();
+        assert_eq!(e.import(&mut conn), 1);
+        assert_eq!(count(&conn, "SELECT count(*) FROM files"), 1);
+    }
+
+    #[test]
+    fn discover_filters_and_sorts() {
+        let e = env();
+        put(&e.root.join("b/x.jsonl"), "");
+        put(&e.root.join("a/y.jsonl"), "");
+        put(&e.root.join("a/y.gen-2.jsonl"), "");
+        put(&e.root.join("a/note.txt"), "");
+        std::os::unix::fs::symlink(e.root.join("nowhere"), e.root.join("a/broken.jsonl")).unwrap();
+        let rels: Vec<_> = discover_in(&e.roots)
+            .into_iter()
+            .map(|f| f.rel.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(rels, vec!["a/y.jsonl", "b/x.jsonl"]);
+        assert!(is_generation_name("s.gen-12.jsonl"));
+        assert!(!is_generation_name("s.gen-x.jsonl"));
+        assert!(!is_generation_name("s.jsonl"));
+    }
+
+    #[test]
+    fn run_sync_respects_sync_lock() {
+        let e = env();
+        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
+        let held = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(e.paths.sync_lock())
+            .unwrap();
+        held.lock_exclusive().unwrap();
+        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
+        assert_eq!(stats, SyncStats::skipped());
+        assert!(!e.paths.db().exists());
+        held.unlock().unwrap();
+        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        assert!(!stats.skipped);
+        assert_eq!(stats.new_exchanges, 1);
+    }
+
+    #[test]
+    fn run_sync_without_embedder_leaves_pending() {
+        let e = env();
+        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
+        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        assert_eq!(
+            (
+                stats.files_synced,
+                stats.new_exchanges,
+                stats.embedded,
+                stats.errors
+            ),
+            (1, 1, 0, 0)
+        );
+        let conn = e.conn();
+        assert_eq!(
+            count(&conn, "SELECT count(*) FROM exchanges WHERE embedded = 0"),
+            1
+        );
+        assert_eq!(meta_get(&conn, "sync_count").as_deref(), Some("1"));
+        assert_eq!(meta_get(&conn, "last_error").as_deref(), Some(""));
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&meta_get(&conn, "last_sync").unwrap()).is_ok()
+        );
+        drop(conn);
+
+        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
+        assert_eq!((stats.new_exchanges, stats.embedded), (0, 1));
+        let conn = e.conn();
+        assert_eq!(count(&conn, "SELECT count(*) FROM vec_exchanges"), 1);
+        assert_eq!(meta_get(&conn, "sync_count").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn run_sync_logs_file_errors_and_continues() {
+        let e = env();
+        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
+        // A source whose archive location is blocked by a directory fails; the other still syncs.
+        put(&e.root.join("p/b.jsonl"), &turn("q2", "a2"));
+        fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
+        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        assert_eq!((stats.errors, stats.files_synced), (1, 1));
+        let conn = e.conn();
+        let last = meta_get(&conn, "last_error").unwrap();
+        assert!(last.contains("a.jsonl"), "{last}");
+        let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(log.contains("a.jsonl"));
     }
 }

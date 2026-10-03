@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod archive;
 mod db;
+mod embed;
 mod log;
 mod parse;
 mod paths;

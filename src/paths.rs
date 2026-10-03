@@ -107,6 +107,15 @@ pub fn source_roots() -> Vec<SourceRoot> {
     ))
 }
 
+/// All three roots resolved from the environment, whether or not they exist.
+pub fn candidate_roots_from_env() -> Vec<SourceRoot> {
+    candidate_roots(
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os("CODEX_HOME"),
+        &home_dir(),
+    )
+}
+
 fn candidate_roots(
     claude_config_dir: Option<OsString>,
     codex_home: Option<OsString>,
