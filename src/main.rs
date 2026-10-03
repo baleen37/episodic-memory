@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
 
+mod log;
+mod paths;
+
 #[derive(Parser)]
 #[command(name = "episodic-memory", version)]
 struct Cli {
