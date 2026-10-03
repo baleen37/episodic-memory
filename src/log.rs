@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::paths::Paths;
 use std::io::Write;
 

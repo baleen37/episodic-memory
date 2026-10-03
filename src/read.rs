@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::parse::{read_file_lines, render_line};
 use crate::paths::{Paths, SourceKind};
 use anyhow::{anyhow, bail, Result};

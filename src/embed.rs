@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use anyhow::{bail, Result};
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use rusqlite::{params, Connection};

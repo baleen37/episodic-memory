@@ -1,0 +1,402 @@
+use fs2::FileExt;
+use rusqlite::{Connection, OpenFlags};
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const BIN: &str = env!("CARGO_BIN_EXE_episodic-memory");
+const VER: &str = env!("CARGO_PKG_VERSION");
+/// Short idle timeout so a leaked daemon cleans itself up.
+const IDLE: &str = "5";
+
+static SEQ: AtomicUsize = AtomicUsize::new(0);
+
+struct Env {
+    root: PathBuf,
+    data: PathBuf,
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        std::fs::copy(e.path(), to.join(e.file_name())).unwrap();
+    }
+}
+
+impl Env {
+    /// `/tmp/em-<pid>-<n>` with fixture copies; `data_name` lets a test lengthen the data path.
+    fn with_data(data_name: &str) -> Env {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let root = PathBuf::from(format!("/tmp/em-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        copy_dir(&fixtures.join("claude"), &root.join("c/projects/demo"));
+        copy_dir(&fixtures.join("codex"), &root.join("x/sessions/2026/01/02"));
+        let data = root.join(data_name);
+        Env { root, data }
+    }
+
+    fn new() -> Env {
+        Env::with_data("d")
+    }
+
+    fn cmd(&self, args: &[&str]) -> Command {
+        let mut c = Command::new(BIN);
+        c.args(args)
+            .env("EPISODIC_MEMORY_DIR", &self.data)
+            .env("CLAUDE_CONFIG_DIR", self.root.join("c"))
+            .env("CODEX_HOME", self.root.join("x"))
+            .env_remove("EPISODIC_MEMORY_DISABLE")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        c
+    }
+
+    /// `sub` plus the hidden test flags.
+    fn fast(&self, sub: &str) -> Command {
+        self.cmd(&[sub, "--fake-embedder", "--idle-secs", IDLE])
+    }
+
+    fn socket(&self) -> PathBuf {
+        self.data.join(format!("daemon-{VER}.sock"))
+    }
+
+    fn run_sync_hook(&self) {
+        let t = Instant::now();
+        let st = self.fast("sync").status().unwrap();
+        assert!(st.success());
+        assert!(t.elapsed() < Duration::from_secs(2), "sync hook blocked");
+    }
+
+    fn meta(&self, key: &str) -> Option<String> {
+        let db = self.data.join("episodic.db");
+        if !db.exists() {
+            return None;
+        }
+        let c = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+        c.busy_timeout(Duration::from_secs(5)).ok()?;
+        c.query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
+            .ok()
+    }
+
+    fn sync_count(&self) -> i64 {
+        self.meta("sync_count")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn mcp(&self) -> Mcp {
+        let mut child = self
+            .fast("mcp")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, rx) = channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut m = Mcp {
+            child,
+            stdin,
+            rx,
+            next_id: 1,
+        };
+        let init = m.request(
+            "initialize",
+            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
+        );
+        assert_eq!(init["result"]["serverInfo"]["name"], "episodic-memory");
+        m
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        // The daemon writes its pid into the daemon lock file.
+        if let Ok(pid) = std::fs::read_to_string(self.data.join(format!("daemon-{VER}.lock"))) {
+            let pid = pid.trim();
+            if !pid.is_empty() {
+                let _ = Command::new("kill").arg(pid).stderr(Stdio::null()).status();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+struct Mcp {
+    child: Child,
+    stdin: ChildStdin,
+    rx: Receiver<String>,
+    next_id: i64,
+}
+
+impl Mcp {
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        let msg = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
+        writeln!(self.stdin, "{msg}").unwrap();
+        let line = self
+            .rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("no MCP response");
+        let v: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], id);
+        v
+    }
+
+    fn search(&mut self, query: &str) -> (bool, String) {
+        let r = self.request(
+            "tools/call",
+            json!({"name":"search","arguments":{"query":query}}),
+        );
+        let text = r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        (r["result"]["isError"] == true, text)
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn wait_until(limit: Duration, mut f: impl FnMut() -> bool) -> bool {
+    let end = Instant::now() + limit;
+    loop {
+        if f() {
+            return true;
+        }
+        if Instant::now() >= end {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_child(c: &mut Child, limit: Duration) -> Option<std::process::ExitStatus> {
+    let end = Instant::now() + limit;
+    loop {
+        if let Some(st) = c.try_wait().unwrap() {
+            return Some(st);
+        }
+        if Instant::now() >= end {
+            let _ = c.kill();
+            return None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn three_mcp_clients_one_daemon() {
+    let env = Env::new();
+    let handles: Vec<_> = (0..3)
+        .map(|_| {
+            let mut m = env.mcp();
+            let r = m.request("tools/list", json!({}));
+            let names: Vec<String> = r["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(names, ["search", "read"]);
+            m
+        })
+        .collect();
+
+    let mut second = env.fast("daemon").spawn().unwrap();
+    let st = wait_child(&mut second, Duration::from_secs(1)).expect("second daemon kept running");
+    assert!(st.success());
+    drop(handles);
+}
+
+#[test]
+fn sync_hook_triggers_indexing() {
+    let env = Env::new();
+    env.run_sync_hook();
+    let mut m = env.mcp();
+    let found = wait_until(Duration::from_secs(2), || {
+        let (err, text) = m.search("list files");
+        assert!(!err, "{text}");
+        text.contains("main.jsonl:")
+    });
+    assert!(found, "search never returned the synced exchange");
+}
+
+#[test]
+fn sync_requests_coalesce() {
+    let env = Env::new();
+    env.run_sync_hook();
+    assert!(wait_until(Duration::from_secs(10), || env.sync_count() >= 1));
+    let base = env.sync_count();
+    // Back-to-back requests (what ten hooks firing at once look like to the daemon); a hook
+    // process takes longer to start than a no-op sync, so spawning ten would not overlap.
+    for _ in 0..10 {
+        let mut s = UnixStream::connect(env.socket()).unwrap();
+        s.write_all(b"{\"client\":\"sync\"}\n").unwrap();
+    }
+    assert!(wait_until(Duration::from_secs(10), || env.sync_count() > base));
+    // Settle: no further syncs for one second.
+    let mut last = env.sync_count();
+    let mut stable_since = Instant::now();
+    assert!(wait_until(Duration::from_secs(10), || {
+        let c = env.sync_count();
+        if c != last {
+            last = c;
+            stable_since = Instant::now();
+        }
+        stable_since.elapsed() >= Duration::from_secs(1)
+    }));
+    let delta = env.sync_count() - base;
+    assert!((1..=2).contains(&delta), "10 requests ran {delta} syncs");
+}
+
+#[test]
+fn different_version_daemons_share_sync_lock() {
+    let env = Env::new();
+    std::fs::create_dir_all(&env.data).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(env.data.join("sync.lock"))
+        .unwrap();
+    lock.lock_exclusive().unwrap();
+
+    env.run_sync_hook();
+    assert!(wait_until(Duration::from_secs(5), || UnixStream::connect(
+        env.socket()
+    )
+    .is_ok()));
+    env.run_sync_hook();
+    thread::sleep(Duration::from_secs(1));
+    assert_eq!(env.meta("last_sync"), None, "sync ran without sync.lock");
+
+    lock.unlock().unwrap();
+    env.run_sync_hook();
+    assert!(
+        wait_until(Duration::from_secs(5), || env.meta("last_sync").is_some()),
+        "sync did not run after the lock was released"
+    );
+}
+
+#[test]
+fn idle_exit() {
+    let env = Env::new();
+    let mut d = env
+        .cmd(&["daemon", "--fake-embedder", "--idle-secs", "2"])
+        .spawn()
+        .unwrap();
+    assert!(wait_until(Duration::from_secs(5), || UnixStream::connect(
+        env.socket()
+    )
+    .is_ok()));
+    let up = Instant::now();
+    let st = wait_child(&mut d, Duration::from_secs(4)).expect("daemon did not exit when idle");
+    assert!(st.success());
+    assert!(up.elapsed() >= Duration::from_secs(1), "exited too early");
+    assert!(UnixStream::connect(env.socket()).is_err());
+}
+
+#[test]
+fn search_during_sync_sees_committed_state() {
+    let env = Env::new();
+    // A large synthetic transcript so the first sync takes a while.
+    let mut big = String::new();
+    for i in 0..3000 {
+        big.push_str(&format!(
+            "{{\"type\":\"user\",\"sessionId\":\"big\",\"cwd\":\"/work/big\",\"timestamp\":\"2026-01-03T00:00:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"bulk question {i} about widgets\"}}}}\n\
+             {{\"type\":\"assistant\",\"sessionId\":\"big\",\"timestamp\":\"2026-01-03T00:00:01.000Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"bulk answer {i} widgets ok\"}}]}}}}\n"
+        ));
+    }
+    std::fs::write(env.root.join("c/projects/demo/big.jsonl"), big).unwrap();
+
+    let mut m = env.mcp();
+    let mut seen: Vec<(String, i64, i64)> = Vec::new();
+    let mut rounds = 0;
+    let done = wait_until(Duration::from_secs(120), || {
+        let finished = env.sync_count() >= 1;
+        let (err, text) = m.search("bulk widgets");
+        assert!(!err, "{text}");
+        for line in text.lines() {
+            let Some((path, range)) = line.trim().rsplit_once(':') else {
+                continue;
+            };
+            let Some((s, e)) = range.split_once('-') else {
+                continue;
+            };
+            if let (Ok(s), Ok(e)) = (s.parse(), e.parse()) {
+                if path.ends_with(".jsonl") {
+                    seen.push((path.to_string(), s, e));
+                }
+            }
+        }
+        rounds += 1;
+        finished
+    });
+    assert!(done, "sync never finished");
+    assert!(rounds >= 2);
+    assert!(!seen.is_empty());
+    let c = Connection::open_with_flags(
+        env.data.join("episodic.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    for (path, s, e) in &seen {
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM exchanges WHERE archive_path = ? AND line_start = ? AND line_end = ?",
+                rusqlite::params![path, s, e],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "{path}:{s}-{e} not in DB");
+    }
+}
+
+#[test]
+fn long_socket_path_fails_cleanly() {
+    let prefix_len = format!("/tmp/em-{}-00/", std::process::id()).len();
+    let env = Env::with_data(&"a".repeat(120 - prefix_len));
+    assert!(env.data.as_os_str().len() >= 119, "{}", env.data.display());
+    let mut m = env.fast("mcp").stdin(Stdio::piped()).spawn().unwrap();
+    let st = wait_child(&mut m, Duration::from_secs(10)).expect("mcp hung");
+    assert!(!st.success());
+    let log = std::fs::read_to_string(env.data.join("logs/episodic-memory.log")).unwrap();
+    assert!(log.contains("socket path too long"), "{log}");
+}
+
+#[test]
+fn disable_env_short_circuits() {
+    let env = Env::new();
+    let st = env
+        .fast("sync")
+        .env("EPISODIC_MEMORY_DISABLE", "1")
+        .status()
+        .unwrap();
+    assert!(st.success());
+    thread::sleep(Duration::from_millis(500));
+    assert!(!env.data.exists(), "disabled sync touched the data dir");
+}

@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::archive::{append_tail, archive_path_for, tails_match};
 use crate::db::{
     delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set, upsert_file, FileRow,
@@ -334,6 +332,7 @@ pub fn discover_in(roots: &[SourceRoot]) -> Vec<DiscoveredFile> {
 }
 
 /// Source files under the real host roots.
+#[allow(dead_code)] // no caller; run_sync uses discover_in
 pub fn discover() -> Vec<DiscoveredFile> {
     discover_in(&source_roots())
 }
@@ -372,6 +371,7 @@ pub fn import_archive_with_roots(
     Ok(registered)
 }
 
+#[allow(dead_code)] // no caller; run_sync uses import_archive_with_roots
 pub fn import_archive(conn: &mut Connection, paths: &Paths) -> Result<usize> {
     import_archive_with_roots(conn, paths, &candidate_roots_from_env())
 }

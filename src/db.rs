@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};

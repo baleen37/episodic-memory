@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +18,7 @@ fn home_dir() -> PathBuf {
 }
 
 impl Paths {
+    #[cfg(test)]
     pub fn new(data: PathBuf) -> Paths {
         Paths { data }
     }
@@ -99,6 +98,7 @@ pub struct SourceRoot {
 }
 
 /// Existing source roots, resolved from the environment.
+#[allow(dead_code)] // no caller since run_sync switched to candidate roots
 pub fn source_roots() -> Vec<SourceRoot> {
     retain_existing(candidate_roots(
         std::env::var_os("CLAUDE_CONFIG_DIR"),

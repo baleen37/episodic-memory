@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::embed::Embedder;
 use crate::terms::build_match_query;
 use anyhow::{bail, Result};

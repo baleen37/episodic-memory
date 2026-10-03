@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::paths::SourceKind;
 use anyhow::Result;
 use serde_json::Value;

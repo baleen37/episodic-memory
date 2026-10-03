@@ -1,5 +1,3 @@
-#![allow(dead_code)] // not yet used by main; wired in later tasks
-
 use crate::paths::{Paths, SourceKind};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
