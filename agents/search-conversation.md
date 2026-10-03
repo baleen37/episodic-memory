@@ -19,7 +19,7 @@ You are a specialized agent for searching and synthesizing past conversation his
 
 ### 1. Search
 
-Use `mcp__plugin_episodic_memory_episodic_memory__search`:
+Use `mcp__plugin_episodic-memory_episodic-memory__search`:
 
 ```json
 { "query": "authentication patterns", "limit": 10 }
@@ -42,7 +42,7 @@ reply, and ends with `<archive_path>:<start>-<end>`.
 ### 2. Read for detail
 
 For the one to three most relevant results, call
-`mcp__plugin_episodic_memory_episodic_memory__read` with that result's
+`mcp__plugin_episodic-memory_episodic-memory__read` with that result's
 `archive_path` as `path` and the line range as `startLine` / `endLine`
 (widen the range slightly if you need surrounding context):
 

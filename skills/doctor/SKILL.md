@@ -8,8 +8,10 @@ description: Diagnose the health of the episodic-memory plugin. Invoke when epis
 Run:
 
 ```bash
-"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" doctor
+"${CLAUDE_PLUGIN_ROOT}/bin/episodic-memory" doctor
 ```
+
+In Codex, use the plugin install path instead: `~/.codex/plugins/cache/<marketplace>/episodic-memory/<version>/bin/episodic-memory doctor`.
 
 Each line is `[ok]`, `[warn]` or `[fail]` followed by `name: detail`. Exit code 1 means at least one `fail`. Doctor only reads state; it never starts the daemon or creates the database.
 
@@ -19,7 +21,6 @@ Report every `warn` and `fail` line to the user with its cause and remedy.
 |---|---|---|
 | `binary` warn, unsupported platform | Only Apple Silicon macOS and Linux (x86_64, aarch64) are supported | Nothing to fix; use a supported machine |
 | `daemon` warn, not running | The daemon starts at SessionStart and exits after 10 idle minutes | Start a new session, then run doctor again |
-| `daemon` warn, version differs | An old daemon survived an upgrade | Wait for it to idle out (10 minutes) or end the old `episodic-memory daemon` process |
 | `db` warn, not created yet | No sync has ever run | Start a new session and wait for the first sync |
 | `db` fail | The database file cannot be opened | Check permissions on the path shown; if corrupt, move it aside so the next sync rebuilds it from the archive |
 | `embeddings` warn | Exchanges are waiting for embedding; search is keyword-only for them | Wait; if it persists, check `model` |

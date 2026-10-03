@@ -25,7 +25,8 @@ and exits 0; the MCP server fails to start.
 
 - The SessionStart hook runs `episodic-memory sync`, which asks a background daemon to copy new
   transcript bytes into `~/.config/episodic-memory/conversation-archive/` and index them.
-  Sources: Claude Code (`~/.claude/projects`, `~/.claude/transcripts`) and Codex (`~/.codex/sessions`).
+  Sources: Claude Code (`$CLAUDE_CONFIG_DIR/projects` and `$CLAUDE_CONFIG_DIR/transcripts`,
+  default `~/.claude`) and Codex (`$CODEX_HOME/sessions`, default `~/.codex`).
 - The index unit is one turn: a user message, the reply, and tool names.
 - The daemon holds the embedding model (multilingual-e5-small) once for all sessions and exits
   after 10 idle minutes.
@@ -126,7 +127,8 @@ The MCP server and skills work without it; only automatic indexing needs the hoo
 3. On first start the daemon indexes the existing archive in the background and downloads the
    embedding model. Search is keyword-only until the model is ready.
    A large archive can take a while; progress survives restarts.
-4. The Stop hook, `setup` and `doctor` skills, and `config.json` LLM settings are removed.
+4. The Stop hook, the `setup` skill, and `config.json` LLM settings are removed. The `doctor`
+   skill remains and now runs `episodic-memory doctor`.
 
 ## Development
 

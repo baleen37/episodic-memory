@@ -56,11 +56,12 @@ MCP client        -> bin/episodic-memory mcp  -> unix socket -> daemon (search, 
 daemon sync job   -> discover *.jsonl under source roots (stat size only)
                   -> append new bytes to conversation-archive/<source_kind>/<rel path>
                   -> parse archive from reparse_line into exchanges (FTS terms inline)
-                  -> embed pending exchanges (32 per batch) into vec_exchanges
+                  -> embed pending exchanges (8 per batch) into vec_exchanges
 ```
 
 - The archive is the source of truth; `read` renders archive text, never the host transcript.
-- Source roots: `$CLAUDE_CONFIG_DIR/projects`, `~/.claude/transcripts`, `$CODEX_HOME/sessions`.
+- Source roots: `$CLAUDE_CONFIG_DIR/projects`, `$CLAUDE_CONFIG_DIR/transcripts`, `$CODEX_HOME/sessions`
+  (`CLAUDE_CONFIG_DIR` defaults to `~/.claude`, `CODEX_HOME` to `~/.codex`).
 - A rewritten source starts a new archive generation (`<name>.gen-N.jsonl`); the old file is kept.
 - One daemon per version (`daemon-{VER}.sock/.lock`); one sync at a time (`sync.lock`).
 - Before the model is ready, search is BM25-only and says so.
