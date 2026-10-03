@@ -1,0 +1,7 @@
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"session_meta","payload":{"id":"codex-sub","cwd":"/work/demo","source":{"subagent":{"thread_spawn":{"parent_thread_id":"codex-modern","depth":1,"agent_path":"/root/reviewer"}}}}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Inherited parent question"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"agent_message","author":"/root","recipient":"/root/other","content":[{"type":"input_text","text":"Not for me"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"agent_message","author":"/root","recipient":"/root/reviewer","content":[{"type":"input_text","text":"Review the parser"},{"type":"encrypted_content","encrypted_content":"AAAA"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"s1","name":"exec","input":"ls"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"s1","output":"z"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Review done."}]}}

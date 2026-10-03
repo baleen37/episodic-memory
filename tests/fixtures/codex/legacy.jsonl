@@ -1,0 +1,11 @@
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"session_meta","payload":{"id":"codex-legacy","cwd":"/work/old"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>be nice</user_instructions>"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>cwd</environment_context>"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Old Q1 hello"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"function_call","call_id":"f1","name":"shell","arguments":"{}"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"f1","output":"x"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"local_shell_call","call_id":"l1","action":{}}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"local_shell_call_output","call_id":"l1","output":"y"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Old A1"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Old Q2 again"}]}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Old A2"}]}}

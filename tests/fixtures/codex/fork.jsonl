@@ -1,0 +1,4 @@
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"session_meta","payload":{"id":"codex-fork","cwd":"/work/demo","forked_from_id":"codex-parent"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"session_meta","payload":{"id":"codex-parent","cwd":"/work/parent"}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"Fork Q1"}]}}}
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fork A1"}]}}

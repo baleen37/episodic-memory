@@ -13,6 +13,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -21,16 +23,101 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
+          node-version: 22
 
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MARKETPLACE_DISPATCH_TOKEN: ${{ secrets.BALEEN_MARKETPLACE_DISPATCH_TOKEN }}
-        run: bunx semantic-release
+        run: |
+          npx -y -p semantic-release -p @semantic-release/exec -p @semantic-release/git semantic-release
+
+      # semantic-release pushes the release commit and a vX.Y.Z tag on it.
+      # If HEAD carries a version tag after the run, a release was made.
+      - name: Detect new version
+        id: version
+        run: |
+          git fetch --tags --force
+          tag="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    env:
+      VER: ${{ needs.release.outputs.version }}
+
+    steps:
+      # Tags created with GITHUB_TOKEN do not trigger other workflows,
+      # so the binaries are built in this same workflow run.
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          name="episodic-memory-v${VER}-${{ matrix.target }}"
+          mkdir -p dist
+          tar -czf "dist/${name}.tar.gz" -C "target/${{ matrix.target }}/release" episodic-memory
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "${name}.tar.gz" > "${name}.sha256"
+          else
+            sha256sum "${name}.tar.gz" > "${name}.sha256"
+          fi
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          name="episodic-memory-v${VER}-${{ matrix.target }}"
+          gh release upload "v${VER}" "dist/${name}.tar.gz" "dist/${name}.sha256" --clobber
+
+  # Runs here, not on `release: published`: a release created with GITHUB_TOKEN triggers no
+  # other workflow, and the marketplace must only learn of a version whose binaries exist.
+  notify-marketplace:
+    needs: [release, build]
+    if: needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.BALEEN_RELEASE_APP_ID }}
+          private-key: ${{ secrets.BALEEN_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: baleen-marketplace
+
+      - name: Notify marketplace
+        uses: baleen37/baleen-marketplace/.github/actions/notify@v1
+        with:
+          source: episodic-memory
+          version: v${{ needs.release.outputs.version }}
+          token: ${{ steps.app-token.outputs.token }}
