@@ -107,6 +107,14 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(c)
 }
 
+/// Opens an existing DB without creating or migrating anything.
+pub fn open_readonly(path: &Path) -> Result<Connection> {
+    register_vec();
+    let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    c.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(c)
+}
+
 pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
     Ok(c.query_row(
         r#"SELECT source_path, source_kind, archive_path, generation, "offset", reparse_line,

@@ -430,3 +430,130 @@ fn disable_env_short_circuits() {
     thread::sleep(Duration::from_millis(500));
     assert!(!env.data.exists(), "disabled sync touched the data dir");
 }
+
+struct Doctor {
+    code: i32,
+    out: String,
+}
+
+impl Doctor {
+    fn line(&self, name: &str) -> &str {
+        let key = format!("] {name}: ");
+        self.out
+            .lines()
+            .find(|l| l.contains(&key))
+            .unwrap_or_else(|| panic!("no {name} line in:\n{}", self.out))
+    }
+}
+
+impl Env {
+    fn doctor(&self) -> Doctor {
+        let o = self
+            .cmd(&["doctor"])
+            .stdout(Stdio::piped())
+            .output()
+            .unwrap();
+        Doctor {
+            code: o.status.code().unwrap(),
+            out: String::from_utf8(o.stdout).unwrap(),
+        }
+    }
+}
+
+#[test]
+fn doctor_on_empty_data_dir_does_not_create_anything() {
+    let env = Env::new();
+    let none = env.root.join("none");
+    let o = env
+        .cmd(&["doctor"])
+        .env("CLAUDE_CONFIG_DIR", &none)
+        .env("CODEX_HOME", &none)
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    let out = String::from_utf8(o.stdout).unwrap();
+    assert_eq!(o.status.code(), Some(1), "{out}");
+    let line = |name: &str| {
+        let key = format!("] {name}: ");
+        out.lines().find(|l| l.contains(&key)).unwrap().to_string()
+    };
+    assert!(line("db").starts_with("[warn]"), "{out}");
+    assert!(line("daemon").starts_with("[warn]"), "{out}");
+    assert!(line("model").starts_with("[warn]"), "{out}");
+    assert!(line("source-roots").starts_with("[fail]"), "{out}");
+    assert!(!env.data.exists(), "doctor created the data dir");
+}
+
+#[test]
+fn doctor_does_not_spawn_a_daemon() {
+    let env = Env::new();
+    let d = env.doctor();
+    assert!(d.line("daemon").starts_with("[warn]"), "{}", d.out);
+    thread::sleep(Duration::from_millis(500));
+    assert!(!env.socket().exists());
+    assert!(!env.data.exists());
+}
+
+#[test]
+fn doctor_after_sync_reports_running_daemon() {
+    let env = Env::new();
+    env.run_sync_hook();
+    assert!(wait_until(Duration::from_secs(10), || env.sync_count() >= 1));
+    let mut d = env.doctor();
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            d = env.doctor();
+            d.line("daemon").contains("sync idle") && d.line("embeddings").starts_with("[ok]")
+        }),
+        "{}",
+        d.out
+    );
+    assert_eq!(d.code, 0, "{}", d.out);
+    let daemon = d.line("daemon");
+    assert!(daemon.starts_with("[ok]") && daemon.contains(&format!("v{VER}")));
+    assert!(daemon.contains("0 client(s)"), "status counted as a client");
+    assert!(d.line("model").starts_with("[ok]"));
+    let db = d.line("db");
+    assert!(
+        db.starts_with("[ok]") && db.contains("user_version 1"),
+        "{db}"
+    );
+    let n: i64 = db
+        .split(", ")
+        .find_map(|p| p.strip_suffix(" exchanges")?.parse().ok())
+        .unwrap_or_else(|| panic!("no exchange count in {db}"));
+    assert!(n > 0, "{db}");
+    assert!(d.line("last-sync").starts_with("[ok]"), "{}", d.out);
+    assert!(d.line("source-roots").starts_with("[ok]"));
+    // A real MCP client is counted; the earlier status connections were not.
+    let _m = env.mcp();
+    assert!(env.doctor().line("daemon").contains("1 client(s)"));
+}
+
+#[test]
+fn doctor_warns_on_last_error() {
+    let env = Env::new();
+    env.run_sync_hook();
+    assert!(wait_until(Duration::from_secs(10), || env
+        .doctor()
+        .line("daemon")
+        .contains("sync idle")
+        && env.sync_count() >= 1));
+    {
+        let c = Connection::open(env.data.join("episodic.db")).unwrap();
+        c.busy_timeout(Duration::from_secs(5)).unwrap();
+        c.execute(
+            "INSERT INTO meta(key, value) VALUES ('last_error', 'synthetic failure')
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [],
+        )
+        .unwrap();
+    }
+    let d = env.doctor();
+    let l = d.line("last-sync");
+    assert!(
+        l.starts_with("[warn]") && l.contains("synthetic failure"),
+        "{}",
+        d.out
+    );
+}

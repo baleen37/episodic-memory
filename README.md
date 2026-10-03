@@ -56,6 +56,12 @@ Typical flow: `search`, then `read` the best `archive_path:start-end`.
 - `search-conversation` agent: searches, reads the relevant ranges, and returns a cited summary.
 - `remembering-conversations` skill: tells Claude when to dispatch that agent.
 
+### Diagnostics
+
+`episodic-memory doctor` prints one `[ok]`, `[warn]` or `[fail]` line per check (binary, daemon,
+DB, embeddings, model, source roots, last sync) and exits 1 if any check fails. It does not start the
+daemon or create the database. The `doctor` skill runs it and explains each result.
+
 ### Exclusion
 
 Put this in a user message to exclude the whole conversation:

@@ -27,7 +27,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 
 | File | Description |
 | ---- | ----------- |
-| `src/main.rs` | CLI entry: subcommands `sync`, `mcp`, `daemon` |
+| `src/main.rs` | CLI entry: subcommands `sync`, `mcp`, `daemon`, `doctor` |
 | `src/paths.rs` | Data dir, archive/db/log/socket paths, source roots (reads env values once) |
 | `src/db.rs` | SQLite schema (`files`, `exchanges`, `fts_exchanges`, `vec_exchanges`, `meta`), `delete_exchanges_from` |
 | `src/archive.rs` | Append-only archive copy, rewrite detection, generations, import of existing archive |
@@ -41,6 +41,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `src/mcp.rs` | MCP JSON-RPC tools `search` and `read` |
 | `src/daemon.rs` | Singleton daemon: unix socket, model, sync jobs, idle exit |
 | `src/client.rs` | `sync` hook client and `mcp` stdio-to-socket bridge; starts daemon if absent |
+| `src/doctor.rs` | `doctor`: read-only health checks (daemon via `{"client":"status"}`, DB opened read-only), `[ok]/[warn]/[fail]` lines, exit 1 on fail |
 | `src/log.rs` | Logging to `<data>/logs/` |
 | `bin/episodic-memory` | Bash wrapper: finds or downloads the versioned binary, then execs it |
 | `scripts/sync-versions.sh` | Writes the release version into Cargo.toml, Cargo.lock, both plugin.json |

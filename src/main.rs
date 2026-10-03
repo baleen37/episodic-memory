@@ -6,6 +6,7 @@ mod archive;
 mod client;
 mod daemon;
 mod db;
+mod doctor;
 mod embed;
 mod log;
 mod mcp;
@@ -50,6 +51,8 @@ enum Command {
     Mcp(Hidden),
     /// Run the background daemon
     Daemon(Hidden),
+    /// Check the health of the plugin
+    Doctor,
 }
 
 fn main() {
@@ -61,6 +64,15 @@ fn main() {
             if let Err(e) = client::run_mcp(&paths, &h.opts()) {
                 log::log_line(&paths, &format!("mcp: {e:#}"));
                 eprintln!("episodic-memory: {e:#}");
+                std::process::exit(1);
+            }
+        }
+        Command::Doctor => {
+            let checks = doctor::run_checks(&paths);
+            for c in &checks {
+                println!("{c}");
+            }
+            if checks.iter().any(|c| c.level == doctor::Level::Fail) {
                 std::process::exit(1);
             }
         }

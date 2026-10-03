@@ -51,6 +51,8 @@ struct State {
     clients: AtomicUsize,
     /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
     loading: AtomicBool,
+    /// Model load ended in an error; reported by `doctor`.
+    load_failed: AtomicBool,
     last_active: Mutex<Instant>,
 }
 
@@ -62,6 +64,7 @@ impl State {
             wake: Condvar::new(),
             clients: AtomicUsize::new(0),
             loading: AtomicBool::new(false),
+            load_failed: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
         }
     }
@@ -73,6 +76,24 @@ impl State {
 
     fn touch(&self) {
         *self.last_active.lock().unwrap() = Instant::now();
+    }
+
+    /// The one-line reply to a `{"client":"status"}` connection.
+    fn status_json(&self) -> Value {
+        let model = if self.ctx.embedder.read().unwrap().is_some() {
+            "ready"
+        } else if self.load_failed.load(Ordering::SeqCst) {
+            "failed"
+        } else {
+            "loading"
+        };
+        let s = self.sched.lock().unwrap();
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "clients": self.clients.load(Ordering::SeqCst),
+            "sync_running": s.running || s.pending,
+            "model": model,
+        })
     }
 
     fn busy(&self) -> bool {
@@ -184,7 +205,10 @@ fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
             *st.ctx.embedder.write().unwrap() = Some(e);
             st.request_sync();
         }
-        Err(e) => log_line(&st.ctx.paths, &format!("model load failed: {e:#}")),
+        Err(e) => {
+            st.load_failed.store(true, Ordering::SeqCst);
+            log_line(&st.ctx.paths, &format!("model load failed: {e:#}"));
+        }
     }
     st.touch();
     st.loading.store(false, Ordering::SeqCst);
@@ -231,6 +255,10 @@ fn handle_conn(stream: UnixStream, st: &State) {
             st.touch();
         }
         Some("sync") => st.request_sync(),
+        // Neither a client nor activity: doctor must not keep the daemon alive.
+        Some("status") => {
+            let _ = writeln!(&writer, "{}", st.status_json());
+        }
         _ => {}
     }
 }
@@ -257,6 +285,21 @@ mod tests {
         finish_load(&st, Err(anyhow::anyhow!("offline")));
         assert!(!st.busy(), "failed load must release busy");
         assert!(st.ctx.embedder.read().unwrap().is_none());
+    }
+
+    #[test]
+    fn status_reports_model_state() {
+        let (_t, st) = state();
+        st.loading.store(true, Ordering::SeqCst);
+        assert_eq!(st.status_json()["model"], "loading");
+        finish_load(&st, Err(anyhow::anyhow!("offline")));
+        assert_eq!(st.status_json()["model"], "failed");
+        finish_load(&st, Ok(Arc::new(FakeEmbedder)));
+        let v = st.status_json();
+        assert_eq!(v["model"], "ready");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(v["clients"], 0);
+        assert_eq!(v["sync_running"], true, "load success requested a sync");
     }
 
     #[test]
