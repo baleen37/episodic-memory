@@ -93,6 +93,39 @@ impl Env {
             .unwrap_or(0)
     }
 
+    /// The daemon's `{"client":"status"}` reply, if it answers.
+    fn status(&self) -> Option<Value> {
+        let mut s = UnixStream::connect(self.socket()).ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        s.write_all(b"{\"client\":\"status\"}\n").ok()?;
+        let mut line = String::new();
+        BufReader::new(s).read_line(&mut line).ok()?;
+        serde_json::from_str(&line).ok()
+    }
+
+    /// Waits until `sync_count` has not changed for one second; with `model_ready`, also until
+    /// the daemon reports the model ready and no sync running or pending (the startup sync and
+    /// the model loader's sync can otherwise land after a caller's baseline).
+    fn settle(&self, model_ready: bool) -> bool {
+        let mut last = self.sync_count();
+        let mut stable_since = Instant::now();
+        wait_until(Duration::from_secs(15), || {
+            let c = self.sync_count();
+            if c != last {
+                last = c;
+                stable_since = Instant::now();
+            }
+            let idle = !model_ready
+                || self
+                    .status()
+                    .is_some_and(|v| v["model"] == "ready" && v["sync_running"] == false);
+            if !idle {
+                stable_since = Instant::now();
+            }
+            stable_since.elapsed() >= Duration::from_secs(1)
+        })
+    }
+
     /// A started and initialized `mcp` client.
     fn mcp(&self) -> Mcp {
         let mut m = self.spawn_mcp();
@@ -280,6 +313,7 @@ fn sync_requests_coalesce() {
     let env = Env::new();
     env.run_sync_hook();
     assert!(wait_until(Duration::from_secs(10), || env.sync_count() >= 1));
+    assert!(env.settle(true), "daemon never settled");
     let base = env.sync_count();
     // Back-to-back requests (what ten hooks firing at once look like to the daemon); a hook
     // process takes longer to start than a no-op sync, so spawning ten would not overlap.
@@ -288,17 +322,7 @@ fn sync_requests_coalesce() {
         s.write_all(b"{\"client\":\"sync\"}\n").unwrap();
     }
     assert!(wait_until(Duration::from_secs(10), || env.sync_count() > base));
-    // Settle: no further syncs for one second.
-    let mut last = env.sync_count();
-    let mut stable_since = Instant::now();
-    assert!(wait_until(Duration::from_secs(10), || {
-        let c = env.sync_count();
-        if c != last {
-            last = c;
-            stable_since = Instant::now();
-        }
-        stable_since.elapsed() >= Duration::from_secs(1)
-    }));
+    assert!(env.settle(false));
     let delta = env.sync_count() - base;
     assert!((1..=2).contains(&delta), "10 requests ran {delta} syncs");
 }
