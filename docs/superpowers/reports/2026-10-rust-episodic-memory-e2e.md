@@ -1,7 +1,8 @@
 # Rust episodic-memory: 실데이터 성능 측정과 E2E (Task 13)
 
 측정일 2026-10-04. 기기: Apple M4 Pro, 48GB RAM, macOS 15 (Darwin 24.4).
-바이너리: `cargo build --release` (버전 3.2.0, 커밋 `68554cf` 기준). 모든 실행은
+바이너리: `cargo build --release` (커밋 `68554cf` 기준). 바이너리가 내는 버전 3.2.0은 릴리스 전이라
+아직 올리지 않은 `Cargo.toml` 버전이다(4.0.0은 semantic-release가 올린다). 모든 실행은
 `EPISODIC_MEMORY_DIR=/tmp/...`로 격리했고 `~/.config/episodic-memory`에는 쓰지 않았다.
 
 ## 요약
@@ -33,7 +34,7 @@
 |---|---|
 | 아카이브 파일 | claude-code-projects 6,567 / codex-sessions 3,856 (합 10,423, skipped 0) |
 | exchange | 35,083 (claude 21,169, codex 13,914, sidechain 11,693) |
-| 들여오기 + 첫 sync | 약 250 s (약 42 파일/s). 이 동안 모델 로드는 따로 끝남 |
+| 들여오기 + 첫 sync | 약 250 s (약 42 파일/s). 모델 로드(캐시 있음, 약 1 s)는 별도 스레드에서 이 시간 안에 병렬로 끝나서 이 값에 거의 영향이 없다. 임베딩은 첫 sync가 끝난 뒤 시작한다 |
 | 임베딩 | 252 s → 2,233 s, 35,083개, 약 17.7개/s (intra threads 2, batch 32) |
 | 전체 검색 가능까지 | 2,233 s (약 37분) |
 | DB | `episodic.db` 305,479,680 bytes (291 MB), 체크포인트 뒤 WAL 0 |
@@ -182,7 +183,7 @@ project `em-e2e-codex-work`, harness `codex`).
 ```text
 1. [em-e2e-codex-work, 2026-10-03, score 1.00]
    User: We are recording a harbor buoy registry. Spawn exactly one subagent (use your sub-agent/spawn tool) and have it write the file /tmp/em-e2e-codex-work/buoys.txt with exactly this content: 'Codeword MAR
-   Assistant: `me:using-me` 지침에 따라 Codex 도구 사용법을 확인한 뒤, 요청하신 서브에이전트 하나만 실행하겠습니다. 코드워드 MARIGOLDNARWHAL4826을 확인했고, 빨간 부이는 13개입니다.
+   Assistant: `<skill>` 지침에 따라 Codex 도구 사용법을 확인한 뒤, 요청하신 서브에이전트 하나만 실행하겠습니다. 코드워드 MARIGOLDNARWHAL4826을 확인했고, 빨간 부이는 13개입니다.
    /tmp/em-e2e/conversation-archive/codex-sessions/2026/10/04/rollout-2026-10-04T00-32-14-01a10264-fa85-7f42-94d1-7b9ab5f65d20.jsonl:10-51
 ```
 
@@ -201,15 +202,26 @@ L48 **Assistant:** 코드워드 MARIGOLDNARWHAL4826을 확인했고, 빨간 부�
 세션 2의 최종 답: 빨간 부이 13개, 파일 `/tmp/em-e2e-codex-work/buoys.txt`. MCP 경로와 Codex 파싱 경로는 통과.
 hook 경로는 Codex에서 자동으로 검증하지 못했다.
 
-**사용자가 직접 할 확인 (Codex hook)**: 4.0.0 설치 뒤 README "Codex" 절대로
-`~/.codex/hooks.json`에 SessionStart 항목을 넣고, 대화형 `codex`를 한 번 열어 hook trust를 승인한다.
-새 세션을 연 뒤 `<data>/episodic.db`의 `meta.sync_count`가 늘었는지 보면 된다.
+**사용자가 직접 할 확인 (Codex hook)**:
+
+1. 4.0.0을 마켓플레이스에서 설치한 뒤에만 한다. `EPISODIC_MEMORY_BIN`은 설정하지 않는다
+   (`echo "${EPISODIC_MEMORY_BIN:-unset}"` → `unset`).
+2. README "Codex" 절차대로 hooks.json 조각을 `~/.codex/hooks.json`의 `hooks.SessionStart`에 합친다.
+   경로는 실제 설치 경로로 바꾼다. 경로 확인:
+   `ls -d ~/.codex/plugins/cache/baleen-marketplace/episodic-memory/4.0.0/bin/episodic-memory`
+3. 기준값을 적어 둔다:
+   `sqlite3 ~/.config/episodic-memory/episodic.db "select value from meta where key='sync_count'"`
+4. 새 Codex 세션을 연다 (`codex`, 처음이면 hook trust를 승인). 몇 초 기다린다.
+5. 3번 명령을 다시 실행한다. 기대값: 기준값 + 1.
 
 ## 5. 발견한 문제 (코드는 바꾸지 않음)
 
 1. **드문 정확 키워드만으로는 순위가 낮다.** `search "MARIGOLDNARWHAL4826"`(그 exchange에만 있는 토큰)은
-   limit 50에서 29위였다. BM25 1위 단독 점수 0.4/61이 벡터 1~31위의 0.6/(60+r)보다 작기 때문이다.
-   문장으로 물으면(벡터도 맞으면) 1위가 된다. RRF 가중치(스펙 상수) 문제라 이 작업 범위 밖으로 둔다.
+   limit 50에서 29위였다. BM25 1위 단독 점수 0.4/61(≈0.0066)은 sidechain이 아닌 벡터 단독 1~31위의
+   0.6/(60+r)보다 작다. 그래서 BM25에만 있으면 32위쯤이 되어야 하는데 실제는 29위였다. 벡터 상위 일부가
+   sidechain(×0.9, 벡터 23위 아래면 0.0066보다 작아짐)이었거나, 이 exchange가 벡터 목록 하위에도 들어간
+   것으로 보인다. 이번 측정에서는 둘을 구분하지 않았다. 어느 쪽이든 정확히 맞는 드문 토큰이 상위 10위 밖으로
+   밀린다. 문장으로 물으면(벡터도 맞으면) 1위가 된다. RRF 가중치(스펙 상수) 문제라 이 작업 범위 밖으로 둔다.
 2. **배열 AND query가 쉽게 0건이 된다.** 개념마다 `limit*5`(50)개만 보고 대화 단위로 교집합을 내서,
    35k exchange에서 3~5개 개념은 0건이 나왔다.
 3. **Agent team의 `<teammate-message>`가 user 메시지로 색인된다** (1,422개). 일반 query 상위에 자주 나온다.
@@ -227,3 +239,8 @@ hook 경로는 Codex에서 자동으로 검증하지 못했다.
 | E2E 뒤 | 7.2 GB |
 
 아카이브와 모델은 clone이라 실제로 늘어난 것은 DB(291 MB ×2), sync가 붙인 새 바이트, 빌드 산출물 정도다.
+
+## 7. 남은 일
+
+1. 4.0.0 Release 뒤 스펙 §9 배포 검증: `EPISODIC_MEMORY_BIN` 없이 래퍼 실행 → 다운로드 → 체크섬 검증 → 실행.
+2. 4절의 Codex hook 수동 확인 (사용자 기기에서 대화형 `codex`로).
