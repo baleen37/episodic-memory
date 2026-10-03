@@ -5,7 +5,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 pub const DIMS: usize = 384;
-const BATCH: usize = 32;
+/// Small batches keep ONNX Runtime's peak activation memory, and so daemon RSS, low
+/// (2,000-exchange sample: peak 4.2 GB at 32, 2.2 GB at 8, same throughput).
+const BATCH: usize = 8;
 const DOC_MAX_CHARS: usize = 2000;
 
 /// Implementations add the `passage: ` / `query: ` prefixes themselves.
@@ -126,7 +128,7 @@ fn next_batch(conn: &Connection) -> Result<Vec<Pending>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Embeds every `embedded = 0` exchange, 32 at a time. Returns how many were embedded.
+/// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
     loop {

@@ -128,7 +128,7 @@ meta(key TEXT PRIMARY KEY, value TEXT)   -- 마지막 sync 시각·에러 등
 9. `user_message`나 `assistant_message`가 256KB를 넘는 exchange는 넣지 않고 개수만 로그에 남긴다(obra#139).
 10. **커밋**.
 
-**임베딩**: 모든 파일을 처리한 뒤, 같은 sync 작업 안에서 `embedded=0`인 exchange를 32개씩 임베딩해 `vec_exchanges`에 넣고 `embedded=1`로 바꾼다. 모델이 준비되지 않았으면 건너뛴다. 문서 텍스트는 `passage: User: <user>\n\nAssistant: <assistant>\n\nTools: <tool_names>`를 2000자에서 자른 것이다. 스레드는 `with_intra_threads(2)`.
+**임베딩**: 모든 파일을 처리한 뒤, 같은 sync 작업 안에서 `embedded=0`인 exchange를 8개씩(데몬 최대 RSS를 낮추려고) 임베딩해 `vec_exchanges`에 넣고 `embedded=1`로 바꾼다. 모델이 준비되지 않았으면 건너뛴다. 문서 텍스트는 `passage: User: <user>\n\nAssistant: <assistant>\n\nTools: <tool_names>`를 2000자에서 자른 것이다. 스레드는 `with_intra_threads(2)`.
 
 **FTS terms**: `user_message`와 `assistant_message`를 이은 텍스트에서, 한글 음절이 연속된 구간을 2글자씩 겹쳐 자른 bigram("검색추천" → "검색 색추 추천")으로 바꾸고 **구간 양옆에 공백을 넣는다**. "API검색"을 unicode61이 `api검색` 한 토큰으로 묶지 않게 하려는 것이다("API검색" → "API 검색"). 한 글자짜리 한글 구간은 그대로 둔다. 나머지 문자는 그대로 둔다. 영어 토큰화·어간은 FTS5 `porter unicode61`이 처리한다.
 

@@ -228,6 +228,18 @@ hook 경로는 Codex에서 자동으로 검증하지 못했다.
 4. **Claude 서브에이전트 exchange의 Assistant 스니펫이 비어 있다.** 서브에이전트가 마지막 보고를
    텍스트가 아니라 도구 호출(`SubagentHandback`)로 넘겨서다.
 5. **데몬 메모리.** 임베딩 중 RSS 4.3 GB, 끝난 뒤에도 줄지 않는다. 모델만 올린 유휴 데몬도 1.8 GB.
+   후속 측정(합성 exchange 2,000개, `/tmp` 데이터 디렉터리, release 빌드, `ps -o rss` 1초 샘플, 각 1회):
+
+   | 설정 | 최대 RSS | 끝난 뒤 RSS | 2,000개 임베딩 시간 | 개/s |
+   |---|---|---|---|---|
+   | batch 32, CPU arena 켬 (이전) | 4.17 GB | 4.17 GB | 111.6 s | 17.9 |
+   | batch 32, CPU arena 끔 | 4.28 GB | 3.43 GB | 119.8 s | 16.7 |
+   | batch 8, CPU arena 끔 | 2.29 GB | 2.29 GB | 118.0 s | 16.9 |
+   | batch 8, CPU arena 켬 (채택) | 2.19 GB | 2.19 GB | 107.5 s | 18.6 |
+   | 모델만 올린 유휴 (이전 / 채택) | 1.93 / 1.90 GB | - | - | - |
+
+   최대 RSS를 줄인 것은 batch 크기다. arena를 끄는 API(`ort::ep::CPU::with_arena_allocator(false)`)는
+   있지만 이 측정에서 효과가 없어서 쓰지 않았다. `BATCH`를 8로 바꿨다.
 6. 결과 날짜는 UTC 기준이다(한국 시간 10-04 00시대 세션이 2026-10-03으로 표시).
 
 ## 6. 디스크
