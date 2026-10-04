@@ -447,10 +447,13 @@ fn search_during_sync_sees_committed_state() {
     assert!(!seen.is_empty());
     let c = env.db().unwrap();
     for (path, s, e) in &seen {
+        // Cards show absolute paths; the DB stores them relative to the data dir.
+        let key = Path::new(path).strip_prefix(&env.data).unwrap();
+        let key = key.to_str().unwrap();
         let n: i64 = c
             .query_row(
                 "SELECT count(*) FROM exchanges WHERE archive_path = ? AND line_start = ? AND line_end = ?",
-                rusqlite::params![path, s, e],
+                rusqlite::params![key, s, e],
                 |r| r.get(0),
             )
             .unwrap();
@@ -566,10 +569,7 @@ fn doctor_after_sync_reports_running_daemon() {
     assert!(daemon.contains("0 client(s)"), "status counted as a client");
     assert!(d.line("model").starts_with("[ok]"));
     let db = d.line("db");
-    assert!(
-        db.starts_with("[ok]") && db.contains("user_version 4"),
-        "{db}"
-    );
+    assert!(db.starts_with("[ok]") && db.contains("revision 2"), "{db}");
     let n: i64 = db
         .split(", ")
         .find_map(|p| p.strip_suffix(" exchanges")?.parse().ok())

@@ -45,7 +45,7 @@ fn is_skipped(paths: &Paths, full: &Path) -> Result<bool> {
     let target = generation_base(full);
     Ok(archive_paths
         .iter()
-        .any(|a| generation_base(&canon(Path::new(a))) == target))
+        .any(|a| generation_base(&canon(&paths.archive_file(a))) == target))
 }
 
 /// Renders an archive file as markdown, `L<line> `-prefixed per item, from `start` to `end`

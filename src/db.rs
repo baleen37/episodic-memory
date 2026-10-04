@@ -75,6 +75,8 @@ pub struct NewExchange {
     pub tool_names: String,
 }
 
+/// The latest schema, for a fresh DB. Existing DBs reach it through `migrations`; a schema
+/// change goes in both. `user_version` stays at 4: `<data>/REVISION` tracks versions now.
 const SCHEMA: &str = r#"
 CREATE TABLE files(
   source_path TEXT PRIMARY KEY,
@@ -120,20 +122,6 @@ CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
 PRAGMA user_version = 4;
 "#;
 
-/// Version 1 (the schema up to v4.0.5) to 4. Every file meta field is stored, with the archive
-/// bytes it was learned from; rows start with `meta_offset` 0, so their meta is learned again
-/// from the archive. The reparse point also stores its byte position and the line that position
-/// belongs to; rows start with NULL (unknown) and find the line by counting once.
-const MIGRATE_1_TO_4: &str = r"
-ALTER TABLE files ADD COLUMN sidechain_known INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN agent_path TEXT;
-ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN reparse_offset INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER;
-PRAGMA user_version = 4;
-";
-
 fn register_vec() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| unsafe {
@@ -166,19 +154,12 @@ pub fn open(path: &Path) -> Result<Connection> {
     // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.
     c.set_transaction_behavior(TransactionBehavior::Immediate);
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < 4 {
-        // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
+    if version == 0 {
+        // IMMEDIATE so two processes opening a fresh DB don't both create the schema.
         let tx = c.transaction()?;
-        // Re-read under the lock: another process may have created or migrated it meanwhile.
-        match tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? {
-            0 => tx.execute_batch(SCHEMA)?,
-            1 => tx.execute_batch(MIGRATE_1_TO_4)?,
-            4 => {}
-            // Versions 2 and 3 existed only on unreleased builds; fail here, not in later SQL.
-            version => anyhow::bail!(
-                "unsupported schema version {version}; delete {} to rebuild",
-                path.display()
-            ),
+        let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version == 0 {
+            tx.execute_batch(SCHEMA)?;
         }
         tx.commit()?;
     }
@@ -502,103 +483,6 @@ mod tests {
                 }
             });
         }
-    }
-
-    #[test]
-    fn open_rejects_an_unreleased_schema_version() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        Connection::open(&p)
-            .unwrap()
-            .execute_batch("PRAGMA user_version = 2;")
-            .unwrap();
-        let err = open(&p).unwrap_err().to_string();
-        assert!(err.contains("schema version 2"), "{err}");
-    }
-
-    /// Every table's columns (sorted by name) and every index, as `PRAGMA` reports them.
-    fn schema(c: &Connection) -> Vec<String> {
-        let mut out: Vec<String> = c
-            .prepare(
-                "SELECT m.type || ' ' || m.name || ': ' || ifnull(p.name, '') || ' ' ||
-                        ifnull(p.type, '') || ' ' || ifnull(p.\"notnull\", '') || ' ' ||
-                        ifnull(p.dflt_value, '') || ' ' || ifnull(p.pk, '')
-                 FROM sqlite_master m LEFT JOIN pragma_table_info(m.name) p
-                 WHERE m.type IN ('table', 'index')",
-            )
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        out.sort();
-        out
-    }
-
-    #[test]
-    fn version_1_database_migrates_to_the_fresh_schema() {
-        // The schema shipped up to v4.0.5.
-        const V1: &str = r#"
-CREATE TABLE files(
-  source_path TEXT PRIMARY KEY,
-  source_kind TEXT NOT NULL,
-  archive_path TEXT NOT NULL UNIQUE,
-  generation INTEGER NOT NULL DEFAULT 0,
-  "offset" INTEGER NOT NULL DEFAULT 0,
-  reparse_line INTEGER NOT NULL DEFAULT 1,
-  session_id TEXT, cwd TEXT, project TEXT,
-  harness TEXT, is_sidechain INTEGER,
-  user_signal TEXT,
-  skipped INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE exchanges(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  archive_path TEXT NOT NULL,
-  line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
-  session_id TEXT,
-  project TEXT NOT NULL,
-  harness TEXT NOT NULL,
-  is_sidechain INTEGER NOT NULL DEFAULT 0,
-  ts INTEGER NOT NULL,
-  user_message TEXT NOT NULL,
-  assistant_message TEXT NOT NULL,
-  tool_names TEXT NOT NULL DEFAULT '',
-  embedded INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX exchanges_file ON exchanges(archive_path, line_start);
-CREATE INDEX exchanges_pending ON exchanges(id) WHERE embedded = 0;
-CREATE VIRTUAL TABLE fts_exchanges USING fts5(terms, content='', contentless_delete=1,
-  tokenize='porter unicode61 remove_diacritics 2');
-CREATE VIRTUAL TABLE vec_exchanges USING vec0(
-  embedding float[384],
-  project TEXT, ts INTEGER, is_sidechain INTEGER);
-CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
-CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
-INSERT INTO files(source_path, source_kind, archive_path, "offset", reparse_line)
-  VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10, 7);
-PRAGMA user_version = 1;
-"#;
-        let dir = tempfile::tempdir().unwrap();
-        let fresh = open(&dir.path().join("fresh.db")).unwrap();
-        let p = dir.path().join("episodic.db");
-        register_vec();
-        Connection::open(&p).unwrap().execute_batch(V1).unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        assert_eq!(schema(&c), schema(&fresh));
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        assert_eq!((got.offset, got.meta_offset), (10, 0));
-        assert_eq!(got.meta, FileMeta::default());
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 7,
-                byte: None
-            }
-        );
     }
 
     #[test]

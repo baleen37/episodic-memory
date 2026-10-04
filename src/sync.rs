@@ -48,6 +48,7 @@ struct IndexStats {
 /// Spec §5 steps 6–9.
 fn index_file(
     tx: &Transaction,
+    paths: &Paths,
     row: &mut FileRow,
     projects: &mut ProjectCache,
 ) -> Result<IndexStats> {
@@ -56,7 +57,7 @@ fn index_file(
     if row.skipped {
         return Ok(stats);
     }
-    let archive = PathBuf::from(&row.archive_path);
+    let archive = paths.archive_file(&row.archive_path);
 
     // File meta is learned only from the archive bytes appended since it was last observed
     // (`meta_offset`), until the provider reports it settled, in the same pass that parses them.
@@ -191,12 +192,12 @@ pub fn adopt_existing_archive(
 
 /// Step 2: archive longer than `offset` (uncommitted append) is truncated back.
 /// Returns true when the archive is shorter than `offset` or missing (needs a new generation).
-fn reconcile_archive(row: &FileRow) -> Result<bool> {
-    let path = Path::new(&row.archive_path);
+fn reconcile_archive(paths: &Paths, row: &FileRow) -> Result<bool> {
+    let path = paths.archive_file(&row.archive_path);
     let offset = row.offset as u64;
-    match archive_len(path)? {
+    match archive_len(&path)? {
         Some(len) if len > offset => {
-            let f = fs::OpenOptions::new().write(true).open(path)?;
+            let f = fs::OpenOptions::new().write(true).open(&path)?;
             f.set_len(offset)?;
             f.sync_all()?;
             Ok(false)
@@ -217,7 +218,7 @@ fn start_new_generation(
     let tx = conn.transaction()?;
     delete_exchanges_from(&tx, &row.archive_path, 1)?;
     row.generation = generation;
-    row.archive_path = path_str(&archive_path_for(paths, f.kind, &f.rel, generation));
+    row.archive_path = paths.archive_key(&archive_path_for(paths, f.kind, &f.rel, generation));
     row.offset = 0;
     row.reset_index();
     upsert_file(&tx, row)?;
@@ -230,7 +231,7 @@ fn register_new(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Res
     let row = FileRow::new(
         path_str(&f.source_path),
         f.kind,
-        path_str(&archive_path_for(paths, f.kind, &f.rel, generation)),
+        paths.archive_key(&archive_path_for(paths, f.kind, &f.rel, generation)),
         generation,
         offset as i64,
     );
@@ -258,19 +259,23 @@ pub fn sync_file(
 
     let source_len = fs::metadata(&f.source_path)?.len();
     let offset = row.offset as u64;
-    let rewritten = reconcile_archive(&row)?
+    let rewritten = reconcile_archive(paths, &row)?
         || (offset > 0
             && (source_len < offset
-                || !tails_match(&f.source_path, Path::new(&row.archive_path), offset)?));
+                || !tails_match(
+                    &f.source_path,
+                    &paths.archive_file(&row.archive_path),
+                    offset,
+                )?));
     if rewritten {
         start_new_generation(conn, paths, f, &mut row)?;
-        reconcile_archive(&row)?;
+        reconcile_archive(paths, &row)?;
     }
 
     let old_offset = row.offset;
     let new_offset = append_tail(
         &f.source_path,
-        Path::new(&row.archive_path),
+        &paths.archive_file(&row.archive_path),
         row.offset as u64,
     )?;
 
@@ -279,7 +284,7 @@ pub fn sync_file(
     // Nothing new to parse unless the append moved the offset or the first parse is pending.
     // An archive with no complete line yet does not exist, so there is nothing to parse.
     let stats = if row.offset != old_offset || (row.harness.is_none() && row.offset > 0) {
-        index_file(&tx, &mut row, projects)?
+        index_file(&tx, paths, &mut row, projects)?
     } else {
         IndexStats::default()
     };
@@ -416,7 +421,7 @@ fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache
             };
             row.reset_index();
             let tx = conn.transaction()?;
-            let stats = index_file(&tx, &mut row, projects)?;
+            let stats = index_file(&tx, paths, &mut row, projects)?;
             upsert_file(&tx, &row)?;
             tx.commit()?;
             Ok(stats.inserted)
@@ -440,12 +445,12 @@ fn import_one(
     rel: &Path,
     projects: &mut ProjectCache,
 ) -> Result<Option<usize>> {
-    let archive0 = path_str(&archive_path_for(paths, kind, rel, 0));
+    let archive0 = archive_path_for(paths, kind, rel, 0);
     let source = root.join(rel);
     let source_key = path_str(&source);
     let known: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM files WHERE archive_path = ?1 OR source_path = ?2)",
-        [&archive0, &source_key],
+        [&paths.archive_key(&archive0), &source_key],
         |r| r.get(0),
     )?;
     if known {
@@ -459,7 +464,7 @@ fn import_one(
     let mut row = FileRow::new(
         source_key,
         kind,
-        path_str(&archive_path_for(paths, kind, rel, generation)),
+        paths.archive_key(&archive_path_for(paths, kind, rel, generation)),
         generation,
         offset as i64,
     );
@@ -467,7 +472,7 @@ fn import_one(
     upsert_file(&tx, &row)?;
     let mut inserted = 0;
     if row.offset > 0 {
-        inserted = index_file(&tx, &mut row, projects)?.inserted;
+        inserted = index_file(&tx, paths, &mut row, projects)?.inserted;
         upsert_file(&tx, &row)?;
     }
     tx.commit()?;
@@ -502,6 +507,9 @@ pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncSt
     let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
     };
+    for id in crate::migrations::run(paths)? {
+        log_line(paths, &format!("migrated to revision {id}"));
+    }
     let mut conn = crate::db::open(&paths.db())?;
     let mut projects = ProjectCache::default();
     let mut stats = SyncStats::default();
@@ -632,7 +640,10 @@ mod mirror {
         let row = e.row();
         assert_eq!(row.offset as usize, lines(0..3).len());
         assert_eq!(row.generation, 0);
-        assert_eq!(row.archive_path, e.gen_path(0).to_str().unwrap());
+        assert_eq!(
+            row.archive_path,
+            "conversation-archive/claude-code-projects/proj/s1.jsonl"
+        );
         assert_eq!(row.source_kind, SourceKind::ClaudeCodeProjects);
     }
 
@@ -748,7 +759,7 @@ mod mirror {
         // Simulate: generation 1 committed, then a partial append before the crash.
         let mut row = e.row();
         row.generation = 1;
-        row.archive_path = e.gen_path(1).to_str().unwrap().into();
+        row.archive_path = e.paths.archive_key(&e.gen_path(1));
         row.offset = 0;
         row.reparse = ReparsePoint::START;
         let tx = e.conn.transaction().unwrap();
@@ -1453,7 +1464,7 @@ mod mirror {
         let err = archive_len(&gen0).unwrap_err();
         assert!(err.to_string().contains("not a regular file"), "{err}");
         let row = FileRow::new(path_str(&e.src), e.f.kind, path_str(&gen0), 0, 0);
-        assert!(reconcile_archive(&row).is_err());
+        assert!(reconcile_archive(&e.paths, &row).is_err());
         assert!(!archive_path_for(&e.paths, e.f.kind, &e.f.rel, 1).exists());
     }
 }

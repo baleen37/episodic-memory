@@ -12,6 +12,7 @@ mod host;
 mod locks;
 mod log;
 mod mcp;
+mod migrations;
 mod parse;
 mod paths;
 mod project;
