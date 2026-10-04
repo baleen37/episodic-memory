@@ -66,7 +66,9 @@ fn quote(t: &str) -> String {
 }
 
 /// Builds an FTS5 MATCH expression (OR of quoted tokens), dropping tokens that
-/// appear in more than 20% of exchanges. Returns None when there are no tokens.
+/// appear in more than 20% of exchanges. When no kept token matches any
+/// exchange, the rarest dropped token is added back so a query never loses its
+/// only matching token. Returns None when there are no tokens.
 /// Doc counts come from a per-token MATCH count, so the FTS tokenizer (porter)
 /// is applied for us.
 pub fn build_match_query(conn: &Connection, query: &str) -> Result<Option<String>> {
@@ -80,6 +82,8 @@ pub fn build_match_query(conn: &Connection, query: &str) -> Result<Option<String
     let mut stmt =
         conn.prepare("SELECT count(*) FROM fts_exchanges WHERE fts_exchanges MATCH ?1")?;
     let mut kept: Vec<String> = Vec::new();
+    // Prefix tokens are not counted; assume they may match.
+    let mut kept_matches = false;
     let mut counted: Vec<(String, i64)> = Vec::new();
     for t in &tokens {
         let (expr, is_prefix) = match t {
@@ -88,18 +92,18 @@ pub fn build_match_query(conn: &Connection, query: &str) -> Result<Option<String
         };
         if is_prefix || total == 0 {
             kept.push(expr);
+            kept_matches = true;
             continue;
         }
         let doc: i64 = stmt.query_row([&expr], |r| r.get(0))?;
         if (doc as f64) <= total as f64 * 0.2 {
             kept.push(expr);
+            kept_matches |= doc > 0;
         } else {
             counted.push((expr, doc));
         }
     }
-    if kept.is_empty()
-        && let Some((expr, _)) = counted.into_iter().min_by_key(|(_, d)| *d)
-    {
+    if !kept_matches && let Some((expr, _)) = counted.into_iter().min_by_key(|(_, d)| *d) {
         kept.push(expr);
     }
     Ok(Some(kept.join(" OR ")))
@@ -193,5 +197,14 @@ mod tests {
         let m = build_match_query(&c, "합니다").unwrap().unwrap();
         assert!(!m.contains(" OR "), "{m}");
         assert!(!m.is_empty());
+    }
+
+    #[test]
+    fn common_token_kept_when_other_tokens_match_nothing() {
+        // `검색` is in 50% of exchanges; `색을` matches none. The query must
+        // still match the exchange containing `검색추천`.
+        let (_d, c) = setup(&["검색추천 기능".into(), "다른 내용".into()]);
+        let m = build_match_query(&c, "검색을").unwrap().unwrap();
+        assert_eq!(run(&c, &m), vec![1], "{m}");
     }
 }
