@@ -94,6 +94,20 @@ impl Embedder for FakeEmbedder {
     }
 }
 
+/// `FakeEmbedder` that sleeps for the given time per passage batch (daemon tests only).
+pub struct SlowFakeEmbedder(pub std::time::Duration);
+
+impl Embedder for SlowFakeEmbedder {
+    fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        std::thread::sleep(self.0);
+        FakeEmbedder.embed_passages(texts)
+    }
+
+    fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+        FakeEmbedder.embed_query(q)
+    }
+}
+
 struct Pending {
     id: i64,
     project: String,
@@ -127,6 +141,8 @@ pub fn to_blob(v: &[f32]) -> Vec<u8> {
 }
 
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
+/// Vectors are computed outside any transaction; each batch is written in one short immediate
+/// transaction. A row deleted or embedded by someone else in between is skipped.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
     loop {
@@ -141,18 +157,21 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
         }
         let tx = conn.transaction()?;
         {
+            let mut mark = tx.prepare_cached(
+                "UPDATE exchanges SET embedded = 1 WHERE id = ? AND embedded = 0",
+            )?;
             let mut insert = tx.prepare_cached(
                 "INSERT INTO vec_exchanges(rowid, embedding, project, ts, is_sidechain)
                  VALUES (?, ?, ?, ?, ?)",
             )?;
-            let mut mark = tx.prepare_cached("UPDATE exchanges SET embedded = 1 WHERE id = ?")?;
             for (p, v) in batch.iter().zip(&vectors) {
-                insert.execute(params![p.id, to_blob(v), p.project, p.ts, p.is_sidechain])?;
-                mark.execute([p.id])?;
+                if mark.execute([p.id])? == 1 {
+                    insert.execute(params![p.id, to_blob(v), p.project, p.ts, p.is_sidechain])?;
+                    total += 1;
+                }
             }
         }
         tx.commit()?;
-        total += batch.len();
     }
 }
 
@@ -233,6 +252,35 @@ mod tests {
             .unwrap();
         assert_eq!((p.as_str(), ts, side), ("proj", 1002, 1));
         assert_eq!(embed_pending(&mut conn, &FakeEmbedder).unwrap(), 0);
+    }
+
+    /// Deletes exchange 1 (as a concurrent sync reindex would) while the batch is embedded.
+    struct DeletesFirst(std::path::PathBuf);
+
+    impl Embedder for DeletesFirst {
+        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            let mut c = crate::db::open(&self.0).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::db::delete_exchanges_from(&tx, "/a", 1).unwrap();
+            tx.commit().unwrap();
+            FakeEmbedder.embed_passages(texts)
+        }
+        fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+            FakeEmbedder.embed_query(q)
+        }
+    }
+
+    #[test]
+    fn exchange_deleted_during_embedding_gets_no_vector() {
+        let t = tempfile::tempdir().unwrap();
+        let db = t.path().join("e.db");
+        let mut conn = crate::db::open(&db).unwrap();
+        add(&mut conn, 1, "q");
+        assert_eq!(embed_pending(&mut conn, &DeletesFirst(db)).unwrap(), 0);
+        let vecs: i64 = conn
+            .query_row("SELECT count(*) FROM vec_exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(vecs, 0);
     }
 
     #[test]

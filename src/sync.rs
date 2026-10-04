@@ -3,7 +3,6 @@ use crate::db::{
     FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
     upsert_file,
 };
-use crate::embed::{Embedder, embed_pending};
 use crate::log::log_line;
 use crate::parse::{initial_meta, observe_meta_from, parse_from};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
@@ -462,7 +461,6 @@ pub struct SyncStats {
     pub files_synced: usize,
     pub new_exchanges: usize,
     pub errors: usize,
-    pub embedded: usize,
 }
 
 impl SyncStats {
@@ -474,16 +472,14 @@ impl SyncStats {
     }
 }
 
-pub fn run_sync(paths: &Paths, embedder: Option<&dyn Embedder>) -> Result<SyncStats> {
-    run_sync_with_roots(paths, embedder, &candidate_roots_from_env())
+pub fn run_sync(paths: &Paths) -> Result<SyncStats> {
+    run_sync_with_roots(paths, &candidate_roots_from_env())
 }
 
+/// Indexes new transcript bytes under the sync lock. Embedding is not part of sync: the
+/// daemon's embedding worker picks up `embedded = 0` exchanges afterwards.
 /// `roots` are the candidate roots per kind; missing ones are ignored for discovery.
-pub fn run_sync_with_roots(
-    paths: &Paths,
-    embedder: Option<&dyn Embedder>,
-    roots: &[SourceRoot],
-) -> Result<SyncStats> {
+pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncStats> {
     let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
     };
@@ -512,17 +508,6 @@ pub fn run_sync_with_roots(
             }
         }
     }
-    if let Some(e) = embedder {
-        match embed_pending(&mut conn, e) {
-            Ok(n) => stats.embedded = n,
-            Err(err) => {
-                stats.errors += 1;
-                last_error = format!("embedding: {err:#}");
-                log_line(paths, &last_error);
-            }
-        }
-    }
-
     meta_set(&conn, "last_sync", &chrono::Utc::now().to_rfc3339())?;
     let count: i64 = meta_get(&conn, "sync_count")
         .and_then(|v| v.parse().ok())
@@ -1248,7 +1233,6 @@ mod mirror {
 #[cfg(test)]
 mod orchestration {
     use super::*;
-    use crate::embed::FakeEmbedder;
     use fs2::FileExt;
 
     struct Env {
@@ -1462,28 +1446,23 @@ mod orchestration {
             .open(e.paths.sync_lock())
             .unwrap();
         held.lock_exclusive().unwrap();
-        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!(stats, SyncStats::skipped());
         assert!(!e.paths.db().exists());
         held.unlock().unwrap();
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert!(!stats.skipped);
         assert_eq!(stats.new_exchanges, 1);
     }
 
     #[test]
-    fn run_sync_without_embedder_leaves_pending() {
+    fn run_sync_indexes_and_leaves_embedding_pending() {
         let e = env();
         put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!(
-            (
-                stats.files_synced,
-                stats.new_exchanges,
-                stats.embedded,
-                stats.errors
-            ),
-            (1, 1, 0, 0)
+            (stats.files_synced, stats.new_exchanges, stats.errors),
+            (1, 1, 0)
         );
         let conn = e.conn();
         assert_eq!(
@@ -1497,10 +1476,10 @@ mod orchestration {
         );
         drop(conn);
 
-        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
-        assert_eq!((stats.new_exchanges, stats.embedded), (0, 1));
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
+        assert_eq!(stats.new_exchanges, 0);
         let conn = e.conn();
-        assert_eq!(count(&conn, "SELECT count(*) FROM vec_exchanges"), 1);
+        assert_eq!(count(&conn, "SELECT count(*) FROM vec_exchanges"), 0);
         assert_eq!(meta_get(&conn, "sync_count").as_deref(), Some("2"));
     }
 
@@ -1511,7 +1490,7 @@ mod orchestration {
         // A source whose archive location is blocked by a directory fails; the other still syncs.
         put(&e.root.join("p/b.jsonl"), &turn("q2", "a2"));
         fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!((stats.errors, stats.files_synced), (1, 1));
         assert!(
             e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
@@ -1532,7 +1511,7 @@ mod orchestration {
     fn older_index_version_reindexes_once() {
         let e = env();
         put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
-        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        run_sync_with_roots(&e.paths, &e.roots).unwrap();
         let conn = e.conn();
         assert_eq!(
             meta_get(&conn, "index_version").as_deref(),
@@ -1544,7 +1523,7 @@ mod orchestration {
              UPDATE meta SET value = '1' WHERE key = 'index_version';",
         )
         .unwrap();
-        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        run_sync_with_roots(&e.paths, &e.roots).unwrap();
         let project = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
         assert_eq!(project("SELECT project FROM files"), "demo");
         assert_eq!(project("SELECT project FROM exchanges"), "demo");

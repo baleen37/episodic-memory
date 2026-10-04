@@ -6,6 +6,7 @@ use crate::read::read_archive;
 use crate::search::{Hit, MAX_LIMIT, SearchParams, search};
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
+use rusqlite::Connection;
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,13 +28,15 @@ pub struct Ctx {
 /// Newline-delimited JSON-RPC 2.0 over `r`/`w` until EOF on `r`. `host_pid` is the Claude Code
 /// or Codex process behind the connection; search leaves out the session it is running.
 pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32>) -> Result<()> {
+    // One DB connection for the whole MCP connection, opened by the first search.
+    let mut conn = None;
     for line in r.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let resp = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&msg, ctx, host_pid),
+            Ok(msg) => handle(&msg, ctx, &mut conn, host_pid),
             Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
         };
         if let Some(resp) = resp {
@@ -50,7 +53,12 @@ fn error(id: &Value, code: i64, message: &str) -> Value {
 }
 
 /// Messages without an `id` are notifications and get no response.
-fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
+fn handle(
+    msg: &Value,
+    ctx: &Ctx,
+    conn: &mut Option<Connection>,
+    host_pid: Option<u32>,
+) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result = match msg.get("method").and_then(Value::as_str).unwrap_or("") {
@@ -69,7 +77,7 @@ fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
             let out = match params.get("name").and_then(Value::as_str) {
-                Some("search") => search_tool(args, ctx, host_pid),
+                Some("search") => search_tool(args, ctx, conn, host_pid),
                 Some("read") => read_tool(args, ctx),
                 other => Err(format!("unknown tool: {}", other.unwrap_or(""))),
             };
@@ -189,19 +197,25 @@ fn search_params(args: &Map<String, Value>) -> Result<SearchParams, String> {
 fn search_tool(
     args: &Map<String, Value>,
     ctx: &Ctx,
+    conn: &mut Option<Connection>,
     host_pid: Option<u32>,
 ) -> Result<String, String> {
     let mut params = search_params(args)?;
-    let conn = db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?;
-    params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
+    let conn = match conn {
+        Some(c) => c,
+        None => {
+            conn.insert(db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?)
+        }
+    };
+    params.exclude_session = host_pid.and_then(|pid| session_of(conn, pid));
     let embedder = crate::locks::read(&ctx.embedder).clone();
-    let out = match search(&conn, embedder.as_deref(), &params) {
+    let out = match search(conn, embedder.as_deref(), &params) {
         Err(e) if embedder.is_some() => {
             crate::log::log_line(
                 &ctx.paths,
                 &format!("vector search failed, keyword-only fallback: {e:#}"),
             );
-            search(&conn, None, &params)
+            search(conn, None, &params)
         }
         r => r,
     }
@@ -297,7 +311,9 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&paths, &roots).unwrap();
+        crate::embed::embed_pending(&mut crate::db::open(&paths.db()).unwrap(), &FakeEmbedder)
+            .unwrap();
         let embedder: Arc<dyn Embedder> = Arc::new(FakeEmbedder);
         let ctx = Ctx {
             paths,
@@ -574,7 +590,12 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&ctx.paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&ctx.paths, &roots).unwrap();
+        crate::embed::embed_pending(
+            &mut crate::db::open(&ctx.paths.db()).unwrap(),
+            &FakeEmbedder,
+        )
+        .unwrap();
         let path = ctx
             .paths
             .archive_root()
@@ -601,5 +622,58 @@ mod tests {
         assert_eq!(r[1]["error"]["code"], -32601);
         assert_eq!(r[2]["id"], 8);
         assert_eq!(r[2]["result"], json!({}));
+    }
+
+    /// Yields one request line per `read`, running `between` before the second line, so the
+    /// test can act while `serve` is mid-connection.
+    struct Lines<F: FnMut()> {
+        requests: Vec<String>,
+        next: usize,
+        between: F,
+    }
+
+    impl<F: FnMut()> std::io::Read for Lines<F> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let Some(line) = self.requests.get(self.next) else {
+                return Ok(0);
+            };
+            if self.next == 1 {
+                (self.between)();
+            }
+            assert!(line.len() <= buf.len());
+            buf[..line.len()].copy_from_slice(line.as_bytes());
+            self.next += 1;
+            Ok(line.len())
+        }
+    }
+
+    #[test]
+    fn searches_on_one_connection_reuse_one_database_connection() {
+        let (_t, ctx) = indexed_ctx();
+        let search = call(1, "search", &json!({"query":"list files"})).to_string() + "\n";
+        let db = ctx.paths.db();
+        let moved = db.with_extension("moved");
+        let reader = std::io::BufReader::new(Lines {
+            requests: vec![search.clone(), search],
+            next: 0,
+            // A connection opened per search would now find no database and create an empty one.
+            between: || {
+                for suffix in ["", "-wal", "-shm"] {
+                    let from = format!("{}{suffix}", db.display());
+                    if std::path::Path::new(&from).exists() {
+                        std::fs::rename(&from, format!("{}{suffix}", moved.display())).unwrap();
+                    }
+                }
+            },
+        });
+        let mut out = Vec::new();
+        serve(reader, &mut out, &ctx, None).unwrap();
+        let r: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(text(&r[0]).contains("Q1 how do I list files?"), "{}", r[0]);
+        assert_eq!(text(&r[1]), text(&r[0]));
     }
 }
