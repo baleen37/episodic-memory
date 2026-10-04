@@ -61,7 +61,7 @@ fn index_file(
     // File meta is learned only from the archive bytes appended since it was last observed
     // (`meta_offset`), until the provider reports it settled. The project follows the `cwd`:
     // transcripts often open with lines lacking one (`mode`, `last-prompt`, ...).
-    let old_cwd = row.meta.cwd.clone();
+    let old_meta = row.meta.clone();
     if row.meta_offset == 0 {
         row.meta = initial_meta(kind, &row.archive_path);
         row.meta_settled = false;
@@ -71,7 +71,12 @@ fn index_file(
             observe_meta_from(kind, &archive, row.meta_offset as u64, &mut row.meta)?;
     }
     row.meta_offset = row.offset;
-    if row.harness.is_none() || row.meta.cwd != old_cwd {
+    // ADR 0001: meta that decides exchange boundaries changed, so every exchange already
+    // indexed may have the wrong boundaries. Reparse the whole archive.
+    if !row.meta.same_boundaries(&old_meta) {
+        row.reparse_line = 1;
+    }
+    if row.harness.is_none() || row.meta.cwd != old_meta.cwd {
         row.harness = Some(kind.harness().to_string());
         row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
     }
@@ -1013,6 +1018,33 @@ mod mirror {
         ) + &codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
                 "type":"response_item","payload":{"type":"message","role":"assistant",
                 "content":[{"type":"output_text","text":a}]}}))
+    }
+
+    #[test]
+    fn codex_archive_whose_user_signal_flips_matches_one_shot() {
+        // Two turns known only from `user_message` events, then a client that also records
+        // `item_completed`: from then on the archive's user signal is `item_completed`.
+        let item_completed = |q: &str| {
+            codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
+                "type":"event_msg","payload":{"type":"item_completed",
+                "item":{"type":"UserMessage","content":[{"type":"text","text":q}]}}}))
+        };
+        let body = codex_line(&serde_json::json!({"type":"session_meta",
+            "payload":{"id":"x","cwd":"/nonexistent/demo"}}))
+            + &codex_turn("old one", "first answer")
+            + &codex_turn("old two", "second answer")
+            + &item_completed("new three")
+            + &codex_turn("new three", "third answer")
+            + &codex_turn("old four", "fourth answer");
+        let line_len = body.lines().map(str::len).max().unwrap() + 1;
+        for chunk in [37, line_len] {
+            assert_incremental_matches_one_shot(
+                SourceKind::CodexSessions,
+                "2026/01/02/flip.jsonl",
+                &body,
+                chunk,
+            );
+        }
     }
 
     #[test]
