@@ -1,6 +1,6 @@
 {
   "name": "episodic-memory",
-  "version": "4.0.5",
+  "version": "4.0.6",
   "description": "Episodic Memory - Search past Claude Code and Codex conversations with hybrid keyword and semantic search",
   "author": {
     "name": "Baleen"
