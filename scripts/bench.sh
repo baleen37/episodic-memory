@@ -2,9 +2,10 @@
 # Usage: scripts/bench.sh [--bin PATH] [--sessions N] [--big-mb N] [--repeat N]
 # Benchmarks the real binary on synthetic transcripts in a temp dir (no network, no real data):
 # first sync, a sync with nothing new, incremental sync after appending to one large Claude Code and one large Codex
-# archive, and single/array search through the MCP stdio tool. Uses the hidden test flags
-# `--fake-embedder` (no model download) and `sync --wait` (returns when the sync job has indexed;
-# embedding continues in the daemon's worker, measured separately as embed_drain).
+# archive, and to a large Codex archive without `item_completed` events (its user signal comes from `user_message`
+# events; added after the first sync so first_sync stays comparable), and single/array search through the MCP stdio
+# tool. Uses the hidden test flags `--fake-embedder` (no model download) and `sync --wait` (returns when the sync job
+# has indexed; embedding continues in the daemon's worker, measured separately as embed_drain).
 # Baseline numbers: scripts/bench-baseline.txt.
 set -euo pipefail
 
@@ -67,7 +68,8 @@ report() { # name values...
     }'
 }
 
-# Writes synthetic exchanges to stdout. kind: claude|codex. Stops after `n` exchanges, or once
+# Writes synthetic exchanges to stdout. kind: claude|codex|codex_um (Codex with `user_message` events instead of
+# `item_completed`). Stops after `n` exchanges, or once
 # `bytes` bytes are written when bytes > 0. `head` = 1 writes the Codex session_meta line.
 gen() { # kind sid n bytes seed head
   awk -v kind="$1" -v sid="$2" -v n="$3" -v bytes="$4" -v seed="$5" -v head="$6" '
@@ -93,7 +95,7 @@ gen() { # kind sid n bytes seed head
       srand(seed)
       ts = "2026-01-02T03:04:05.000Z"
       cwd = "/work/proj-" (seed % 7)
-      if (kind == "codex" && head)
+      if (kind != "claude" && head)
         out("{\"timestamp\":\"" ts "\",\"type\":\"session_meta\",\"payload\":{\"id\":\"" sid "\",\"cwd\":\"" cwd "\",\"source\":\"cli\"}}")
       for (i = 1; (bytes > 0) ? written < bytes : i <= n; i++) {
         # Every 50th exchange carries the phrase the search measurements look for.
@@ -106,7 +108,10 @@ gen() { # kind sid n bytes seed head
           out("{\"type\":\"user\",\"sessionId\":\"" sid "\",\"timestamp\":\"" ts "\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t" i "\",\"content\":\"" tool "\"}]}}")
           out("{\"type\":\"assistant\",\"sessionId\":\"" sid "\",\"timestamp\":\"" ts "\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"" a "\"}]}}")
         } else {
-          out("{\"timestamp\":\"" ts "\",\"type\":\"event_msg\",\"payload\":{\"type\":\"item_completed\",\"item\":{\"type\":\"UserMessage\",\"id\":\"u" i "\",\"content\":[{\"type\":\"text\",\"text\":\"" q "\",\"text_elements\":[]}]}}}")
+          if (kind == "codex_um")
+            out("{\"timestamp\":\"" ts "\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"" q "\"}}")
+          else
+            out("{\"timestamp\":\"" ts "\",\"type\":\"event_msg\",\"payload\":{\"type\":\"item_completed\",\"item\":{\"type\":\"UserMessage\",\"id\":\"u" i "\",\"content\":[{\"type\":\"text\",\"text\":\"" q "\",\"text_elements\":[]}]}}}")
           out("{\"timestamp\":\"" ts "\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"" q "\"}]}}")
           out("{\"timestamp\":\"" ts "\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"call_id\":\"c" i "\",\"name\":\"exec\",\"input\":\"grep -r " W[i % NW + 1] "\"}}")
           out("{\"timestamp\":\"" ts "\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"c" i "\",\"output\":\"" tool "\"}}")
@@ -159,9 +164,17 @@ runs=()
 for r in $(seq 1 "$REPEAT"); do runs+=("$(timed_sync)"); done
 report noop_sync "${runs[@]}"
 
-for kind in claude codex; do
-  big="$BIG_CLAUDE"
-  [ "$kind" = codex ] && big="$BIG_CODEX"
+# The large Codex session without `item_completed`, indexed by an untimed sync before its appends are timed.
+BIG_CODEX_UM="$CODEX/sessions/2026/01/02/rollout-2026-01-02T03-04-05-codex-um.jsonl"
+gen codex_um codex-um 0 $((BIG_MB * 1048576)) 1003 1 >"$BIG_CODEX_UM"
+em sync --wait "${FLAGS[@]}"
+
+for kind in claude codex codex_um; do
+  case "$kind" in
+    claude) big="$BIG_CLAUDE" ;;
+    codex) big="$BIG_CODEX" ;;
+    codex_um) big="$BIG_CODEX_UM" ;;
+  esac
   runs=()
   for r in $(seq 1 "$REPEAT"); do
     gen "$kind" "$kind-0" 1 0 $((2000 + r)) 0 >>"$big"

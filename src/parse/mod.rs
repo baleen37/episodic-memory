@@ -2,7 +2,7 @@ use crate::paths::SourceKind;
 use anyhow::Result;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 pub mod claude;
@@ -21,6 +21,14 @@ pub struct FileMeta {
     pub sidechain_known: bool,
     pub agent_path: Option<String>,
     pub user_signal: Option<String>,
+}
+
+impl FileMeta {
+    /// True when both decide exchange start messages alike: they agree on every field an
+    /// adapter's `start_message` may read.
+    pub fn same_boundaries(&self, other: &FileMeta) -> bool {
+        self.agent_path == other.agent_path && self.user_signal == other.user_signal
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,17 +248,38 @@ pub fn render_line(kind: SourceKind, value: &Value) -> Vec<String> {
     provider(kind).render_line(value)
 }
 
-/// Reads file meta from the head of the archive file, stopping once it is settled.
-pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
+/// File meta of an archive before any of its lines is observed. `archive_path` keeps the
+/// source's relative path.
+pub fn initial_meta(kind: SourceKind, archive_path: &str) -> FileMeta {
+    provider(kind).initial_meta(archive_path)
+}
+
+/// Updates `meta` from the archive lines that start at byte `from` (a line start), stopping
+/// once it is settled. Returns true when no later line can change `meta`.
+pub fn observe_meta_from(
+    kind: SourceKind,
+    archive: &Path,
+    from: u64,
+    meta: &mut FileMeta,
+) -> Result<bool> {
     let p = provider(kind);
-    let mut meta = p.initial_meta(rel_path);
-    for line in read_file_lines_from(archive, 1)? {
+    let mut f = File::open(archive)?;
+    f.seek(SeekFrom::Start(from))?;
+    for line in read_lines_from(BufReader::new(f), 1) {
         if let (_, Some(v)) = line?
-            && p.observe_meta(&mut meta, &v)
+            && p.observe_meta(meta, &v)
         {
-            break;
+            return Ok(true);
         }
     }
+    Ok(false)
+}
+
+/// File meta observed from the whole archive.
+#[cfg(test)]
+pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
+    let mut meta = initial_meta(kind, rel_path);
+    observe_meta_from(kind, archive, 0, &mut meta)?;
     Ok(meta)
 }
 

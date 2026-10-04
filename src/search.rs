@@ -1,5 +1,4 @@
 use crate::embed::Embedder;
-use crate::parse::truncate_chars;
 use crate::terms::build_match_query;
 use anyhow::{Result, bail};
 use chrono::{Days, Duration, Local, NaiveDate, TimeZone};
@@ -183,21 +182,34 @@ fn vec_hits(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Candidate ids from `session` (to drop) and sidechain ids among `all`.
+/// `ids` as a JSON array, bound as one parameter and expanded with `json_each`.
+fn json_ids<'a>(ids: impl IntoIterator<Item = &'a i64>) -> String {
+    let mut s = String::from("[");
+    for (i, id) in ids.into_iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        let _ = write!(s, "{id}");
+    }
+    s.push(']');
+    s
+}
+
+/// Candidate ids from `session` (to drop) and sidechain ids among `all`, in one query.
 fn screen(
     conn: &Connection,
     all: &[&[i64]],
     session: Option<&str>,
 ) -> Result<(HashSet<i64>, HashSet<i64>)> {
     let mut stmt = conn.prepare_cached(
-        "SELECT is_sidechain, ?2 IS NOT NULL AND session_id IS ?2 FROM exchanges WHERE id = ?1",
+        "SELECT id, is_sidechain, ?2 IS NOT NULL AND session_id IS ?2 FROM exchanges
+         WHERE id IN (SELECT value FROM json_each(?1))",
     )?;
+    let list = json_ids(all.iter().flat_map(|s| s.iter()));
     let (mut own, mut side) = (HashSet::new(), HashSet::new());
-    for &id in all.iter().flat_map(|s| s.iter()) {
-        let (is_side, is_own): (bool, bool) = stmt
-            .query_row(rusqlite::params![id, session], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?;
+    let mut rows = stmt.query(rusqlite::params![list, session])?;
+    while let Some(r) = rows.next()? {
+        let (id, is_side, is_own): (i64, bool, bool) = (r.get(0)?, r.get(1)?, r.get(2)?);
         if is_own {
             own.insert(id);
         } else if is_side {
@@ -241,34 +253,50 @@ fn concept(
         .collect())
 }
 
-fn load_hit(conn: &Connection, id: i64, score: f64) -> Result<Hit> {
-    let snippet = |s: String| truncate_chars(&s, SNIPPET_CHARS).to_owned();
-    Ok(conn.query_row(
-        "SELECT project, ts, user_message, assistant_message, archive_path, line_start, line_end
-         FROM exchanges WHERE id = ?",
-        [id],
-        |r| {
+/// Hits for `ranked` (id, absolute score) in the same order, previews cut in SQL.
+fn load_hits(conn: &Connection, ranked: &[(i64, f64)]) -> Result<Vec<Hit>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, project, ts, substr(user_message, 1, {SNIPPET_CHARS}),
+                substr(assistant_message, 1, {SNIPPET_CHARS}), archive_path, line_start, line_end
+         FROM exchanges WHERE id IN (SELECT value FROM json_each(?))"
+    ))?;
+    let mut by_id: HashMap<i64, Hit> = stmt
+        .query_map([json_ids(ranked.iter().map(|(id, _)| id))], |r| {
             Ok(Hit {
-                exchange_id: id,
-                project: r.get(0)?,
-                ts: r.get(1)?,
-                score,
-                user_snippet: snippet(r.get(2)?),
-                assistant_snippet: snippet(r.get(3)?),
-                archive_path: r.get(4)?,
-                line_start: r.get(5)?,
-                line_end: r.get(6)?,
+                exchange_id: r.get(0)?,
+                project: r.get(1)?,
+                ts: r.get(2)?,
+                score: 0.0,
+                user_snippet: r.get(3)?,
+                assistant_snippet: r.get(4)?,
+                archive_path: r.get(5)?,
+                line_start: r.get(6)?,
+                line_end: r.get(7)?,
             })
-        },
-    )?)
+        })?
+        .map(|h| h.map(|h| (h.exchange_id, h)))
+        .collect::<rusqlite::Result<_>>()?;
+    ranked
+        .iter()
+        .map(|&(id, score)| {
+            let mut h = by_id
+                .remove(&id)
+                .ok_or_else(|| anyhow::anyhow!("exchange {id} vanished during search"))?;
+            h.score = score;
+            Ok(h)
+        })
+        .collect()
 }
 
-fn archive_path_of(conn: &Connection, id: i64) -> Result<String> {
-    Ok(conn.query_row(
-        "SELECT archive_path FROM exchanges WHERE id = ?",
-        [id],
-        |r| r.get(0),
-    )?)
+/// Archive path of each id, in one query.
+fn archive_paths(conn: &Connection, ids: &[Scored]) -> Result<HashMap<i64, String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, archive_path FROM exchanges WHERE id IN (SELECT value FROM json_each(?))",
+    )?;
+    let rows = stmt.query_map([json_ids(ids.iter().map(|s| &s.0))], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 pub fn search(
@@ -308,9 +336,14 @@ fn search_in<Tz: TimeZone>(
         // path -> per-concept best
         let mut by_path: HashMap<String, Vec<Option<Scored>>> = HashMap::new();
         for (ci, q) in p.queries.iter().enumerate() {
-            for (id, score, kw) in concept(conn, e, q, &f, 2 * n, n)? {
+            let scored = concept(conn, e, q, &f, 2 * n, n)?;
+            let mut paths = archive_paths(conn, &scored)?;
+            for (id, score, kw) in scored {
+                let path = paths
+                    .remove(&id)
+                    .ok_or_else(|| anyhow::anyhow!("exchange {id} vanished during search"))?;
                 let slot = by_path
-                    .entry(archive_path_of(conn, id)?)
+                    .entry(path)
                     .or_insert_with(|| vec![None; p.queries.len()]);
                 if slot[ci].is_none_or(|(_, s, _)| score > s) {
                     slot[ci] = Some((id, score, kw));
@@ -336,10 +369,11 @@ fn search_in<Tz: TimeZone>(
     };
 
     let keyword_match = ranked.iter().any(|r| r.2);
-    let hits = ranked
+    let scored: Vec<(i64, f64)> = ranked
         .into_iter()
-        .map(|(id, s, _)| load_hit(conn, id, (s / MAX_FUSED).clamp(0.0, 1.0)))
-        .collect::<Result<Vec<_>>>()?;
+        .map(|(id, s, _)| (id, (s / MAX_FUSED).clamp(0.0, 1.0)))
+        .collect();
+    let hits = load_hits(conn, &scored)?;
     Ok(SearchOutput {
         hits,
         vector_used,
@@ -628,9 +662,18 @@ mod tests {
     #[test]
     fn snippets_are_first_200_chars() {
         let long = format!("quokka {}", "가".repeat(500));
-        let (_t, conn) = db_with(&[ex("/a/1", 1, &long)], false);
+        let mut row = ex("/a/1", 1, &long);
+        let asst = format!("{}tail", "é😀".repeat(150));
+        row.asst = &asst;
+        let short = ex("/a/2", 1, "quokka short");
+        let (_t, conn) = db_with(&[row, short], false);
         let o = search(&conn, None, &params(&["quokka"])).unwrap();
-        assert_eq!(o.hits[0].user_snippet.chars().count(), 200);
+        let first = o.hits.iter().find(|h| h.archive_path == "/a/1").unwrap();
+        assert_eq!(first.user_snippet, format!("quokka {}", "가".repeat(193)));
+        assert_eq!(first.assistant_snippet, "é😀".repeat(100));
+        let second = o.hits.iter().find(|h| h.archive_path == "/a/2").unwrap();
+        assert_eq!(second.user_snippet, "quokka short");
+        assert_eq!(second.assistant_snippet, "ok");
     }
 
     #[test]
