@@ -192,7 +192,16 @@ mod tests {
     fn parse(path: &str, from: i64) -> (crate::parse::FileMeta, ParseOutput) {
         let p = Path::new(path);
         let meta = read_meta(K, p, "2026/01/02/rollout.jsonl").unwrap();
-        let out = parse_from(K, p, from, &meta).unwrap();
+        let out = parse_from(
+            K,
+            p,
+            crate::parse::ReparsePoint {
+                line: from,
+                byte: 0,
+            },
+            &meta,
+        )
+        .unwrap();
         (meta, out)
     }
 

@@ -4,7 +4,7 @@ use crate::db::{
     upsert_file,
 };
 use crate::log::log_line;
-use crate::parse::{initial_meta, observe_meta_from, parse_from};
+use crate::parse::{ReparsePoint, initial_meta, observe_meta_from, parse_from};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
 use crate::project::ProjectCache;
 use crate::terms::to_terms;
@@ -74,15 +74,15 @@ fn index_file(
     // ADR 0001: meta that decides exchange boundaries changed, so every exchange already
     // indexed may have the wrong boundaries. Reparse the whole archive.
     if !row.meta.same_boundaries(&old_meta) {
-        row.reparse_line = 1;
+        row.reparse = ReparsePoint::START;
     }
     if row.harness.is_none() || row.meta.cwd != old_meta.cwd {
         row.harness = Some(kind.harness().to_string());
         row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
     }
 
-    delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
-    let out = parse_from(kind, &archive, row.reparse_line, &row.meta)?;
+    delete_exchanges_from(tx, &row.archive_path, row.reparse.line)?;
+    let out = parse_from(kind, &archive, row.reparse, &row.meta)?;
     stats.bad_lines = out.bad_lines;
     if out.do_not_index {
         row.skipped = true;
@@ -92,7 +92,10 @@ fn index_file(
 
     let project = row.project.clone().unwrap_or_else(|| "unknown".into());
     if let Some(last) = out.exchanges.last() {
-        row.reparse_line = last.line_start;
+        row.reparse = ReparsePoint {
+            line: last.line_start,
+            byte: last.byte_start,
+        };
     }
     for e in out.exchanges {
         if e.user_message.len() > MAX_MESSAGE_BYTES || e.assistant_message.len() > MAX_MESSAGE_BYTES
@@ -205,7 +208,7 @@ fn start_new_generation(
     row.generation = generation;
     row.archive_path = path_str(&archive_path_for(paths, f.kind, &f.rel, generation));
     row.offset = 0;
-    row.reparse_line = 1;
+    row.reparse = ReparsePoint::START;
     row.meta_offset = 0;
     row.harness = None;
     upsert_file(&tx, row)?;
@@ -397,7 +400,7 @@ fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache
             let Some(mut row) = get_file(conn, &source)? else {
                 return Ok(());
             };
-            row.reparse_line = 1;
+            row.reparse = ReparsePoint::START;
             row.meta_offset = 0;
             row.harness = None;
             let tx = conn.transaction()?;
@@ -669,7 +672,7 @@ mod mirror {
         assert_eq!(row.generation, 1);
         assert!(row.archive_path.ends_with("proj/s1.gen-1.jsonl"));
         assert_eq!(row.offset as usize, lines(100..102).len());
-        assert_eq!(row.reparse_line, 1);
+        assert_eq!(row.reparse, ReparsePoint::START);
     }
 
     #[test]
@@ -731,7 +734,7 @@ mod mirror {
         row.generation = 1;
         row.archive_path = e.gen_path(1).to_str().unwrap().into();
         row.offset = 0;
-        row.reparse_line = 1;
+        row.reparse = ReparsePoint::START;
         let tx = e.conn.transaction().unwrap();
         upsert_file(&tx, &row).unwrap();
         tx.commit().unwrap();
@@ -1082,6 +1085,117 @@ mod mirror {
         assert_eq!(users.last().unwrap(), "fresh question");
     }
 
+    /// One exchange per provider: a user message, then an answer (two archive lines).
+    fn provider_turn(kind: SourceKind, q: &str, a: &str) -> String {
+        match kind {
+            SourceKind::CodexSessions => codex_turn(q, a),
+            _ => turn(q, a),
+        }
+    }
+
+    const PROVIDERS: [(SourceKind, &str); 2] = [
+        (SourceKind::ClaudeCodeProjects, "p/r.jsonl"),
+        (SourceKind::CodexSessions, "2026/01/02/r.jsonl"),
+    ];
+
+    #[test]
+    fn sync_resumes_at_the_reparse_point_without_rereading_the_head() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            // The long answer keeps the head out of the 4096 tail bytes compared with the source.
+            e.write(
+                &(provider_turn(kind, "q1 x", "a1")
+                    + &provider_turn(kind, "q2", &"long answer ".repeat(500))
+                    + &provider_turn(kind, "q3", "a3")),
+            );
+            e.sync();
+            // Split archive line 1 in two, keeping its byte length. A sync that counted lines
+            // from byte 0 to reach the reparse point would see every later line shifted by one.
+            let archive = e.gen_path(0);
+            let text = fs::read_to_string(&archive).unwrap();
+            fs::write(&archive, text.replacen("q1 x", "q1\nx", 1)).unwrap();
+            e.append(&provider_turn(kind, "q4", "a4"));
+            e.sync();
+            assert_eq!(e.row().generation, 0);
+            let got: Vec<(i64, String)> = e.exchanges().into_iter().map(|x| (x.1, x.2)).collect();
+            assert_eq!(
+                got[2..],
+                [(5, "q3".to_string()), (7, "q4".to_string())],
+                "{kind:?}"
+            );
+        }
+    }
+
+    /// Indexed exchanges of a fresh sync of `body`, for comparison with an incremental one.
+    fn one_shot(kind: SourceKind, rel: &str, body: &str) -> Vec<Indexed> {
+        let mut once = env_for(kind, rel);
+        once.write(body);
+        once.sync();
+        once.indexed()
+    }
+
+    #[test]
+    fn new_generation_indexes_like_a_fresh_sync() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            e.write(&(provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2")));
+            e.sync();
+            // Rewritten source: shorter, so it starts generation 1 from line 1.
+            let body = provider_turn(kind, "fresh", "answer");
+            e.write(&body);
+            e.sync();
+            e.append(&provider_turn(kind, "next", "answer"));
+            e.sync();
+            assert_eq!(e.row().generation, 1);
+            let body = body + &provider_turn(kind, "next", "answer");
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn crash_repair_truncation_indexes_like_a_fresh_sync() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body = provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2");
+            e.write(&body);
+            e.sync();
+            // An append that reached the archive but was never committed.
+            let mut h = OpenOptions::new().append(true).open(e.gen_path(0)).unwrap();
+            h.write_all(provider_turn(kind, "lost lost", "gone").as_bytes())
+                .unwrap();
+            h.write_all(b"{\"partial").unwrap();
+            let more = provider_turn(kind, "q3", "a3");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.archive(0), body);
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn reparse_point_without_a_byte_position_is_located_by_line() {
+        // Rows from schema version 2 store only the reparse line.
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body = provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2");
+            e.write(&body);
+            e.sync();
+            let mut row = e.row();
+            assert!(row.reparse.line > 1);
+            row.reparse.byte = 0;
+            let tx = e.conn.transaction().unwrap();
+            upsert_file(&tx, &row).unwrap();
+            tx.commit().unwrap();
+            let more = provider_turn(kind, "q3", "a3");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+            assert!(e.row().reparse.byte > 0);
+        }
+    }
+
     #[test]
     fn indexes_fresh_file_and_fills_session_info() {
         let mut e = env();
@@ -1093,7 +1207,7 @@ mod mirror {
         assert_eq!(row.project.as_deref(), Some("demo"));
         assert_eq!(row.harness.as_deref(), Some("claude"));
         assert!(row.meta.sidechain_known && !row.meta.is_sidechain);
-        assert_eq!(row.reparse_line, 3);
+        assert_eq!(row.reparse.line, 3);
         assert_eq!(e.exchanges().len(), 2);
     }
 

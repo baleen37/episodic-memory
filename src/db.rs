@@ -1,4 +1,4 @@
-use crate::parse::FileMeta;
+use crate::parse::{FileMeta, ReparsePoint};
 use crate::paths::SourceKind;
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
@@ -14,7 +14,7 @@ pub struct FileRow {
     pub archive_path: String,
     pub generation: i64,
     pub offset: i64,
-    pub reparse_line: i64,
+    pub reparse: ReparsePoint,
     /// File meta learned from the archive's first `meta_offset` bytes.
     pub meta: FileMeta,
     /// Archive bytes observed into `meta`; 0 means `meta` starts over from the provider's
@@ -42,7 +42,7 @@ impl FileRow {
             archive_path,
             generation,
             offset,
-            reparse_line: 1,
+            reparse: ReparsePoint::START,
             meta: FileMeta::default(),
             meta_offset: 0,
             meta_settled: false,
@@ -75,6 +75,7 @@ CREATE TABLE files(
   generation INTEGER NOT NULL DEFAULT 0,
   "offset" INTEGER NOT NULL DEFAULT 0,
   reparse_line INTEGER NOT NULL DEFAULT 1,
+  reparse_offset INTEGER NOT NULL DEFAULT 0,
   session_id TEXT, cwd TEXT, project TEXT,
   harness TEXT, is_sidechain INTEGER,
   user_signal TEXT,
@@ -107,7 +108,7 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   project TEXT, ts INTEGER, is_sidechain INTEGER);
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 "#;
 
 /// Version 1 to 2: every file meta field is stored, with the archive bytes it was learned
@@ -118,6 +119,13 @@ ALTER TABLE files ADD COLUMN agent_path TEXT;
 ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
 PRAGMA user_version = 2;
+";
+
+/// Version 2 to 3: the reparse point also stores its byte position. Existing rows get 0
+/// (unknown), so their next sync finds the reparse line by counting once.
+const MIGRATE_2_TO_3: &str = r"
+ALTER TABLE files ADD COLUMN reparse_offset INTEGER NOT NULL DEFAULT 0;
+PRAGMA user_version = 3;
 ";
 
 fn register_vec() {
@@ -152,13 +160,17 @@ pub fn open(path: &Path) -> Result<Connection> {
     // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.
     c.set_transaction_behavior(TransactionBehavior::Immediate);
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < 2 {
+    if version < 3 {
         // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
         let tx = c.transaction()?;
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         match version {
             0 => tx.execute_batch(SCHEMA)?,
-            1 => tx.execute_batch(MIGRATE_1_TO_2)?,
+            1 => {
+                tx.execute_batch(MIGRATE_1_TO_2)?;
+                tx.execute_batch(MIGRATE_2_TO_3)?;
+            }
+            2 => tx.execute_batch(MIGRATE_2_TO_3)?,
             _ => {}
         }
         tx.commit()?;
@@ -198,7 +210,7 @@ pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
     Ok(c.prepare_cached(
         r#"SELECT source_path, source_kind, archive_path, generation, "offset", reparse_line,
                   session_id, cwd, project, harness, is_sidechain, user_signal, skipped,
-                  sidechain_known, agent_path, meta_offset, meta_settled
+                  sidechain_known, agent_path, meta_offset, meta_settled, reparse_offset
            FROM files WHERE source_path = ?"#,
     )?
     .query_row([source_path], |r| {
@@ -215,7 +227,10 @@ pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
             archive_path: r.get(2)?,
             generation: r.get(3)?,
             offset: r.get(4)?,
-            reparse_line: r.get(5)?,
+            reparse: ReparsePoint {
+                line: r.get(5)?,
+                byte: r.get(17)?,
+            },
             meta: FileMeta {
                 session_id: r.get(6)?,
                 cwd: r.get(7)?,
@@ -239,8 +254,9 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
         r#"INSERT INTO files(source_path, source_kind, archive_path, generation, "offset",
                              reparse_line, session_id, cwd, project, harness, is_sidechain,
                              user_signal, skipped, sidechain_known, agent_path, meta_offset,
-                             meta_settled)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                             meta_settled, reparse_offset)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                   ?18)
            ON CONFLICT(source_path) DO UPDATE SET
              source_kind = excluded.source_kind, archive_path = excluded.archive_path,
              generation = excluded.generation, "offset" = excluded."offset",
@@ -249,7 +265,7 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
              is_sidechain = excluded.is_sidechain, user_signal = excluded.user_signal,
              skipped = excluded.skipped, sidechain_known = excluded.sidechain_known,
              agent_path = excluded.agent_path, meta_offset = excluded.meta_offset,
-             meta_settled = excluded.meta_settled"#,
+             meta_settled = excluded.meta_settled, reparse_offset = excluded.reparse_offset"#,
     )?
     .execute(params![
         f.source_path,
@@ -257,7 +273,7 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
         f.archive_path,
         f.generation,
         f.offset,
-        f.reparse_line,
+        f.reparse.line,
         f.meta.session_id,
         f.meta.cwd,
         f.project,
@@ -268,7 +284,8 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
         f.meta.sidechain_known,
         f.meta.agent_path,
         f.meta_offset,
-        f.meta_settled
+        f.meta_settled,
+        f.reparse.byte
     ])?;
     Ok(())
 }
@@ -432,7 +449,7 @@ mod tests {
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
         let vocab: i64 = c
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
@@ -450,6 +467,7 @@ mod tests {
                  ALTER TABLE files DROP COLUMN agent_path;
                  ALTER TABLE files DROP COLUMN meta_offset;
                  ALTER TABLE files DROP COLUMN meta_settled;
+                 ALTER TABLE files DROP COLUMN reparse_offset;
                  INSERT INTO files(source_path, source_kind, archive_path, \"offset\")
                    VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10);
                  PRAGMA user_version = 1;",
@@ -459,10 +477,34 @@ mod tests {
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
         let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
         assert_eq!((got.offset, got.meta_offset), (10, 0));
         assert_eq!(got.meta, FileMeta::default());
+        assert_eq!(got.reparse, ReparsePoint::START);
+    }
+
+    #[test]
+    fn version_2_database_keeps_the_reparse_line_with_an_unknown_byte_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("episodic.db");
+        open(&p)
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE files DROP COLUMN reparse_offset;
+                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\", reparse_line)
+                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10, 7);
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        let c = open(&p).unwrap();
+        let v: i64 = c
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 3);
+        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
+        assert_eq!(got.reparse, ReparsePoint { line: 7, byte: 0 });
+        assert_eq!(got.offset, 10);
     }
 
     #[test]
@@ -540,6 +582,7 @@ mod tests {
             meta: meta.clone(),
             meta_offset: 10,
             meta_settled: true,
+            reparse: ReparsePoint { line: 3, byte: 7 },
             project: Some("p".into()),
             harness: Some("codex".into()),
             ..FileRow::new(
@@ -561,6 +604,7 @@ mod tests {
         assert!(got.skipped);
         assert_eq!(got.meta, meta);
         assert_eq!((got.meta_offset, got.meta_settled), (10, true));
+        assert_eq!(got.reparse, ReparsePoint { line: 3, byte: 7 });
         assert_eq!(count(&c, "files"), 1);
 
         assert_eq!(meta_get(&c, "k"), None);
