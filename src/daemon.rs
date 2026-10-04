@@ -17,6 +17,8 @@ pub const DEFAULT_IDLE_SECS: u64 = 600;
 /// Below the smallest `sun_path` (104 bytes on macOS) with room to spare.
 const MAX_SOCKET_PATH: usize = 100;
 const MAX_HELLO: u64 = 4096;
+/// A connection that sends no hello line within this time is closed, so it cannot hold a thread.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy)]
 pub struct DaemonOpts {
@@ -260,6 +262,8 @@ fn handle_conn(stream: UnixStream, st: &State) {
     let Ok(writer) = stream.try_clone() else {
         return;
     };
+    // Fails (EINVAL on macOS) only when the peer already closed; its buffered hello still reads.
+    let _ = stream.set_read_timeout(Some(HELLO_TIMEOUT));
     let mut reader = BufReader::new(stream);
     let mut hello = String::new();
     if reader
@@ -272,6 +276,8 @@ fn handle_conn(stream: UnixStream, st: &State) {
     }
     match serde_json::from_str::<Hello>(hello.trim()).ok() {
         Some(Hello::Mcp { host_pid }) => {
+            // MCP clients stay connected and idle between requests.
+            let _ = reader.get_ref().set_read_timeout(None);
             st.clients.fetch_add(1, Ordering::SeqCst);
             if let Err(e) = serve(&mut reader, &writer, &st.ctx, host_pid) {
                 log_line(&st.ctx.paths, &format!("mcp connection: {e:#}"));
