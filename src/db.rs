@@ -75,8 +75,8 @@ pub struct NewExchange {
     pub tool_names: String,
 }
 
-/// The latest schema, for a fresh DB. Existing DBs reach it through `migrations`; a schema
-/// change goes in both. `user_version` stays at 4: `<data>/REVISION` tracks versions now.
+/// The latest schema, for a fresh DB, which `open` stamps with `migrations::HEAD`. Existing DBs
+/// reach it through `migrations`; a schema change goes in both.
 const SCHEMA: &str = r#"
 CREATE TABLE files(
   source_path TEXT PRIMARY KEY,
@@ -119,7 +119,6 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   project TEXT, ts INTEGER, is_sidechain INTEGER);
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
-PRAGMA user_version = 4;
 "#;
 
 fn register_vec() {
@@ -160,6 +159,7 @@ pub fn open(path: &Path) -> Result<Connection> {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version == 0 {
             tx.execute_batch(SCHEMA)?;
+            crate::migrations::stamp(&tx, crate::migrations::HEAD)?;
         }
         tx.commit()?;
     }
@@ -450,7 +450,9 @@ mod tests {
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, crate::migrations::USER_VERSION);
+        let head = crate::migrations::HEAD.to_string();
+        assert_eq!(meta_get(&c, "revision"), Some(head));
         let vocab: i64 = c
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();

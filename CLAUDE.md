@@ -31,7 +31,7 @@ scripts/bench.sh                 # benchmark on synthetic data in a temp dir (ne
 | `src/main.rs` | CLI entry: subcommands `sync`, `mcp`, `daemon`, `doctor` |
 | `src/paths.rs` | Data dir, archive/db/log/socket paths, source roots (reads env values once) |
 | `src/db.rs` | Latest SQLite schema for a fresh DB (`files`, `exchanges`, `fts_exchanges`, `vec_exchanges`, `meta`), `delete_exchanges_from` |
-| `src/migrations/` | Data dir revisions: one `rNNNN_*.rs` script each (SQL and file moves), run by sync under `sync.lock`; applied revision in `<data>/REVISION` |
+| `src/migrations/` | Data dir revisions: one `rNNNN_*.rs` script each (SQL and file moves), run by sync under `sync.lock`; applied revision in `meta.revision`, `user_version` 2 locks out older binaries |
 | `src/archive.rs` | Append-only archive copy, rewrite detection, generations, import of existing archive |
 | `src/parse/{mod,claude,codex}.rs` | Transcript parsers: exchange boundaries, exclusion rules, tools, DO NOT INDEX |
 | `src/project.rs` | project name = git common-dir parent directory name |
@@ -77,7 +77,7 @@ embedding worker  -> embed pending exchanges (8 per batch) into vec_exchanges,
 
 - Never commit real transcripts or content copied from them. Test fixtures are synthetic.
 - The archive is append-only. Never rewrite, truncate (except to `offset` for crash repair), or delete archive files.
-- Any change to the schema or data dir layout is a new revision in `src/migrations/` (ADR 0002). A schema change also goes in `db::SCHEMA`; the migrations tests check both reach the same columns. A revision runs in one DB transaction and must be safe to rerun after a crash. Moving an archive file with `rename` (content unchanged) is allowed there.
+- Any change to the schema or data dir layout is a new revision in `src/migrations/` (ADR 0002). A schema change also goes in `db::SCHEMA`; the migrations tests check both reach the same columns. A revision runs in one DB transaction with its `meta.revision` stamp; file work in it must be safe to rerun after a crash. Moving an archive file with `rename` (content unchanged) is allowed there.
 - DB `archive_path` is relative to the data dir: build it with `Paths::archive_key`, open it with `Paths::archive_file`. MCP output shows absolute paths.
 - `delete_exchanges_from` in `src/db.rs` is the only way to delete exchanges. It clears `fts_exchanges` and `vec_exchanges` first because virtual tables have no FKs.
 - Env vars are limited to three: `EPISODIC_MEMORY_DIR` (data dir, tests), `EPISODIC_MEMORY_DISABLE=1` (sync no-op), `EPISODIC_MEMORY_BIN` (wrapper override). Do not add more.

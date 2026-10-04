@@ -569,7 +569,7 @@ fn doctor_after_sync_reports_running_daemon() {
     assert!(daemon.contains("0 client(s)"), "status counted as a client");
     assert!(d.line("model").starts_with("[ok]"));
     let db = d.line("db");
-    assert!(db.starts_with("[ok]") && db.contains("revision 2"), "{db}");
+    assert!(db.starts_with("[ok]") && db.contains("revision 3"), "{db}");
     let n: i64 = db
         .split(", ")
         .find_map(|p| p.strip_suffix(" exchanges")?.parse().ok())
