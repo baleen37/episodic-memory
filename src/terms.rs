@@ -97,10 +97,10 @@ pub fn build_match_query(conn: &Connection, query: &str) -> Result<Option<String
             counted.push((expr, doc));
         }
     }
-    if kept.is_empty() {
-        if let Some((expr, _)) = counted.into_iter().min_by_key(|(_, d)| *d) {
-            kept.push(expr);
-        }
+    if kept.is_empty()
+        && let Some((expr, _)) = counted.into_iter().min_by_key(|(_, d)| *d)
+    {
+        kept.push(expr);
     }
     Ok(Some(kept.join(" OR ")))
 }

@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use daemon::{DaemonOpts, DEFAULT_IDLE_SECS};
+use daemon::{DEFAULT_IDLE_SECS, DaemonOpts};
 use paths::Paths;
 
 mod archive;

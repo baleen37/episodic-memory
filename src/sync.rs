@@ -1,12 +1,12 @@
 use crate::archive::{append_tail, archive_path_for, tails_match};
 use crate::db::{
-    delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set, upsert_file, FileRow,
-    NewExchange,
+    FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
+    upsert_file,
 };
-use crate::embed::{embed_pending, Embedder};
+use crate::embed::{Embedder, embed_pending};
 use crate::log::log_line;
-use crate::parse::{parse_from, read_meta, FileMeta};
-use crate::paths::{candidate_roots_from_env, try_lock, Paths, SourceKind, SourceRoot};
+use crate::parse::{FileMeta, parse_from, read_meta};
+use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
 use crate::project::resolve_project;
 use crate::terms::to_terms;
 use anyhow::Result;
@@ -322,10 +322,11 @@ fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
                 stack.push(path);
             } else if meta.is_file() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if name.ends_with(".jsonl") && !is_generation_name(&name) {
-                    if let Ok(rel) = path.strip_prefix(root) {
-                        out.push((rel.to_path_buf(), meta.len()));
-                    }
+                if name.ends_with(".jsonl")
+                    && !is_generation_name(&name)
+                    && let Ok(rel) = path.strip_prefix(root)
+                {
+                    out.push((rel.to_path_buf(), meta.len()));
                 }
             }
         }
@@ -1293,12 +1294,14 @@ mod orchestration {
         fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
         let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
         assert_eq!((stats.errors, stats.files_synced), (1, 1));
-        assert!(e
-            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
-            .is_dir());
-        assert!(!e
-            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 1)
-            .exists());
+        assert!(
+            e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
+                .is_dir()
+        );
+        assert!(
+            !e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 1)
+                .exists()
+        );
         let conn = e.conn();
         let last = meta_get(&conn, "last_error").unwrap();
         assert!(last.contains("a.jsonl"), "{last}");

@@ -1,12 +1,12 @@
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -401,10 +401,10 @@ fn search_during_sync_sees_committed_state() {
             let Some((s, e)) = range.split_once('-') else {
                 continue;
             };
-            if let (Ok(s), Ok(e)) = (s.parse(), e.parse()) {
-                if path.ends_with(".jsonl") {
-                    seen.push((path.to_string(), s, e));
-                }
+            if let (Ok(s), Ok(e)) = (s.parse(), e.parse())
+                && path.ends_with(".jsonl")
+            {
+                seen.push((path.to_string(), s, e));
             }
         }
         rounds += 1;
