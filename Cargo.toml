@@ -1,6 +1,6 @@
 [package]
 name = "episodic-memory"
-version = "4.0.7"
+version = "4.1.0"
 edition = "2024"
 description = "Persistent conversation memory for Claude Code and Codex"
 
