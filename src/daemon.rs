@@ -36,7 +36,11 @@ pub fn socket_path(paths: &Paths) -> Result<PathBuf> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "client", rename_all = "lowercase")]
 pub enum Hello {
-    Mcp,
+    /// `host_pid`: the Claude Code or Codex process the bridge runs under.
+    Mcp {
+        #[serde(default)]
+        host_pid: Option<u32>,
+    },
     Sync,
     Status,
 }
@@ -261,9 +265,9 @@ fn handle_conn(stream: UnixStream, st: &State) {
         return;
     }
     match serde_json::from_str::<Hello>(hello.trim()).ok() {
-        Some(Hello::Mcp) => {
+        Some(Hello::Mcp { host_pid }) => {
             st.clients.fetch_add(1, Ordering::SeqCst);
-            if let Err(e) = serve(&mut reader, &writer, &st.ctx) {
+            if let Err(e) = serve(&mut reader, &writer, &st.ctx, host_pid) {
                 log_line(&st.ctx.paths, &format!("mcp connection: {e:#}"));
             }
             st.clients.fetch_sub(1, Ordering::SeqCst);
@@ -294,11 +298,14 @@ mod tests {
     }
 
     #[test]
-    fn hello_lines_roundtrip() {
-        for h in [Hello::Mcp, Hello::Sync, Hello::Status] {
+    fn hello_lines_roundtrip_and_accept_bare_mcp() {
+        for h in [Hello::Mcp { host_pid: Some(7) }, Hello::Sync, Hello::Status] {
             assert_eq!(serde_json::from_str::<Hello>(h.line().trim()).unwrap(), h);
         }
-        assert_eq!(Hello::Mcp.line(), "{\"client\":\"mcp\"}\n");
+        assert_eq!(
+            serde_json::from_str::<Hello>(r#"{"client":"mcp"}"#).unwrap(),
+            Hello::Mcp { host_pid: None }
+        );
     }
 
     #[test]

@@ -28,6 +28,9 @@ pub struct ParsedExchange {
     pub user_message: String,
     pub assistant_message: String,
     pub tool_names: Vec<String>,
+    /// Answer text seen only in transient events (Codex `agent_message`); it becomes the answer
+    /// when the turn recorded none, which happens when the user interrupts it.
+    pub fallback_answer: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -86,7 +89,18 @@ impl ParsedExchange {
             user_message,
             assistant_message: String::new(),
             tool_names: Vec::new(),
+            fallback_answer: String::new(),
         }
+    }
+
+    /// The exchange as indexed, or None when the turn produced neither an answer nor a tool
+    /// call (interrupted before any output, resubmitted, or a local command like `/clear`).
+    fn finish(mut self) -> Option<Self> {
+        if self.assistant_message.is_empty() {
+            self.assistant_message = std::mem::take(&mut self.fallback_answer);
+        }
+        self.fallback_answer.clear();
+        (!self.assistant_message.is_empty() || !self.tool_names.is_empty()).then_some(self)
     }
 
     pub(crate) fn push_answer(&mut self, text: &str) {
@@ -105,6 +119,8 @@ impl ParsedExchange {
 
 /// Shared exchange loop. `start` returns the text of a line that opens an exchange;
 /// `add` folds every other line into the open exchange. Bad lines extend the open exchange.
+/// Turns without an answer or tool call are dropped; a still-open last turn is picked up again
+/// by the next sync, which reparses from the last returned exchange.
 pub(crate) fn parse_exchanges(
     archive: &Path,
     from_line: i64,
@@ -123,7 +139,8 @@ pub(crate) fn parse_exchanges(
             continue;
         };
         if let Some(text) = start(&v) {
-            out.exchanges.extend(cur.take());
+            out.exchanges
+                .extend(cur.take().and_then(ParsedExchange::finish));
             out.do_not_index |= text.contains(DO_NOT_INDEX);
             cur = Some(ParsedExchange::new(n, ts_ms(&v), text));
             continue;
@@ -132,7 +149,7 @@ pub(crate) fn parse_exchanges(
         c.line_end = n;
         add(c, &v);
     }
-    out.exchanges.extend(cur);
+    out.exchanges.extend(cur.and_then(ParsedExchange::finish));
     Ok(out)
 }
 

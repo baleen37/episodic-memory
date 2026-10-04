@@ -30,6 +30,10 @@ pub enum FileOutcome {
     Skipped,
 }
 
+/// Bumped when parsing or project resolution changes what an indexed file should contain;
+/// a database indexed under an older version is reindexed once (`reindex_all`).
+const INDEX_VERSION: &str = "2";
+
 /// Exchanges larger than this (either message, UTF-8 bytes) are not indexed (obra#139).
 const MAX_MESSAGE_BYTES: usize = 262_144;
 
@@ -365,8 +369,36 @@ pub fn import_archive_with_roots(
     }
     if failures == 0 {
         meta_set(conn, "imported", "1")?;
+        meta_set(conn, "index_version", INDEX_VERSION)?;
     }
     Ok(registered)
+}
+
+/// Rebuilds every indexed file's exchanges and session info (project included) from its
+/// archive. A file that fails is logged and left as it was.
+fn reindex_all(conn: &mut Connection, paths: &Paths) -> Result<()> {
+    let sources: Vec<String> = conn
+        .prepare(r#"SELECT source_path FROM files WHERE "offset" > 0 AND skipped = 0"#)?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for source in sources {
+        let result = (|| -> Result<()> {
+            let Some(mut row) = get_file(conn, &source)? else {
+                return Ok(());
+            };
+            row.reparse_line = 1;
+            row.harness = None;
+            let tx = conn.transaction()?;
+            index_file(&tx, &mut row)?;
+            upsert_file(&tx, &row)?;
+            tx.commit()?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log_line(paths, &format!("reindex {source}: {e:#}"));
+        }
+    }
+    meta_set(conn, "index_version", INDEX_VERSION)
 }
 
 /// Registers one archive file; false if it already has a `files` row.
@@ -444,6 +476,9 @@ pub fn run_sync_with_roots(
     let mut conn = crate::db::open(&paths.db())?;
     if meta_get(&conn, "imported").is_none() {
         import_archive_with_roots(&mut conn, paths, roots)?;
+    }
+    if meta_get(&conn, "index_version").as_deref() != Some(INDEX_VERSION) {
+        reindex_all(&mut conn, paths)?;
     }
 
     let mut stats = SyncStats::default();
@@ -844,6 +879,17 @@ mod mirror {
         assert_eq!(row.is_sidechain, Some(false));
         assert_eq!(row.reparse_line, 3);
         assert_eq!(e.exchanges().len(), 2);
+    }
+
+    #[test]
+    fn open_turn_is_indexed_once_answered() {
+        let mut e = env();
+        e.write(&(turn("q1", "a1") + &user("still thinking")));
+        assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
+        e.append(&assistant("now answered"));
+        e.sync();
+        let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
+        assert_eq!(users, ["q1", "still thinking"]);
     }
 
     #[test]
@@ -1248,5 +1294,32 @@ mod orchestration {
         assert!(last.contains("a.jsonl"), "{last}");
         let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
         assert!(log.contains("a.jsonl"));
+    }
+
+    #[test]
+    fn older_index_version_reindexes_once() {
+        let e = env();
+        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
+        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let conn = e.conn();
+        assert_eq!(
+            meta_get(&conn, "index_version").as_deref(),
+            Some(INDEX_VERSION)
+        );
+        // A database indexed by an older version: stale project, version 1.
+        conn.execute_batch(
+            "UPDATE files SET project = 'stale'; UPDATE exchanges SET project = 'stale';
+             UPDATE meta SET value = '1' WHERE key = 'index_version';",
+        )
+        .unwrap();
+        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let project = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+        assert_eq!(project("SELECT project FROM files"), "demo");
+        assert_eq!(project("SELECT project FROM exchanges"), "demo");
+        assert_eq!(count(&conn, "SELECT count(*) FROM exchanges"), 1);
+        assert_eq!(
+            meta_get(&conn, "index_version").as_deref(),
+            Some(INDEX_VERSION)
+        );
     }
 }

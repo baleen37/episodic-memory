@@ -24,6 +24,8 @@ pub struct SearchParams {
     pub after: Option<NaiveDate>,
     pub before: Option<NaiveDate>,
     pub project: Option<String>,
+    /// The requesting conversation; its exchanges are never returned.
+    pub exclude_session: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +79,8 @@ struct Filters {
     project: Option<String>,
     ts_from: Option<i64>,
     ts_to: Option<i64>,
+    /// Applied to candidates after retrieval (`vec_exchanges` has no session column).
+    exclude_session: Option<String>,
 }
 
 impl Filters {
@@ -98,6 +102,7 @@ impl Filters {
         };
         Filters {
             project: p.project.clone(),
+            exclude_session: p.exclude_session.clone(),
             ts_from: p.after.map(day_ms),
             ts_to: p
                 .before
@@ -175,16 +180,28 @@ fn vec_hits(
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-fn sidechain_set(conn: &Connection, all: &[&[i64]]) -> Result<HashSet<i64>> {
-    let mut stmt = conn.prepare("SELECT is_sidechain FROM exchanges WHERE id = ?")?;
-    let mut out = HashSet::new();
-    for id in all.iter().flat_map(|s| s.iter()) {
-        let side: Option<i64> = stmt.query_row([id], |r| r.get(0)).ok();
-        if side == Some(1) {
-            out.insert(*id);
+/// Candidate ids from `session` (to drop) and sidechain ids among `all`.
+fn screen(
+    conn: &Connection,
+    all: &[&[i64]],
+    session: Option<&str>,
+) -> Result<(HashSet<i64>, HashSet<i64>)> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT is_sidechain, ?2 IS NOT NULL AND session_id IS ?2 FROM exchanges WHERE id = ?1",
+    )?;
+    let (mut own, mut side) = (HashSet::new(), HashSet::new());
+    for &id in all.iter().flat_map(|s| s.iter()) {
+        let (is_side, is_own): (bool, bool) = stmt
+            .query_row(rusqlite::params![id, session], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        if is_own {
+            own.insert(id);
+        } else if is_side {
+            side.insert(id);
         }
     }
-    Ok(out)
+    Ok((own, side))
 }
 
 /// (exchange id, raw fused score, found by BM25).
@@ -210,8 +227,10 @@ fn concept(
             .collect(),
         None => Vec::new(),
     };
-    let side = sidechain_set(conn, &[&bm, &ve])?;
-    let mut ranked = rrf(&bm, &ve, &side);
+    let (own, side) = screen(conn, &[&bm, &ve], f.exclude_session.as_deref())?;
+    let keep =
+        |ids: Vec<i64>| -> Vec<i64> { ids.into_iter().filter(|id| !own.contains(id)).collect() };
+    let mut ranked = rrf(&keep(bm), &keep(ve), &side);
     ranked.truncate(limit);
     Ok(ranked
         .into_iter()
@@ -399,6 +418,39 @@ mod tests {
 
     fn ids_of(o: &SearchOutput) -> Vec<i64> {
         o.hits.iter().map(|h| h.exchange_id).collect()
+    }
+
+    #[test]
+    fn requesting_session_is_excluded_on_both_sides() {
+        let (_t, conn) = db_with(
+            &[
+                ex("a.jsonl", 1, "zebra mine"),
+                ex("b.jsonl", 1, "zebra theirs"),
+            ],
+            true,
+        );
+        conn.execute(
+            "UPDATE exchanges SET session_id = 'me' WHERE archive_path = 'a.jsonl'",
+            [],
+        )
+        .unwrap();
+        let theirs: i64 = conn
+            .query_row(
+                "SELECT id FROM exchanges WHERE archive_path = 'b.jsonl'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let mut p = params(&["zebra"]);
+        p.exclude_session = Some("me".into());
+        let out = search(&conn, Some(&FakeEmbedder), &p).unwrap();
+        assert_eq!(ids_of(&out), [theirs]);
+        // Exchanges without a session id are never treated as the requester's.
+        p.exclude_session = None;
+        assert_eq!(
+            search(&conn, Some(&FakeEmbedder), &p).unwrap().hits.len(),
+            2
+        );
     }
 
     /// BM25 rank 1 alone, as an absolute score.
