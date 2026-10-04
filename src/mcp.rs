@@ -196,7 +196,7 @@ fn search_tool(
     let mut params = search_params(args)?;
     let conn = db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?;
     params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
-    let embedder = ctx.embedder.read().ok().and_then(|g| g.clone());
+    let embedder = crate::locks::read(&ctx.embedder).clone();
     let out = match search(&conn, embedder.as_deref(), &params) {
         Err(_) if embedder.is_some() => search(&conn, None, &params),
         r => r,
