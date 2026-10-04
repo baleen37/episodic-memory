@@ -122,10 +122,13 @@ pub fn open(path: &Path) -> Result<Connection> {
     c.execute_batch(
         "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
     )?;
+    // Every write transaction starts IMMEDIATE: a deferred one that reads first fails its
+    // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.
+    c.set_transaction_behavior(TransactionBehavior::Immediate);
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version == 0 {
         // IMMEDIATE so two processes opening a fresh DB don't both create the schema.
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = c.transaction()?;
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version == 0 {
             tx.execute_batch(SCHEMA)?;
@@ -346,6 +349,34 @@ mod tests {
         });
         open(&p).expect("open must wait out the lock, not fail with SQLITE_BUSY");
         release.join().unwrap();
+    }
+
+    #[test]
+    fn write_transactions_wait_for_a_concurrent_writer_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("episodic.db");
+        let mut a = open(&p).unwrap();
+        a.execute_batch("CREATE TABLE t(x)").unwrap();
+        // A reads, then writes inside one transaction. A deferred transaction would take a
+        // read snapshot, let B commit, then fail the upgrade with SQLITE_BUSY at once.
+        let tx = a.transaction().unwrap();
+        let _: i64 = tx
+            .query_row("SELECT count(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        let p2 = p.clone();
+        let writer = std::thread::spawn(move || {
+            let b = open(&p2).unwrap();
+            b.execute("INSERT INTO t VALUES (2)", []).unwrap();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        tx.execute("INSERT INTO t VALUES (1)", [])
+            .expect("write must not fail with SQLITE_BUSY");
+        tx.commit().unwrap();
+        writer.join().unwrap();
+        let n: i64 = a
+            .query_row("SELECT count(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
     }
 
     #[test]
