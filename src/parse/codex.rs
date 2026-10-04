@@ -197,7 +197,7 @@ mod tests {
             p,
             crate::parse::ReparsePoint {
                 line: from,
-                byte: 0,
+                byte: None,
             },
             &meta,
         )

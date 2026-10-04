@@ -56,17 +56,21 @@ pub struct ParseOutput {
 pub(crate) type Line = (i64, Option<Value>);
 
 /// Where the next sync resumes parsing an archive: the 1-based line number of the last
-/// exchange's start message and the byte position where that line starts. Byte 0 past line 1
-/// means the position is unknown (rows from schema version 2): the line is found by counting.
+/// exchange's start message and, when known, the byte position where that line starts. An
+/// unknown position (rows from schema version 2, or a line moved by an older binary) is found
+/// by counting lines from the start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReparsePoint {
     pub line: i64,
-    pub byte: i64,
+    pub byte: Option<i64>,
 }
 
 impl ReparsePoint {
     /// The archive's first line.
-    pub const START: ReparsePoint = ReparsePoint { line: 1, byte: 0 };
+    pub const START: ReparsePoint = ReparsePoint {
+        line: 1,
+        byte: Some(0),
+    };
 }
 
 /// Yields (1-based line number, parsed JSON or None when the line is bad). Blank lines are skipped.
@@ -78,18 +82,18 @@ pub(crate) fn read_lines<R: BufRead>(reader: R) -> impl Iterator<Item = Result<L
 
 /// Like `read_lines`, but lines before `from_line` are only counted, never decoded.
 fn read_lines_from<R: BufRead>(reader: R, from_line: i64) -> impl Iterator<Item = Result<Line>> {
-    positioned_lines(reader, ReparsePoint::START, from_line).map(|l| l.map(|(n, _, v)| (n, v)))
+    positioned_lines(reader, (1, 0), from_line).map(|l| l.map(|(n, _, v)| (n, v)))
 }
 
-/// Lines of a reader positioned at `at` (line `at.line` starts at byte `at.byte`), each with
+/// Lines of a reader positioned at `(line, byte)` (that line starts at that byte), each with
 /// its line number and start byte. Lines before `from_line` are only counted, never decoded.
 fn positioned_lines<R: BufRead>(
     mut reader: R,
-    at: ReparsePoint,
+    (line, byte): (i64, i64),
     from_line: i64,
 ) -> impl Iterator<Item = Result<(i64, i64, Option<Value>)>> {
-    let mut n = at.line - 1;
-    let mut next_byte = at.byte;
+    let mut n = line - 1;
+    let mut next_byte = byte;
     let mut buf = Vec::new();
     std::iter::from_fn(move || {
         loop {
@@ -201,11 +205,12 @@ fn parse_exchanges(
     let mut cur: Option<ParsedExchange> = None;
     let mut file = File::open(archive)?;
     // A known byte position is seeked to; an unknown one is found by counting from line 1.
-    let at = if from.byte > 0 || from.line == 1 {
-        file.seek(SeekFrom::Start(from.byte as u64))?;
-        from
-    } else {
-        ReparsePoint::START
+    let at = match from.byte {
+        Some(byte) => {
+            file.seek(SeekFrom::Start(byte as u64))?;
+            (from.line, byte)
+        }
+        None => (1, 0),
     };
     for line in positioned_lines(BufReader::new(file), at, from.line) {
         let (n, byte, v) = line?;

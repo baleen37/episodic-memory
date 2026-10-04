@@ -94,7 +94,7 @@ fn index_file(
     if let Some(last) = out.exchanges.last() {
         row.reparse = ReparsePoint {
             line: last.line_start,
-            byte: last.byte_start,
+            byte: Some(last.byte_start),
         };
     }
     for e in out.exchanges {
@@ -1183,7 +1183,7 @@ mod mirror {
             e.sync();
             let mut row = e.row();
             assert!(row.reparse.line > 1);
-            row.reparse.byte = 0;
+            row.reparse.byte = None;
             let tx = e.conn.transaction().unwrap();
             upsert_file(&tx, &row).unwrap();
             tx.commit().unwrap();
@@ -1192,7 +1192,34 @@ mod mirror {
             body += &more;
             e.sync();
             assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
-            assert!(e.row().reparse.byte > 0);
+            assert!(e.row().reparse.byte.is_some());
+        }
+    }
+
+    #[test]
+    fn reparse_line_moved_by_an_older_binary_is_located_by_line() {
+        // Binaries before the byte position existed update `reparse_line` only, leaving the
+        // stored byte position pointing at an earlier line.
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body = (1..=3)
+                .map(|i| provider_turn(kind, &format!("q{i}"), "a"))
+                .collect::<String>();
+            e.write(&body);
+            e.sync();
+            let row = e.row();
+            assert_eq!(row.reparse.line, 5);
+            e.conn
+                .execute(
+                    "UPDATE files SET reparse_line = 7 WHERE source_path = ?",
+                    [&row.source_path],
+                )
+                .unwrap();
+            let more = provider_turn(kind, "q4", "a");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
         }
     }
 
