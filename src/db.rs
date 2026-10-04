@@ -146,7 +146,15 @@ pub fn open(path: &Path) -> Result<Connection> {
     register_vec();
     let mut c = Connection::open(path)?;
     c.execute_batch(
-        "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
+        "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+    )?;
+    // mmap_size 256 MiB: reads come straight from the OS page cache, shared by every connection,
+    // instead of being copied into each connection's private cache.
+    // cache_size -32768 (KiB, so 32 MiB): the 2 MiB default thrashes on FTS and vector pages;
+    // per connection, and the daemon keeps one per MCP client, so kept moderate.
+    // temp_store MEMORY: sorts and temp b-trees for ORDER BY / GROUP BY in search skip temp files.
+    c.execute_batch(
+        "PRAGMA mmap_size=268435456; PRAGMA cache_size=-32768; PRAGMA temp_store=MEMORY;",
     )?;
     // Every write transaction starts IMMEDIATE: a deferred one that reads first fails its
     // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.

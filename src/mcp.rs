@@ -1,6 +1,6 @@
 use crate::db;
 use crate::embed::Embedder;
-use crate::host::session_of;
+use crate::host::HostSession;
 use crate::paths::{Paths, VERSION};
 use crate::read::read_archive;
 use crate::search::{Hit, MAX_LIMIT, SearchParams, search};
@@ -30,13 +30,14 @@ pub struct Ctx {
 pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32>) -> Result<()> {
     // One DB connection for the whole MCP connection, opened by the first search.
     let mut conn = None;
+    let mut host = host_pid.map(HostSession::new);
     for line in r.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let resp = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&msg, ctx, &mut conn, host_pid),
+            Ok(msg) => handle(&msg, ctx, &mut conn, &mut host),
             Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
         };
         if let Some(resp) = resp {
@@ -57,7 +58,7 @@ fn handle(
     msg: &Value,
     ctx: &Ctx,
     conn: &mut Option<Connection>,
-    host_pid: Option<u32>,
+    host: &mut Option<HostSession>,
 ) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
@@ -77,7 +78,7 @@ fn handle(
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
             let out = match params.get("name").and_then(Value::as_str) {
-                Some("search") => search_tool(args, ctx, conn, host_pid),
+                Some("search") => search_tool(args, ctx, conn, host),
                 Some("read") => read_tool(args, ctx),
                 other => Err(format!("unknown tool: {}", other.unwrap_or(""))),
             };
@@ -198,7 +199,7 @@ fn search_tool(
     args: &Map<String, Value>,
     ctx: &Ctx,
     conn: &mut Option<Connection>,
-    host_pid: Option<u32>,
+    host: &mut Option<HostSession>,
 ) -> Result<String, String> {
     let mut params = search_params(args)?;
     let conn = match conn {
@@ -207,7 +208,7 @@ fn search_tool(
             conn.insert(db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?)
         }
     };
-    params.exclude_session = host_pid.and_then(|pid| session_of(conn, pid));
+    params.exclude_session = host.as_mut().and_then(|h| h.current(conn));
     let embedder = crate::locks::read(&ctx.embedder).clone();
     let out = match search(conn, embedder.as_deref(), &params) {
         Err(e) if embedder.is_some() => {

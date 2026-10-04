@@ -22,3 +22,13 @@ setup() {
   [ -n "$dir" ]
   [ ! -e "$dir" ]
 }
+
+@test "bench searches do not run lsof (MCP host has a Claude session file)" {
+  stub="$BATS_TEST_TMPDIR/stub"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\necho called >>"%s"\n' "$BATS_TEST_TMPDIR/lsof-calls" >"$stub/lsof"
+  chmod +x "$stub/lsof"
+  PATH="$stub:$PATH" run "$ROOT/scripts/bench.sh" --bin "$BIN" --sessions 2 --big-mb 1 --repeat 2
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/lsof-calls" ]
+}
