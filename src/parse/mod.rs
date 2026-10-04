@@ -53,6 +53,14 @@ impl UserSignal {
     }
 }
 
+impl FileMeta {
+    /// True when both decide exchange start messages alike: they agree on every field an
+    /// adapter's `start_message` may read.
+    pub fn same_boundaries(&self, other: &FileMeta) -> bool {
+        self.agent_path == other.agent_path && self.user_signal == other.user_signal
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedExchange {
     pub line_start: i64,
@@ -73,6 +81,11 @@ pub struct ParseOutput {
     pub exchanges: Vec<ParsedExchange>,
     pub do_not_index: bool,
     pub bad_lines: usize,
+    /// A line observed during the pass reported the file meta settled.
+    pub meta_settled: bool,
+    /// The pass stopped at a line whose file meta change invalidates what was parsed before it
+    /// (ADR 0001); parse again from line 1.
+    pub restart: bool,
 }
 
 pub(crate) type Line = (i64, Option<Value>);
@@ -217,11 +230,15 @@ pub(crate) fn provider(kind: SourceKind) -> &'static dyn Provider {
 /// Exchange loop shared by all providers. Bad lines extend the open exchange.
 /// Exchanges without an answer or tool call are dropped; a still-open last exchange is picked up again
 /// by the next sync, which reparses from the last returned exchange.
+/// Lines starting at or after byte `observe_from` update `meta` first, until it is settled. The
+/// pass stops with `restart` when one changes `meta` after exchanges before `from` were indexed,
+/// or changes exchange boundaries.
 fn parse_exchanges(
     p: &dyn Provider,
     archive: &Path,
     from: ReparsePoint,
-    meta: &FileMeta,
+    meta: &mut FileMeta,
+    observe_from: Option<i64>,
 ) -> Result<ParseOutput> {
     let mut out = ParseOutput::default();
     let mut cur: Option<ParsedExchange> = None;
@@ -243,6 +260,17 @@ fn parse_exchanges(
             }
             continue;
         };
+        if !out.meta_settled
+            && let Some(at) = observe_from
+            && byte >= at
+        {
+            let seen = meta.clone();
+            out.meta_settled = p.observe_meta(meta, &v);
+            if *meta != seen && (from.line > 1 || !meta.same_boundaries(&seen)) {
+                out.restart = true;
+                return Ok(out);
+            }
+        }
         if let Some(text) = p.start_message(&v, meta) {
             out.exchanges
                 .extend(cur.take().and_then(ParsedExchange::finish));
@@ -316,48 +344,42 @@ pub fn initial_meta(kind: SourceKind, archive_path: &str) -> FileMeta {
     provider(kind).initial_meta(archive_path)
 }
 
-/// Updates `meta` from the archive lines that start at byte `from` (a line start), stopping
-/// once it is settled. Returns true when no later line can change `meta`.
-pub fn observe_meta_from(
-    kind: SourceKind,
-    archive: &Path,
-    from: u64,
-    meta: &mut FileMeta,
-) -> Result<bool> {
-    let p = provider(kind);
-    let mut f = File::open(archive)?;
-    f.seek(SeekFrom::Start(from))?;
-    for line in read_lines_from(BufReader::new(f), 1) {
-        if let (_, Some(v)) = line?
-            && p.observe_meta(meta, &v)
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// File meta observed from the whole archive.
-#[cfg(test)]
-pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
-    let mut meta = initial_meta(kind, rel_path);
-    observe_meta_from(kind, archive, 0, &mut meta)?;
-    Ok(meta)
-}
-
-/// Parses exchanges starting at the reparse point `from`.
+/// Parses exchanges starting at the reparse point `from`. With `observe_from`, the lines starting
+/// at or after that byte also update `meta` (until settled) in the same pass, each before it is
+/// parsed; see `ParseOutput::restart`.
 pub fn parse_from(
     kind: SourceKind,
     archive: &Path,
     from: ReparsePoint,
-    meta: &FileMeta,
+    meta: &mut FileMeta,
+    observe_from: Option<i64>,
 ) -> Result<ParseOutput> {
-    parse_exchanges(provider(kind), archive, from, meta)
+    parse_exchanges(provider(kind), archive, from, meta, observe_from)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Path of `tests/fixtures/<provider>/<name>.jsonl`.
+    pub(crate) fn fixture(provider: &str, name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("tests/fixtures/{provider}/{name}.jsonl"))
+    }
+
+    /// File meta observed from the whole archive; `rel_path` is the source's relative path.
+    pub(crate) fn meta_of(kind: SourceKind, archive: &Path, rel_path: &str) -> FileMeta {
+        let p = provider(kind);
+        let mut meta = p.initial_meta(rel_path);
+        for line in read_file_lines_from(archive, 1).unwrap() {
+            if let (_, Some(v)) = line.unwrap()
+                && p.observe_meta(&mut meta, &v)
+            {
+                break;
+            }
+        }
+        meta
+    }
 
     #[test]
     fn file_lines_from_start_keep_physical_numbers() {

@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::ParseOutput;
 use super::{
     FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
 };
@@ -165,27 +163,21 @@ fn render_line(v: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::ParseOutput;
     use crate::parse::read_lines;
+    use crate::parse::tests::{fixture, meta_of};
     use crate::paths::SourceKind;
     use std::io::BufReader;
+    use std::path::PathBuf;
 
     const K: SourceKind = SourceKind::ClaudeCodeProjects;
-    const MAIN: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/claude/main.jsonl"
-    );
-    const NOISE: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/claude/noise.jsonl"
-    );
-    const SUB: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/claude/subagent.jsonl"
-    );
 
-    fn parse(path: &str, from: i64) -> ParseOutput {
-        let p = Path::new(path);
-        let meta = crate::parse::read_meta(K, p, "proj/s.jsonl").unwrap();
+    fn fx(name: &str) -> PathBuf {
+        fixture("claude", name)
+    }
+
+    fn parse(p: &Path, from: i64) -> ParseOutput {
+        let mut meta = meta_of(K, p, "proj/s.jsonl");
         crate::parse::parse_from(
             K,
             p,
@@ -193,14 +185,15 @@ mod tests {
                 line: from,
                 byte: None,
             },
-            &meta,
+            &mut meta,
+            None,
         )
         .unwrap()
     }
 
     #[test]
     fn main_fixture_exchanges() {
-        let out = parse(MAIN, 1);
+        let out = parse(&fx("main"), 1);
         assert_eq!(out.exchanges.len(), 3);
         assert_eq!(out.bad_lines, 0);
         assert!(!out.do_not_index);
@@ -218,14 +211,14 @@ mod tests {
 
     #[test]
     fn parse_from_later_line() {
-        let out = parse(MAIN, 3);
+        let out = parse(&fx("main"), 3);
         assert_eq!(out.exchanges.len(), 2);
         assert_eq!(out.exchanges[0].line_start, 3);
     }
 
     #[test]
     fn noise_does_not_create_boundaries() {
-        let out = parse(NOISE, 1);
+        let out = parse(&fx("noise"), 1);
         assert_eq!(out.exchanges.len(), 2);
         assert_eq!(out.bad_lines, 1);
         assert!(!out.do_not_index);
@@ -240,7 +233,7 @@ mod tests {
 
     #[test]
     fn subagent_handback_is_assistant_text() {
-        let out = parse(SUB, 1);
+        let out = parse(&fx("subagent"), 1);
         assert_eq!(out.exchanges.len(), 1);
         let e = &out.exchanges[0];
         assert_eq!(e.assistant_message, "Found it.\n\nSynthetic final report.");
@@ -255,20 +248,19 @@ mod tests {
         let line = |t: &str, c: &str| format!(r#"{{"type":"{t}","message":{{"content":{c}}}}}"#);
         let marker = serde_json::to_string(crate::parse::DO_NOT_INDEX).unwrap();
         std::fs::write(&p, line("user", &marker) + "\n").unwrap();
-        assert!(parse(p.to_str().unwrap(), 1).do_not_index);
+        assert!(parse(&p, 1).do_not_index);
     }
 
     #[test]
     fn meta_and_sidechain() {
-        let m = crate::parse::read_meta(K, Path::new(MAIN), "proj/s.jsonl").unwrap();
+        let m = meta_of(K, &fx("main"), "proj/s.jsonl");
         assert_eq!(m.session_id.as_deref(), Some("sess-main"));
         assert_eq!(m.cwd.as_deref(), Some("/work/demo"));
         assert!(!m.is_sidechain);
         assert!(m.agent_path.is_none() && m.user_signal.is_none());
-        let s = crate::parse::read_meta(K, Path::new(SUB), "proj/s.jsonl").unwrap();
+        let s = meta_of(K, &fx("subagent"), "proj/s.jsonl");
         assert!(s.is_sidechain);
-        let by_path =
-            crate::parse::read_meta(K, Path::new(MAIN), "x/subagents/agent-1.jsonl").unwrap();
+        let by_path = meta_of(K, &fx("main"), "x/subagents/agent-1.jsonl");
         assert!(by_path.is_sidechain);
     }
 

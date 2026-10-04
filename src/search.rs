@@ -9,7 +9,6 @@ use std::fmt::Write as _;
 
 /// Most hits one search returns.
 pub const MAX_LIMIT: usize = 50;
-const SNIPPET_CHARS: usize = 200;
 /// Candidates fetched per side (BM25 and vector) for each concept of an array query.
 const MULTI_CONCEPT_CANDIDATES: usize = 300;
 /// Vector candidates whose cosine similarity to the query is below this are dropped before
@@ -253,13 +252,14 @@ fn concept(
         .collect())
 }
 
-/// Hits for `ranked` (id, absolute score) in the same order, previews cut in SQL.
+/// Hits for `ranked` (id, absolute score) in the same order, previews (first 200 chars) cut in
+/// SQL.
 fn load_hits(conn: &Connection, ranked: &[(i64, f64)]) -> Result<Vec<Hit>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT id, project, ts, substr(user_message, 1, {SNIPPET_CHARS}),
-                substr(assistant_message, 1, {SNIPPET_CHARS}), archive_path, line_start, line_end
-         FROM exchanges WHERE id IN (SELECT value FROM json_each(?))"
-    ))?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, project, ts, substr(user_message, 1, 200),
+                substr(assistant_message, 1, 200), archive_path, line_start, line_end
+         FROM exchanges WHERE id IN (SELECT value FROM json_each(?))",
+    )?;
     let mut by_id: HashMap<i64, Hit> = stmt
         .query_map([json_ids(ranked.iter().map(|(id, _)| id))], |r| {
             Ok(Hit {

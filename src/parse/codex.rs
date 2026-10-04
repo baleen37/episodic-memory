@@ -172,22 +172,19 @@ fn render_line(v: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{DO_NOT_INDEX, ParseOutput, UserSignal, parse_from, read_meta};
+    use crate::parse::tests::{fixture, meta_of};
+    use crate::parse::{DO_NOT_INDEX, ParseOutput, UserSignal, parse_from};
     use crate::paths::SourceKind;
     use std::path::Path;
 
     const K: SourceKind = SourceKind::CodexSessions;
 
-    fn fx(name: &str) -> String {
-        format!(
-            "{}/tests/fixtures/codex/{name}.jsonl",
-            env!("CARGO_MANIFEST_DIR")
-        )
+    fn fx(name: &str) -> std::path::PathBuf {
+        fixture("codex", name)
     }
 
-    fn parse(path: &str, from: i64) -> (crate::parse::FileMeta, ParseOutput) {
-        let p = Path::new(path);
-        let meta = read_meta(K, p, "2026/01/02/rollout.jsonl").unwrap();
+    fn parse(p: &Path, from: i64) -> (crate::parse::FileMeta, ParseOutput) {
+        let mut meta = meta_of(K, p, "2026/01/02/rollout.jsonl");
         let out = parse_from(
             K,
             p,
@@ -195,7 +192,8 @@ mod tests {
                 line: from,
                 byte: None,
             },
-            &meta,
+            &mut meta,
+            None,
         )
         .unwrap();
         (meta, out)
@@ -277,7 +275,7 @@ mod tests {
              not json\n"
         );
         std::fs::write(&p, content).unwrap();
-        let (meta, out) = parse(p.to_str().unwrap(), 1);
+        let (meta, out) = parse(&p, 1);
         assert_eq!(meta.user_signal, Some(UserSignal::UserMessage));
         assert_eq!(out.exchanges.len(), 1);
         assert_eq!(out.exchanges[0].line_end, 5);
@@ -296,7 +294,7 @@ mod tests {
              {{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":{marker}}}]}}}}\n"
         );
         std::fs::write(&p, content).unwrap();
-        assert!(!parse(p.to_str().unwrap(), 1).1.do_not_index);
+        assert!(!parse(&p, 1).1.do_not_index);
     }
 
     #[test]
@@ -330,7 +328,7 @@ mod tests {
         ]
         .concat();
         std::fs::write(&p, content).unwrap();
-        let (_, out) = parse(p.to_str().unwrap(), 1);
+        let (_, out) = parse(&p, 1);
         let got: Vec<_> = out
             .exchanges
             .iter()

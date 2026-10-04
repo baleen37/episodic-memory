@@ -3,7 +3,7 @@ use crate::locks;
 use crate::log::log_line;
 use crate::mcp::{Ctx, serve};
 use crate::paths::{Paths, VERSION, try_lock};
-use crate::sync::run_sync;
+use crate::sync::{SyncStats, run_sync};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -199,11 +199,17 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     state.request_sync();
 
     let st = state.clone();
-    std::thread::spawn(move || scheduler(&st, |paths| run_sync(paths).map(drop)));
+    std::thread::spawn(move || scheduler(&st, run_sync));
     let st = state.clone();
     std::thread::spawn(move || {
+        // One connection for the worker's lifetime, opened by the first pass that needs it.
+        let mut conn = None;
         embed_worker(&st, &wakes, |paths, e| {
-            embed_pending(&mut crate::db::open(&paths.db())?, e).map(drop)
+            let c = match &mut conn {
+                Some(c) => c,
+                None => conn.insert(crate::db::open(&paths.db())?),
+            };
+            embed_pending(c, e).map(drop)
         });
     });
     if !opts.fake_embedder {
@@ -234,8 +240,9 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     Ok(())
 }
 
-/// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each.
-fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
+/// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each
+/// run that indexed new exchanges (or failed, having maybe indexed some).
+fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<SyncStats>) {
     loop {
         {
             let mut s = locks::lock(&st.sched);
@@ -249,11 +256,20 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
         let paths = &st.ctx.paths;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync(paths)));
         match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => log_line(paths, &format!("sync: {e:#}")),
-            Err(_) => log_line(paths, "sync: panicked"),
+            Ok(Ok(stats)) => {
+                if stats.new_exchanges > 0 {
+                    st.wake_embedder();
+                }
+            }
+            Ok(Err(e)) => {
+                log_line(paths, &format!("sync: {e:#}"));
+                st.wake_embedder();
+            }
+            Err(_) => {
+                log_line(paths, "sync: panicked");
+                st.wake_embedder();
+            }
         }
-        st.wake_embedder();
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
         let mut s = locks::lock(&st.sched);
@@ -269,7 +285,7 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
 fn embed_worker(
     st: &State,
     wakes: &Receiver<()>,
-    embed: impl Fn(&Paths, &dyn Embedder) -> Result<()>,
+    mut embed: impl FnMut(&Paths, &dyn Embedder) -> Result<()>,
 ) {
     while wakes.recv().is_ok() {
         let Some(e) = locks::read(&st.ctx.embedder).clone() else {
@@ -510,7 +526,7 @@ mod tests {
             });
         });
         let s_st = st.clone();
-        std::thread::spawn(move || scheduler(&s_st, |_| Ok(())));
+        std::thread::spawn(move || scheduler(&s_st, |_| Ok(SyncStats::default())));
         st.wake_embedder();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !st.embedding.load(Ordering::SeqCst) {
@@ -528,6 +544,27 @@ mod tests {
             .expect("sync --wait waited for the embedding pass");
         assert!(st.embedding.load(Ordering::SeqCst));
         drop(release);
+    }
+
+    #[test]
+    fn scheduler_wakes_the_embedder_only_after_new_exchanges() {
+        let (_t, st, wakes) = state();
+        let st = Arc::new(st);
+        let new = Arc::new(AtomicUsize::new(0));
+        let (s_st, s_new) = (st.clone(), new.clone());
+        std::thread::spawn(move || {
+            scheduler(&s_st, |_| {
+                Ok(SyncStats {
+                    new_exchanges: s_new.load(Ordering::SeqCst),
+                    ..SyncStats::default()
+                })
+            });
+        });
+        st.sync_and_wait();
+        assert!(wakes.try_recv().is_err(), "woke with nothing to embed");
+        new.store(3, Ordering::SeqCst);
+        st.sync_and_wait();
+        assert!(wakes.try_recv().is_ok());
     }
 
     #[test]
@@ -549,7 +586,7 @@ mod tests {
         std::thread::spawn(move || {
             scheduler(&sched_st, |_| {
                 sched_runs.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(SyncStats::default())
             });
         });
         for want in 1..=2 {
