@@ -7,7 +7,7 @@ use crate::embed::{Embedder, embed_pending};
 use crate::log::log_line;
 use crate::parse::{FileMeta, parse_from, read_meta};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
-use crate::project::resolve_project;
+use crate::project::ProjectCache;
 use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
@@ -47,7 +47,11 @@ struct IndexStats {
 }
 
 /// Spec §5 steps 6–9.
-fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
+fn index_file(
+    tx: &Transaction,
+    row: &mut FileRow,
+    projects: &mut ProjectCache,
+) -> Result<IndexStats> {
     let kind = row.source_kind;
     let mut stats = IndexStats::default();
     if row.skipped {
@@ -80,7 +84,7 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
         row.is_sidechain = Some(meta.is_sidechain);
         row.user_signal = meta.user_signal.clone();
         row.harness = Some(kind.harness().to_string());
-        row.project = Some(resolve_project(meta.cwd.as_deref()));
+        row.project = Some(projects.resolve(meta.cwd.as_deref()));
     }
 
     delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
@@ -231,7 +235,12 @@ fn register_new(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Res
 
 /// Spec §5 "파일 하나 처리": mirrors the source's new complete lines into the archive
 /// (append-only, never overwriting), then indexes them in one transaction.
-pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Result<FileOutcome> {
+pub fn sync_file(
+    conn: &mut Connection,
+    paths: &Paths,
+    f: &DiscoveredFile,
+    projects: &mut ProjectCache,
+) -> Result<FileOutcome> {
     let source_key = path_str(&f.source_path);
     let mut row = match get_file(conn, &source_key)? {
         Some(row) if row.offset as u64 == f.size => return Ok(FileOutcome::Unchanged),
@@ -261,7 +270,7 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
     row.offset = new_offset as i64;
     // Nothing new to parse unless the append moved the offset or the first parse is pending.
     let stats = if row.offset != old_offset || row.harness.is_none() {
-        index_file(&tx, &mut row)?
+        index_file(&tx, &mut row, projects)?
     } else {
         IndexStats::default()
     };
@@ -357,6 +366,7 @@ pub fn import_archive_with_roots(
     conn: &mut Connection,
     paths: &Paths,
     candidates: &[SourceRoot],
+    projects: &mut ProjectCache,
 ) -> Result<usize> {
     let mut registered = 0;
     let mut failures = 0;
@@ -366,7 +376,7 @@ pub fn import_archive_with_roots(
         };
         let archive_dir = paths.archive_root().join(kind.as_str());
         for (rel, _) in walk_jsonl(&archive_dir) {
-            match import_one(conn, paths, kind, &root.root, &rel) {
+            match import_one(conn, paths, kind, &root.root, &rel, projects) {
                 Ok(true) => registered += 1,
                 Ok(false) => {}
                 Err(e) => {
@@ -388,7 +398,7 @@ pub fn import_archive_with_roots(
 
 /// Rebuilds every indexed file's exchanges and session info (project included) from its
 /// archive. A file that fails is logged and left as it was.
-fn reindex_all(conn: &mut Connection, paths: &Paths) -> Result<()> {
+fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache) -> Result<()> {
     let sources: Vec<String> = conn
         .prepare(r#"SELECT source_path FROM files WHERE "offset" > 0 AND skipped = 0"#)?
         .query_map([], |r| r.get(0))?
@@ -401,7 +411,7 @@ fn reindex_all(conn: &mut Connection, paths: &Paths) -> Result<()> {
             row.reparse_line = 1;
             row.harness = None;
             let tx = conn.transaction()?;
-            index_file(&tx, &mut row)?;
+            index_file(&tx, &mut row, projects)?;
             upsert_file(&tx, &row)?;
             tx.commit()?;
             Ok(())
@@ -420,6 +430,7 @@ fn import_one(
     kind: SourceKind,
     root: &Path,
     rel: &Path,
+    projects: &mut ProjectCache,
 ) -> Result<bool> {
     let archive0 = path_str(&archive_path_for(paths, kind, rel, 0));
     let source = root.join(rel);
@@ -447,7 +458,7 @@ fn import_one(
     let tx = conn.transaction()?;
     upsert_file(&tx, &row)?;
     if row.offset > 0 {
-        index_file(&tx, &mut row)?;
+        index_file(&tx, &mut row, projects)?;
         upsert_file(&tx, &row)?;
     }
     tx.commit()?;
@@ -486,17 +497,18 @@ pub fn run_sync_with_roots(
         return Ok(SyncStats::skipped());
     };
     let mut conn = crate::db::open(&paths.db())?;
+    let mut projects = ProjectCache::default();
     if meta_get(&conn, "imported").is_none() {
-        import_archive_with_roots(&mut conn, paths, roots)?;
+        import_archive_with_roots(&mut conn, paths, roots, &mut projects)?;
     }
     if meta_get(&conn, "index_version").as_deref() != Some(INDEX_VERSION) {
-        reindex_all(&mut conn, paths)?;
+        reindex_all(&mut conn, paths, &mut projects)?;
     }
 
     let mut stats = SyncStats::default();
     let mut last_error = String::new();
     for f in discover_in(roots) {
-        match sync_file(&mut conn, paths, &f) {
+        match sync_file(&mut conn, paths, &f, &mut projects) {
             Ok(FileOutcome::Synced { new_exchanges }) => {
                 stats.files_synced += 1;
                 stats.new_exchanges += new_exchanges;
@@ -578,7 +590,13 @@ mod mirror {
         }
         fn sync(&mut self) -> FileOutcome {
             self.f.size = fs::metadata(&self.src).unwrap().len();
-            sync_file(&mut self.conn, &self.paths, &self.f).unwrap()
+            sync_file(
+                &mut self.conn,
+                &self.paths,
+                &self.f,
+                &mut ProjectCache::default(),
+            )
+            .unwrap()
         }
         fn row(&self) -> FileRow {
             get_file(&self.conn, self.src.to_str().unwrap())
@@ -830,7 +848,7 @@ mod mirror {
         e.sync();
         fs::remove_file(&e.src).unwrap();
         e.f.size = 999;
-        assert!(sync_file(&mut e.conn, &e.paths, &e.f).is_err());
+        assert!(sync_file(&mut e.conn, &e.paths, &e.f, &mut ProjectCache::default()).is_err());
         assert_eq!(e.archive(0), lines(0..1));
     }
 
@@ -1085,7 +1103,8 @@ mod orchestration {
                 .unwrap()
         }
         fn import(&self, conn: &mut Connection) -> usize {
-            import_archive_with_roots(conn, &self.paths, &self.roots).unwrap()
+            import_archive_with_roots(conn, &self.paths, &self.roots, &mut ProjectCache::default())
+                .unwrap()
         }
     }
 
@@ -1163,7 +1182,7 @@ mod orchestration {
             .unwrap();
         // The last (possibly in-progress) exchange is re-parsed, so q1 is rebuilt along with q2.
         assert_eq!(
-            sync_file(&mut conn, &e.paths, f).unwrap(),
+            sync_file(&mut conn, &e.paths, f, &mut ProjectCache::default()).unwrap(),
             FileOutcome::Synced { new_exchanges: 2 }
         );
         assert_eq!(
@@ -1185,7 +1204,7 @@ mod orchestration {
             .iter()
             .find(|f| f.rel == Path::new("p/diff.jsonl"))
             .unwrap();
-        sync_file(&mut conn, &e.paths, f).unwrap();
+        sync_file(&mut conn, &e.paths, f, &mut ProjectCache::default()).unwrap();
         assert_eq!(
             fs::metadata(e.archive(k, "p/diff.jsonl", 1)).unwrap().len(),
             f.size
