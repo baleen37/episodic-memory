@@ -1,11 +1,29 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+
+/// Project names by working directory, so a sync starts at most one git process per cwd.
+#[derive(Default)]
+pub struct ProjectCache(HashMap<String, String>);
+
+impl ProjectCache {
+    /// `resolve_project`, computed once per distinct `cwd`.
+    pub fn resolve(&mut self, cwd: Option<&str>) -> String {
+        let Some(cwd) = cwd else {
+            return "unknown".into();
+        };
+        self.0
+            .entry(cwd.to_owned())
+            .or_insert_with(|| resolve_project(Some(cwd)))
+            .clone()
+    }
+}
 
 /// Spec §5 project: the main repo directory name via `git rev-parse --git-common-dir`
 /// (so worktrees map to their main repo), else the cwd basename, else `unknown`.
 /// A cwd that no longer exists (a removed worktree) is resolved from its nearest existing
 /// ancestor, which still finds the repo for worktrees kept inside it (`<repo>/.worktrees/x`).
-pub fn resolve_project(cwd: Option<&str>) -> String {
+fn resolve_project(cwd: Option<&str>) -> String {
     let Some(cwd) = cwd else {
         return "unknown".into();
     };
@@ -91,6 +109,23 @@ mod tests {
     #[test]
     fn missing_path_uses_basename() {
         assert_eq!(resolve_project(Some("/x/y/proj")), "proj");
+    }
+
+    #[test]
+    fn cache_runs_git_once_per_cwd() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("mainrepo");
+        let sub = repo.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        git(&repo, &["init", "-q"]);
+        let sub = sub.to_str().unwrap();
+        let mut cache = ProjectCache::default();
+        assert_eq!(cache.resolve(Some(sub)), "mainrepo");
+        // Without the repo, git would now say "sub"; a cached cwd never asks git again.
+        std::fs::remove_dir_all(repo.join(".git")).unwrap();
+        assert_eq!(cache.resolve(Some(sub)), "mainrepo");
+        assert_eq!(ProjectCache::default().resolve(Some(sub)), "sub");
+        assert_eq!(cache.resolve(None), "unknown");
     }
 
     #[test]

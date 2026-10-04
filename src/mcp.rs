@@ -1,9 +1,9 @@
 use crate::db;
 use crate::embed::Embedder;
 use crate::host::session_of;
-use crate::paths::Paths;
+use crate::paths::{Paths, VERSION};
 use crate::read::read_archive;
-use crate::search::{Hit, SearchParams, search};
+use crate::search::{Hit, MAX_LIMIT, SearchParams, search};
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use serde_json::{Map, Value, json};
@@ -11,9 +11,7 @@ use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 10;
-const MAX_LIMIT: usize = 50;
 const KEYWORD_ONLY: &str = "(vector search unavailable: model loading — keyword results only)";
 const KEYWORD_ONLY_FAILED: &str =
     "(vector search unavailable: model unavailable — keyword results only)";
@@ -198,7 +196,13 @@ fn search_tool(
     params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
     let embedder = crate::locks::read(&ctx.embedder).clone();
     let out = match search(&conn, embedder.as_deref(), &params) {
-        Err(_) if embedder.is_some() => search(&conn, None, &params),
+        Err(e) if embedder.is_some() => {
+            crate::log::log_line(
+                &ctx.paths,
+                &format!("vector search failed, keyword-only fallback: {e:#}"),
+            );
+            search(&conn, None, &params)
+        }
         r => r,
     }
     .map_err(|e| format!("search failed: {e:#}"))?;
@@ -444,6 +448,12 @@ mod tests {
         assert_ne!(r["result"]["isError"], true, "{r}");
         assert!(text(r).starts_with(KEYWORD_ONLY), "{}", text(r));
         assert!(text(r).contains("main.jsonl:"));
+        let log = std::fs::read_to_string(ctx.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|l| l.contains("vector search failed") && l.contains("broken")),
+            "{log}"
+        );
     }
 
     #[test]
