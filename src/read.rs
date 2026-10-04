@@ -3,6 +3,7 @@ use crate::parse::{read_file_lines, render_line};
 use crate::paths::{Paths, SourceKind};
 use crate::sync::is_generation_name;
 use anyhow::{Result, anyhow, bail};
+use std::fmt::Write as _;
 use std::path::{Component, Path};
 
 const OUTPUT_MAX: usize = 61440;
@@ -114,7 +115,10 @@ pub fn read_archive(
         if items.is_empty() {
             continue;
         }
-        let block: String = items.iter().map(|i| format!("L{n} {i}\n\n")).collect();
+        let mut block = String::new();
+        for i in &items {
+            let _ = write!(block, "L{n} {i}\n\n");
+        }
         if out.len() + block.len() <= budget {
             out.push_str(&block);
             continue;
@@ -124,10 +128,10 @@ pub fn read_archive(
             out.push_str(cut(&block, budget - 16));
             out.push_str("…[truncated]\n\n");
             if lines.next().is_some_and(|l| l.is_ok_and(|(m, _)| m <= end)) {
-                out.push_str(&format!("_(continue with startLine={})_", n + 1));
+                let _ = write!(out, "_(continue with startLine={})_", n + 1);
             }
         } else {
-            out.push_str(&format!("_(continue with startLine={n})_"));
+            let _ = write!(out, "_(continue with startLine={n})_");
         }
         return Ok(out);
     }
@@ -165,7 +169,7 @@ mod tests {
         json!({"type":"user","message":{"role":"user","content":t}}).to_string()
     }
 
-    fn assistant_tool(name: &str, input: serde_json::Value) -> String {
+    fn assistant_tool(name: &str, input: &serde_json::Value) -> String {
         json!({"type":"assistant","message":{"content":[
             {"type":"text","text":"on it"},
             {"type":"tool_use","name":name,"input":input}]}})
@@ -191,7 +195,7 @@ mod tests {
             "claude-code-projects/p/s.jsonl",
             &[
                 user("hello there"),
-                assistant_tool("Bash", json!({"command":"ls"})),
+                assistant_tool("Bash", &json!({"command":"ls"})),
                 tool_result("file-a\nfile-b"),
                 json!({"type":"summary"}).to_string(),
             ],

@@ -51,7 +51,7 @@ fn fts5_contentless_delete_and_vec0_metadata_knn() {
 }
 
 #[test]
-#[ignore] // requires model download (~470MB)
+#[ignore = "requires model download (~470MB)"]
 fn e5_small_embeds_384() {
     use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
     let cache =

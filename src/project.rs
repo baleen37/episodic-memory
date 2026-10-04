@@ -14,8 +14,7 @@ pub fn resolve_project(cwd: Option<&str>) -> String {
     }
     Path::new(cwd)
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".into())
+        .map_or_else(|| "unknown".into(), |n| n.to_string_lossy().into_owned())
 }
 
 fn git_repo_name(cwd: &Path) -> Option<String> {

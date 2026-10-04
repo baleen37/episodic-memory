@@ -150,14 +150,14 @@ impl State {
 
 /// Runs until idle. Returns `Ok` without doing anything when another daemon of this version
 /// holds the daemon lock.
-pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
+pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     let Some(mut lock) = try_lock(&paths.daemon_lock())? else {
         return Ok(());
     };
     lock.set_len(0)?;
     writeln!(lock, "{}", std::process::id())?;
 
-    let socket = socket_path(&paths)?;
+    let socket = socket_path(paths)?;
     // Only the lock holder may replace the socket file.
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket)?;
@@ -202,7 +202,7 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
                 std::thread::spawn(move || handle_conn(stream, &st));
             }
             Err(e) => {
-                log_line(&paths, &format!("daemon accept: {e}"));
+                log_line(paths, &format!("daemon accept: {e}"));
                 std::thread::sleep(Duration::from_millis(100));
             }
         }

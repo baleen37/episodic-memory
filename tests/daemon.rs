@@ -183,7 +183,7 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn send(&mut self, method: &str, params: Value) -> i64 {
+    fn send(&mut self, method: &str, params: &Value) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         let msg = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
@@ -194,7 +194,7 @@ impl Mcp {
     fn send_initialize(&mut self) -> i64 {
         self.send(
             "initialize",
-            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
+            &json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
         )
     }
 
@@ -203,7 +203,7 @@ impl Mcp {
         assert_eq!(init["result"]["serverInfo"]["name"], "episodic-memory");
     }
 
-    fn request(&mut self, method: &str, params: Value) -> Value {
+    fn request(&mut self, method: &str, params: &Value) -> Value {
         let id = self.send(method, params);
         self.recv(id)
     }
@@ -221,7 +221,7 @@ impl Mcp {
     fn search(&mut self, query: &str) -> (bool, String) {
         let r = self.request(
             "tools/call",
-            json!({"name":"search","arguments":{"query":query}}),
+            &json!({"name":"search","arguments":{"query":query}}),
         );
         let text = r["result"]["content"][0]["text"]
             .as_str()
@@ -270,14 +270,14 @@ fn three_mcp_clients_one_daemon() {
     let env = Env::new();
     // All three race to find (or spawn) the daemon before any of them talks to it.
     let mut clients: Vec<Mcp> = (0..3).map(|_| env.spawn_mcp()).collect();
-    let ids: Vec<i64> = clients.iter_mut().map(|m| m.send_initialize()).collect();
+    let ids: Vec<i64> = clients.iter_mut().map(Mcp::send_initialize).collect();
     for (m, id) in clients.iter_mut().zip(ids) {
         m.check_initialize(id);
     }
     let handles: Vec<_> = clients
         .into_iter()
         .map(|mut m| {
-            let r = m.request("tools/list", json!({}));
+            let r = m.request("tools/list", &json!({}));
             let names: Vec<String> = r["result"]["tools"]
                 .as_array()
                 .unwrap()
@@ -398,15 +398,18 @@ fn idle_exit() {
 }
 
 #[test]
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn search_during_sync_sees_committed_state() {
+    use std::fmt::Write as _;
     let env = Env::new();
     // A large synthetic transcript so the first sync takes a while.
     let mut big = String::new();
     for i in 0..3000 {
-        big.push_str(&format!(
+        let _ = write!(
+            big,
             "{{\"type\":\"user\",\"sessionId\":\"big\",\"cwd\":\"/work/big\",\"timestamp\":\"2026-01-03T00:00:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"bulk question {i} about widgets\"}}}}\n\
              {{\"type\":\"assistant\",\"sessionId\":\"big\",\"timestamp\":\"2026-01-03T00:00:01.000Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"bulk answer {i} widgets ok\"}}]}}}}\n"
-        ));
+        );
     }
     std::fs::write(env.root.join("c/projects/demo/big.jsonl"), big).unwrap();
 
