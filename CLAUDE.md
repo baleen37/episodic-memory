@@ -31,7 +31,7 @@ scripts/bench.sh                 # benchmark on synthetic data in a temp dir (ne
 | `src/main.rs` | CLI entry: subcommands `sync`, `mcp`, `daemon`, `doctor` |
 | `src/paths.rs` | Data dir, archive/db/log/socket paths, source roots (reads env values once) |
 | `src/db.rs` | Latest SQLite schema for a fresh DB (`files`, `exchanges`, `fts_exchanges`, `vec_exchanges`, `meta`), `delete_exchanges_from` |
-| `src/migrations/` | Data dir revisions: one `rNNNN_*.rs` script each (SQL and file moves), run by sync under `sync.lock`; applied revision in `meta.revision`, `user_version` 2 locks out older binaries |
+| `src/migrations/` | Data dir revisions: one `rNNNN_*.rs` script each (SQL and file moves), run by sync under `sync.lock`; applied revision in `meta.revision`; triggers stop older binaries from adding absolute `archive_path` |
 | `src/archive.rs` | Append-only archive copy, rewrite detection, generations, import of existing archive |
 | `src/parse/{mod,claude,codex}.rs` | Transcript parsers: exchange boundaries, exclusion rules, tools, DO NOT INDEX |
 | `src/project.rs` | project name = git common-dir parent directory name |

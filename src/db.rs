@@ -119,6 +119,14 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   project TEXT, ts INTEGER, is_sidechain INTEGER);
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
+CREATE TRIGGER files_archive_path_insert BEFORE INSERT ON files
+  WHEN substr(NEW.archive_path, 1, 1) = '/'
+    AND NOT EXISTS (SELECT 1 FROM files WHERE archive_path = NEW.archive_path)
+BEGIN SELECT RAISE(ABORT, 'absolute archive_path from an outdated episodic-memory; restart this session'); END;
+CREATE TRIGGER files_archive_path_update BEFORE UPDATE OF archive_path ON files
+  WHEN substr(NEW.archive_path, 1, 1) = '/' AND NEW.archive_path IS NOT OLD.archive_path
+BEGIN SELECT RAISE(ABORT, 'absolute archive_path from an outdated episodic-memory; restart this session'); END;
+PRAGMA user_version = 4;
 "#;
 
 fn register_vec() {
@@ -450,7 +458,7 @@ mod tests {
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, crate::migrations::USER_VERSION);
+        assert_eq!(v, 4);
         let head = crate::migrations::HEAD.to_string();
         assert_eq!(meta_get(&c, "revision"), Some(head));
         let vocab: i64 = c

@@ -237,7 +237,7 @@ fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
                     n.exchanges,
                     n.skipped
                 ),
-                migrations::current(paths, &c),
+                migrations::current(paths, &c).map(|(r, _)| r),
             ),
             pending_check(
                 n.pending,
@@ -365,7 +365,6 @@ mod tests {
         let dir = t.path().join(dir_name);
         std::fs::create_dir_all(&dir).unwrap();
         let paths = Paths::new(dir.clone());
-        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             c.execute(
@@ -413,7 +412,6 @@ mod tests {
     fn db_counts_and_last_error() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
-        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();

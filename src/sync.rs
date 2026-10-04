@@ -511,12 +511,12 @@ pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncSt
     let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
     };
+    let mut conn = crate::db::open(&paths.db())?;
     let mut stats = SyncStats::default();
-    for id in crate::migrations::run(paths)? {
+    for id in crate::migrations::run(paths, &mut conn)? {
         log_line(paths, &format!("migrated to revision {id}"));
         stats.migrated += 1;
     }
-    let mut conn = crate::db::open(&paths.db())?;
     let mut projects = ProjectCache::default();
     if meta_get(&conn, "imported").is_none() {
         stats.new_exchanges += import_archive_with_roots(&mut conn, paths, roots, &mut projects)?.1;

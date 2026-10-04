@@ -10,10 +10,10 @@
 //! `REVISIONS`. A fresh DB is created from `db::SCHEMA`, which must already match every
 //! revision's schema, and is stamped with `HEAD` without running any script.
 
-use crate::db::{meta_get, meta_set};
+use crate::db::meta_set;
 use crate::paths::{Paths, VERSION};
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction};
 use std::fs;
 
 mod r0001_file_meta_and_reparse_columns;
@@ -65,22 +65,18 @@ const REVISIONS: &[Revision] = &[
 
 pub const HEAD: i64 = REVISIONS[REVISIONS.len() - 1].id;
 
-/// `user_version` of every DB that tracks `meta.revision`. Binaries from before that refuse
-/// it in `db::open` (4.0.7 rejects 2 and 3; 4.0.6 fails migrating 2 to 3), so they cannot
-/// write a layout they do not know.
-pub const USER_VERSION: i64 = 2;
-
 /// Records `revision` as applied, in `tx`.
 pub fn stamp(tx: &Transaction, revision: i64) -> Result<()> {
-    meta_set(tx, "revision", &revision.to_string())?;
-    tx.execute_batch(&format!("PRAGMA user_version = {USER_VERSION}"))?;
-    Ok(())
+    meta_set(tx, "revision", &revision.to_string())
 }
 
 fn meta_revision(c: &Connection) -> Result<Option<i64>> {
-    meta_get(c, "revision")
-        .map(|v| v.parse().context("meta.revision is not a number"))
-        .transpose()
+    c.query_row("SELECT value FROM meta WHERE key = 'revision'", [], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()?
+    .map(|v| v.parse().context("meta.revision is not a number"))
+    .transpose()
 }
 
 /// `<data>/REVISION`, where v4.1.0 kept the revision.
@@ -95,44 +91,42 @@ fn revision_file(paths: &Paths) -> Result<Option<i64>> {
     }
 }
 
-/// The revision of the DB behind `c`: `meta.revision`, else the v4.1.0 `REVISION` file, else
-/// the `user_version` before either: 1 (up to v4.0.5) is revision 0, 4 is revision 1.
-pub fn current(paths: &Paths, c: &Connection) -> Result<i64> {
+/// The revision of the DB behind `c`, and whether `meta.revision` records it. Without it, the
+/// DB's `user_version` decides: 1 (up to v4.0.5) is revision 0; 4 is revision 1, or whatever
+/// the v4.1.0 `REVISION` file says. The file is ignored when unreadable or beside a version 1
+/// schema, which it cannot describe.
+pub fn current(paths: &Paths, c: &Connection) -> Result<(i64, bool)> {
     if let Some(r) = meta_revision(c)? {
-        return Ok(r);
+        return Ok((r, true));
     }
-    // A v4.1.0 file that cannot be read is treated as absent: user_version is still right.
-    if let Ok(Some(r)) = revision_file(paths) {
-        return Ok(r);
-    }
-    match c.query_row("PRAGMA user_version", [], |r| r.get(0))? {
-        1 => Ok(0),
-        4 => Ok(1),
-        v => bail!("unsupported schema version {v}; delete the DB to rebuild it"),
-    }
+    let r = match c.query_row("PRAGMA user_version", [], |r| r.get(0))? {
+        1 => 0,
+        4 => match revision_file(paths) {
+            Ok(Some(r)) => r,
+            _ => 1,
+        },
+        v => bail!("unsupported schema version {v}"),
+    };
+    Ok((r, false))
 }
 
-/// Brings the data dir to `HEAD`. The caller holds `sync.lock`. Returns the revisions applied.
-pub fn run(paths: &Paths) -> Result<Vec<i64>> {
-    fs::create_dir_all(&paths.data)?;
-    let mut conn = crate::db::open(&paths.db())?;
-    let from = current(paths, &conn)?;
+/// Brings the DB behind `conn` and the data dir to `HEAD`. The caller holds `sync.lock`.
+/// Returns the revisions applied.
+pub fn run(paths: &Paths, conn: &mut Connection) -> Result<Vec<i64>> {
+    let (from, recorded) = current(paths, conn)?;
     if from > HEAD {
         bail!(
             "data dir is at revision {from}, newer than this binary ({VERSION}, revision {HEAD})"
         );
     }
-    if meta_revision(&conn)?.is_none() {
-        // Stamp first so older binaries refuse the DB before any revision changes the layout.
+    if !recorded {
         let tx = conn.transaction()?;
         stamp(&tx, from)?;
         tx.commit()?;
-    }
-    // Without the v4.1.0 file, a v4.1.0 binary falls back to user_version and refuses the DB
-    // instead of trusting a revision that later ones moved past.
-    match fs::remove_file(paths.revision_file()) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-        _ => {}
+        match fs::remove_file(paths.revision_file()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
     }
     let mut applied = Vec::new();
     for r in REVISIONS.iter().filter(|r| r.id > from) {
@@ -152,7 +146,7 @@ mod tests {
     use crate::parse::{FileMeta, ReparsePoint};
     use std::path::PathBuf;
 
-    /// Every table's columns (sorted by name) and every index, as `PRAGMA` reports them.
+    /// Every table's columns (sorted by name), every index and every trigger.
     fn schema(c: &Connection) -> Vec<String> {
         let mut out: Vec<String> = c
             .prepare(
@@ -160,12 +154,16 @@ mod tests {
                         ifnull(p.type, '') || ' ' || ifnull(p.\"notnull\", '') || ' ' ||
                         ifnull(p.dflt_value, '') || ' ' || ifnull(p.pk, '')
                  FROM sqlite_master m LEFT JOIN pragma_table_info(m.name) p
-                 WHERE m.type IN ('table', 'index')",
+                 WHERE m.type IN ('table', 'index')
+                 UNION ALL
+                 SELECT 'trigger ' || name || ': ' || sql FROM sqlite_master WHERE type = 'trigger'",
             )
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
             .map(Result::unwrap)
+            // Trigger SQL keeps its source formatting.
+            .map(|s: String| s.split_whitespace().collect::<Vec<_>>().join(" "))
             .collect();
         out.sort();
         out
@@ -222,8 +220,13 @@ PRAGMA user_version = 1;
             c
         } else {
             let c = crate::db::open(&paths.db()).unwrap();
-            c.execute_batch("DELETE FROM meta WHERE key = 'revision'; PRAGMA user_version = 4;")
-                .unwrap();
+            c.execute_batch(
+                "DELETE FROM meta WHERE key = 'revision';
+                 DROP TRIGGER files_archive_path_insert;
+                 DROP TRIGGER files_archive_path_update;
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
             c
         };
         c.execute(
@@ -235,15 +238,16 @@ PRAGMA user_version = 1;
         (t, paths)
     }
 
-    fn revision(paths: &Paths) -> i64 {
-        current(paths, &crate::db::open(&paths.db()).unwrap()).unwrap()
+    /// What `run_sync` does before indexing.
+    fn migrate(paths: &Paths) -> Result<Vec<i64>> {
+        fs::create_dir_all(&paths.data)?;
+        run(paths, &mut crate::db::open(&paths.db())?)
     }
 
-    fn user_version(paths: &Paths) -> i64 {
-        crate::db::open(&paths.db())
+    fn revision(paths: &Paths) -> i64 {
+        current(paths, &crate::db::open(&paths.db()).unwrap())
             .unwrap()
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap()
+            .0
     }
 
     /// Exchanges at `archive_path`s, as absolute paths under `data` were stored before revision 2.
@@ -287,15 +291,14 @@ PRAGMA user_version = 1;
     fn a_fresh_db_is_at_head_whoever_creates_it() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().join("d"));
-        assert_eq!(run(&paths).unwrap(), Vec::<i64>::new());
+        assert_eq!(migrate(&paths).unwrap(), Vec::<i64>::new());
         assert_eq!(revision(&paths), HEAD);
         // MCP search or the embed worker may open the DB before the first sync.
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
         drop(crate::db::open(&paths.db()).unwrap());
         assert_eq!(revision(&paths), HEAD);
-        assert_eq!(run(&paths).unwrap(), Vec::<i64>::new());
-        assert_eq!(user_version(&paths), USER_VERSION);
+        assert_eq!(migrate(&paths).unwrap(), Vec::<i64>::new());
     }
 
     #[test]
@@ -305,10 +308,9 @@ PRAGMA user_version = 1;
         for (version, from) in [(1, 0), (4, 1)] {
             let (_t, paths) = legacy(version);
             assert_eq!(revision(&paths), from);
-            let applied = run(&paths).unwrap();
+            let applied = migrate(&paths).unwrap();
             assert_eq!(applied, (from + 1..=HEAD).collect::<Vec<_>>(), "v{version}");
             assert_eq!(revision(&paths), HEAD);
-            assert_eq!(user_version(&paths), USER_VERSION, "v{version}");
             let c = crate::db::open(&paths.db()).unwrap();
             assert_eq!(schema(&c), schema(&fresh), "v{version}");
             let got = crate::db::get_file(&c, "/src/a.jsonl").unwrap().unwrap();
@@ -331,9 +333,8 @@ PRAGMA user_version = 1;
         let (_t, paths) = legacy(4);
         fs::write(paths.revision_file(), "2\n").unwrap();
         assert_eq!(revision(&paths), 2);
-        assert_eq!(run(&paths).unwrap(), (3..=HEAD).collect::<Vec<_>>());
+        assert_eq!(migrate(&paths).unwrap(), (3..=HEAD).collect::<Vec<_>>());
         assert_eq!(revision(&paths), HEAD);
-        assert_eq!(user_version(&paths), USER_VERSION);
         assert!(!paths.revision_file().exists());
     }
 
@@ -341,7 +342,7 @@ PRAGMA user_version = 1;
     fn an_unreadable_revision_file_falls_back_to_user_version() {
         let (_t, paths) = legacy(4);
         fs::write(paths.revision_file(), "").unwrap();
-        assert_eq!(run(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
+        assert_eq!(migrate(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
         assert!(!paths.revision_file().exists());
     }
 
@@ -352,7 +353,7 @@ PRAGMA user_version = 1;
             .unwrap()
             .execute_batch("PRAGMA user_version = 3")
             .unwrap();
-        let err = run(&paths).unwrap_err().to_string();
+        let err = migrate(&paths).unwrap_err().to_string();
         assert!(err.contains("schema version 3"), "{err}");
     }
 
@@ -360,7 +361,7 @@ PRAGMA user_version = 1;
     fn archive_paths_become_relative_to_the_data_dir() {
         let (_t, paths) = legacy(4);
         add_absolute_rows(&paths, &format!("{}/", paths.data.display()));
-        assert_eq!(run(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
+        assert_eq!(migrate(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
         assert_relative(&paths);
     }
 
@@ -372,15 +373,68 @@ PRAGMA user_version = 1;
         add_absolute_rows(&paths, &paths.data.to_string_lossy());
         // v4.1.0 already ran revision 2 with the wrong prefix, converting nothing.
         fs::write(paths.revision_file(), "2\n").unwrap();
-        assert_eq!(run(&paths).unwrap(), vec![3]);
+        assert_eq!(migrate(&paths).unwrap(), vec![3]);
         assert_relative(&paths);
+    }
+
+    #[test]
+    fn a_revision_file_beside_a_version_1_schema_is_ignored() {
+        let (_t, paths) = legacy(1);
+        fs::write(paths.revision_file(), "2\n").unwrap();
+        assert_eq!(revision(&paths), 0);
+        assert_eq!(migrate(&paths).unwrap(), (1..=HEAD).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn older_binaries_cannot_add_absolute_archive_paths() {
+        let (_t, paths) = legacy(4);
+        // A row written under another EPISODIC_MEMORY_DIR stays absolute and keeps syncing.
+        crate::db::open(&paths.db())
+            .unwrap()
+            .execute(
+                "INSERT INTO files(source_path, source_kind, archive_path)
+                   VALUES ('/src/b.jsonl', 'codex-sessions', '/elsewhere/b.jsonl')",
+                [],
+            )
+            .unwrap();
+        migrate(&paths).unwrap();
+        let mut c = crate::db::open(&paths.db()).unwrap();
+        let mut b = crate::db::get_file(&c, "/src/b.jsonl").unwrap().unwrap();
+        b.offset = 99;
+        let tx = c.transaction().unwrap();
+        crate::db::upsert_file(&tx, &b).unwrap();
+        tx.commit().unwrap();
+        // An older binary starting a generation or registering a file writes an absolute path.
+        let mut a = crate::db::get_file(&c, "/src/a.jsonl").unwrap().unwrap();
+        a.archive_path = format!(
+            "{}/conversation-archive/a.gen-1.jsonl",
+            paths.data.display()
+        );
+        let tx = c.transaction().unwrap();
+        let err = crate::db::upsert_file(&tx, &a).unwrap_err().to_string();
+        assert!(err.contains("outdated episodic-memory"), "{err}");
+        drop(tx);
+        let err = c
+            .execute(
+                "INSERT INTO files(source_path, source_kind, archive_path)
+                   VALUES ('/src/c.jsonl', 'codex-sessions', '/d/c.jsonl')",
+                [],
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("outdated episodic-memory"), "{err}");
+        // This binary's relative paths pass.
+        a.archive_path = "conversation-archive/a.gen-1.jsonl".into();
+        let tx = c.transaction().unwrap();
+        crate::db::upsert_file(&tx, &a).unwrap();
+        tx.commit().unwrap();
     }
 
     #[test]
     fn run_at_head_does_nothing() {
         let (_t, paths) = legacy(1);
-        run(&paths).unwrap();
-        assert_eq!(run(&paths).unwrap(), Vec::<i64>::new());
+        migrate(&paths).unwrap();
+        assert_eq!(migrate(&paths).unwrap(), Vec::<i64>::new());
     }
 
     #[test]
@@ -391,10 +445,14 @@ PRAGMA user_version = 1;
             .unwrap()
             .execute_batch("ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER")
             .unwrap();
-        assert!(run(&paths).is_err());
-        // Stamped at revision 0 already, so older binaries refuse the DB from here on.
+        assert!(migrate(&paths).is_err());
+        // Stamped at revision 0; binaries before revisions still use the DB as before.
         assert_eq!(revision(&paths), 0);
-        assert_eq!(user_version(&paths), USER_VERSION);
+        let v: i64 = crate::db::open(&paths.db())
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 1);
         let c = crate::db::open(&paths.db()).unwrap();
         // Rolled back: none of the earlier columns of revision 1 were kept.
         let n: i64 = c
@@ -407,7 +465,7 @@ PRAGMA user_version = 1;
         assert_eq!(n, 0);
         c.execute_batch("ALTER TABLE files DROP COLUMN reparse_offset_line")
             .unwrap();
-        assert_eq!(run(&paths).unwrap(), (1..=HEAD).collect::<Vec<_>>());
+        assert_eq!(migrate(&paths).unwrap(), (1..=HEAD).collect::<Vec<_>>());
         assert_eq!(revision(&paths), HEAD);
     }
 
@@ -420,7 +478,7 @@ PRAGMA user_version = 1;
             &(HEAD + 1).to_string(),
         )
         .unwrap();
-        let err = run(&paths).unwrap_err().to_string();
+        let err = migrate(&paths).unwrap_err().to_string();
         assert!(err.contains("newer than this binary"), "{err}");
     }
 }
