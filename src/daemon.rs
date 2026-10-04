@@ -1,9 +1,9 @@
 use crate::embed::{E5Embedder, Embedder, FakeEmbedder};
 use crate::log::log_line;
-use crate::mcp::{serve, Ctx};
-use crate::paths::{try_lock, Paths, VERSION};
+use crate::mcp::{Ctx, serve};
+use crate::paths::{Paths, VERSION, try_lock};
 use crate::sync::run_sync;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -142,7 +142,9 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
     let listener = UnixListener::bind(&socket)?;
 
     // fastembed prefers HF_HOME over our cache dir.
-    std::env::remove_var("HF_HOME");
+    // SAFETY: `run` is only called from `main` on the main thread, and this runs before the
+    // daemon spawns any thread, so nothing else reads or writes the environment concurrently.
+    unsafe { std::env::remove_var("HF_HOME") };
     let embedder: Option<Arc<dyn Embedder>> = if opts.fake_embedder {
         Some(Arc::new(FakeEmbedder))
     } else {

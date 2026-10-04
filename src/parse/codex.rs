@@ -1,5 +1,5 @@
 use super::{
-    render_result, render_text, render_tool, value_text, FileMeta, ParsedExchange, Provider,
+    FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
 };
 use serde_json::Value;
 
@@ -176,7 +176,7 @@ fn render_line(v: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{parse_from, read_meta, ParseOutput, DO_NOT_INDEX};
+    use crate::parse::{DO_NOT_INDEX, ParseOutput, parse_from, read_meta};
     use crate::paths::SourceKind;
     use std::path::Path;
 
@@ -299,13 +299,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("r.jsonl");
         let user = |t: &str| {
-            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"{t}\"}}}}\n")
+            format!(
+                "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"{t}\"}}}}\n"
+            )
         };
         let streamed = |t: &str| {
-            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"{t}\"}}}}\n")
+            format!(
+                "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"{t}\"}}}}\n"
+            )
         };
         let answer = |t: &str| {
-            format!("{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{t}\"}}]}}}}\n")
+            format!(
+                "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{t}\"}}]}}}}\n"
+            )
         };
         let content = [
             "{\"type\":\"session_meta\",\"payload\":{\"id\":\"x\"}}\n".to_string(),

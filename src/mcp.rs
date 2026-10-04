@@ -3,10 +3,10 @@ use crate::embed::Embedder;
 use crate::host::session_of;
 use crate::paths::Paths;
 use crate::read::read_archive;
-use crate::search::{search, Hit, SearchParams};
+use crate::search::{Hit, SearchParams, search};
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -274,7 +274,7 @@ mod tests {
     use crate::embed::FakeEmbedder;
     use crate::paths::{SourceKind, SourceRoot};
     use crate::sync::run_sync_with_roots;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn indexed_ctx() -> (tempfile::TempDir, Ctx) {
         let t = tempfile::tempdir().unwrap();

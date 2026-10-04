@@ -58,22 +58,24 @@ fn read_lines_from<R: BufRead>(
 ) -> impl Iterator<Item = Result<Line>> {
     let mut n = 0i64;
     let mut buf = Vec::new();
-    std::iter::from_fn(move || loop {
-        buf.clear();
-        match reader.read_until(b'\n', &mut buf) {
-            Ok(0) => return None,
-            Err(e) => return Some(Err(e.into())),
-            Ok(_) => {
-                n += 1;
-                if n < from_line {
-                    continue;
+    std::iter::from_fn(move || {
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) => return None,
+                Err(e) => return Some(Err(e.into())),
+                Ok(_) => {
+                    n += 1;
+                    if n < from_line {
+                        continue;
+                    }
+                    let parsed = std::str::from_utf8(&buf).ok().map(str::trim);
+                    if parsed == Some("") {
+                        continue;
+                    }
+                    let v = parsed.and_then(|s| serde_json::from_str::<Value>(s).ok());
+                    return Some(Ok((n, v)));
                 }
-                let parsed = std::str::from_utf8(&buf).ok().map(str::trim);
-                if parsed == Some("") {
-                    continue;
-                }
-                let v = parsed.and_then(|s| serde_json::from_str::<Value>(s).ok());
-                return Some(Ok((n, v)));
             }
         }
     })
@@ -234,10 +236,10 @@ pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<Fil
     let p = provider(kind);
     let mut meta = p.initial_meta(rel_path);
     for line in read_file_lines(archive)? {
-        if let (_, Some(v)) = line? {
-            if p.observe_meta(&mut meta, &v) {
-                break;
-            }
+        if let (_, Some(v)) = line?
+            && p.observe_meta(&mut meta, &v)
+        {
+            break;
         }
     }
     Ok(meta)

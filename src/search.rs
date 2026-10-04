@@ -1,9 +1,9 @@
 use crate::embed::Embedder;
 use crate::terms::build_match_query;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{Days, Duration, Local, NaiveDate, TimeZone};
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{params_from_iter, Connection};
+use rusqlite::{Connection, params_from_iter};
 use std::collections::{HashMap, HashSet};
 
 const MAX_LIMIT: usize = 50;
@@ -347,8 +347,8 @@ fn search_in<Tz: TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{self, insert_exchange, NewExchange};
-    use crate::embed::{embed_pending, FakeEmbedder};
+    use crate::db::{self, NewExchange, insert_exchange};
+    use crate::embed::{FakeEmbedder, embed_pending};
     use crate::terms::to_terms;
 
     const DAY: i64 = 86_400_000;

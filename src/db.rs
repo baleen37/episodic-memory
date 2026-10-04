@@ -1,7 +1,7 @@
 use crate::paths::SourceKind;
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use sqlite_vec::sqlite3_vec_init;
 use std::path::Path;
 use std::sync::Once;

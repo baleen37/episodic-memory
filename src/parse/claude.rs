@@ -1,7 +1,7 @@
 #[cfg(test)]
 use super::ParseOutput;
 use super::{
-    render_result, render_text, render_tool, value_text, FileMeta, ParsedExchange, Provider,
+    FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
 };
 use serde_json::Value;
 use std::path::Path;
@@ -23,10 +23,10 @@ impl Exclusions {
         if v["isMeta"].as_bool() == Some(true) || v["isCompactSummary"].as_bool() == Some(true) {
             return true;
         }
-        if let Some(kind) = v["origin"]["kind"].as_str() {
-            if kind != "human" {
-                return true;
-            }
+        if let Some(kind) = v["origin"]["kind"].as_str()
+            && kind != "human"
+        {
+            return true;
         }
         let t = text.trim_start();
         Self::TEXT_PREFIXES.iter().any(|p| t.starts_with(p))
@@ -72,11 +72,11 @@ impl Provider for ClaudeCode {
         if meta.cwd.is_none() {
             meta.cwd = v["cwd"].as_str().map(String::from);
         }
-        if !meta.sidechain_known {
-            if let Some(b) = v["isSidechain"].as_bool() {
-                meta.sidechain_known = true;
-                meta.is_sidechain |= b;
-            }
+        if !meta.sidechain_known
+            && let Some(b) = v["isSidechain"].as_bool()
+        {
+            meta.sidechain_known = true;
+            meta.is_sidechain |= b;
         }
         meta.session_id.is_some() && meta.cwd.is_some() && meta.sidechain_known
     }
@@ -112,10 +112,10 @@ fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
                 if let Some(name) = b["name"].as_str() {
                     c.push_tool(name);
                     // A subagent's final report arrives as this tool's input, not as text.
-                    if name == "SubagentHandback" {
-                        if let Some(t) = b["input"]["message"].as_str() {
-                            c.push_answer(t);
-                        }
+                    if name == "SubagentHandback"
+                        && let Some(t) = b["input"]["message"].as_str()
+                    {
+                        c.push_answer(t);
                     }
                 }
             }
