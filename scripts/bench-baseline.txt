@@ -4,6 +4,10 @@
 # Tree: perf/efficiency at 44ccfc2 (4.0.5 + sync --wait + clippy pedantic), release profile
 # Command: scripts/bench.sh --bin <release binary>   (defaults: --sessions 300 --big-mb 100 --repeat 5)
 # The daemon is started before timing; first_sync includes the fake-embedder embedding pass.
+# Search numbers below include one `lsof` per search (~60 ms on macOS): the bench MCP host had no Claude session
+# file, so the host session was looked up the Codex way. Since #123 the bench writes
+# <CLAUDE_CONFIG_DIR>/sessions/<pid>.json for its MCP host and measures the Claude Code path (no lsof); compare
+# later search numbers against these with that in mind.
 
 source_bytes   241128120
 first_sync               33.564s  (median of 1; min 33.564 max 33.564)
