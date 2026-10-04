@@ -76,6 +76,25 @@ impl Paths {
     pub fn sync_lock(&self) -> PathBuf {
         self.data.join("sync.lock")
     }
+
+    /// An archive file as the DB stores it (`archive_path`): relative to the data dir, so the
+    /// data dir can move. A path outside the data dir stays absolute.
+    pub fn archive_key(&self, archive: &Path) -> String {
+        archive
+            .strip_prefix(&self.data)
+            .unwrap_or(archive)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// The archive file a DB `archive_path` names. An absolute one is used as is.
+    pub fn archive_file(&self, key: &str) -> PathBuf {
+        self.data.join(key)
+    }
+
+    pub fn revision_file(&self) -> PathBuf {
+        self.data.join("REVISION")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

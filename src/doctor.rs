@@ -1,5 +1,6 @@
 use crate::daemon::{Hello, Status};
 use crate::db::{meta_get, open_readonly};
+use crate::migrations;
 use crate::paths::{Paths, SourceRoot, VERSION, candidate_roots_from_env};
 use rusqlite::Connection;
 use std::fmt;
@@ -181,6 +182,28 @@ fn counts(c: &Connection) -> rusqlite::Result<Counts> {
     })
 }
 
+/// The DB line, with the data dir revision: behind `HEAD` means a sync has migrations to run.
+fn db_check(detail: &str, revision: anyhow::Result<Option<i64>>) -> Check {
+    let head = migrations::HEAD;
+    match revision {
+        Err(e) => check("db", Level::Fail, format!("{detail}: {e:#}")),
+        Ok(Some(r)) if r == head => check("db", Level::Ok, format!("{detail}, revision {r}")),
+        Ok(Some(r)) if r > head => check(
+            "db",
+            Level::Fail,
+            format!("{detail}, revision {r} is newer than this binary (revision {head})"),
+        ),
+        Ok(r) => check(
+            "db",
+            Level::Warn,
+            format!(
+                "{detail}, revision {} of {head}: the next sync migrates",
+                r.unwrap_or(0)
+            ),
+        ),
+    }
+}
+
 /// The DB check plus the checks that read from it. Never creates the DB.
 fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
     let db = paths.db();
@@ -211,17 +234,15 @@ fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
             sync,
         ],
         Ok(n) => vec![
-            check(
-                "db",
-                Level::Ok,
-                format!(
-                    "{} (user_version {}, {} files, {} exchanges, {} skipped)",
+            db_check(
+                &format!(
+                    "{} ({} files, {} exchanges, {} skipped)",
                     db.display(),
-                    n.version,
                     n.files,
                     n.exchanges,
                     n.skipped
                 ),
+                migrations::stored(paths).map(|r| r.or(migrations::from_user_version(n.version))),
             ),
             pending_check(
                 n.pending,
@@ -349,6 +370,7 @@ mod tests {
         let dir = t.path().join(dir_name);
         std::fs::create_dir_all(&dir).unwrap();
         let paths = Paths::new(dir.clone());
+        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             c.execute(
@@ -396,6 +418,7 @@ mod tests {
     fn db_counts_and_last_error() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
+        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();
@@ -403,10 +426,24 @@ mod tests {
         }
         let checks = db_checks(&paths, false);
         assert_eq!(checks[0].level, Level::Ok);
-        assert!(checks[0].detail.contains("user_version 4"));
+        let head = format!("revision {}", crate::migrations::HEAD);
+        assert!(checks[0].detail.contains(&head), "{}", checks[0].detail);
         assert_eq!(checks[1].level, Level::Ok);
         assert_eq!(checks[2].level, Level::Warn);
         assert!(checks[2].detail.contains("bad file"));
+    }
+
+    #[test]
+    fn pending_and_newer_revisions() {
+        let t = tempfile::tempdir().unwrap();
+        let paths = Paths::new(t.path().to_path_buf());
+        // A data dir from before REVISION: DB user_version 4 is revision 3.
+        drop(crate::db::open(&paths.db()).unwrap());
+        let db = &db_checks(&paths, false)[0];
+        assert_eq!(db.level, Level::Warn, "{}", db.detail);
+        assert!(db.detail.contains("revision 3 of"), "{}", db.detail);
+        std::fs::write(paths.revision_file(), "999\n").unwrap();
+        assert_eq!(db_checks(&paths, false)[0].level, Level::Fail);
     }
 
     #[test]

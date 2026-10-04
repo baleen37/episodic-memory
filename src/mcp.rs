@@ -210,7 +210,7 @@ fn search_tool(
     };
     params.exclude_session = host.as_mut().and_then(|h| h.current(conn));
     let embedder = crate::locks::read(&ctx.embedder).clone();
-    let out = match search(conn, embedder.as_deref(), &params) {
+    let mut out = match search(conn, embedder.as_deref(), &params) {
         Err(e) if embedder.is_some() => {
             crate::log::log_line(
                 &ctx.paths,
@@ -221,6 +221,14 @@ fn search_tool(
         r => r,
     }
     .map_err(|e| format!("search failed: {e:#}"))?;
+    // Cards show the absolute path `read` accepts, wherever the data dir is.
+    for h in &mut out.hits {
+        h.archive_path = ctx
+            .paths
+            .archive_file(&h.archive_path)
+            .to_string_lossy()
+            .into_owned();
+    }
 
     let mut text = String::new();
     if !out.vector_used {

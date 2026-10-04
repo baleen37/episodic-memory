@@ -67,6 +67,8 @@ pub struct NewExchange {
     pub tool_names: String,
 }
 
+/// The latest schema, for a fresh DB. Existing DBs reach it through `migrations`; a schema
+/// change goes in both. `user_version` stays at 4: `<data>/REVISION` tracks versions now.
 const SCHEMA: &str = r#"
 CREATE TABLE files(
   source_path TEXT PRIMARY KEY,
@@ -112,31 +114,6 @@ CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
 PRAGMA user_version = 4;
 "#;
 
-/// Version 1 to 2: every file meta field is stored, with the archive bytes it was learned
-/// from. Rows start with `meta_offset` 0, so their meta is learned again from the archive.
-const MIGRATE_1_TO_2: &str = r"
-ALTER TABLE files ADD COLUMN sidechain_known INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN agent_path TEXT;
-ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
-PRAGMA user_version = 2;
-";
-
-/// Version 2 to 3: the reparse point also stores its byte position. Existing rows get 0
-/// (unknown), so their next sync finds the reparse line by counting once.
-const MIGRATE_2_TO_3: &str = r"
-ALTER TABLE files ADD COLUMN reparse_offset INTEGER NOT NULL DEFAULT 0;
-PRAGMA user_version = 3;
-";
-
-/// Version 3 to 4: the reparse line that `reparse_offset` belongs to. Binaries before version 3
-/// update `reparse_line` without `reparse_offset`, so the byte position is used only while both
-/// name the same line. Existing rows get NULL (unknown) and find the line by counting once.
-const MIGRATE_3_TO_4: &str = r"
-ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER;
-PRAGMA user_version = 4;
-";
-
 fn register_vec() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| unsafe {
@@ -169,22 +146,12 @@ pub fn open(path: &Path) -> Result<Connection> {
     // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.
     c.set_transaction_behavior(TransactionBehavior::Immediate);
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < 4 {
-        // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
+    if version == 0 {
+        // IMMEDIATE so two processes opening a fresh DB don't both create the schema.
         let tx = c.transaction()?;
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version == 0 {
             tx.execute_batch(SCHEMA)?;
-        } else {
-            for (from, sql) in [
-                (1, MIGRATE_1_TO_2),
-                (2, MIGRATE_2_TO_3),
-                (3, MIGRATE_3_TO_4),
-            ] {
-                if version <= from {
-                    tx.execute_batch(sql)?;
-                }
-            }
         }
         tx.commit()?;
     }
@@ -502,101 +469,6 @@ mod tests {
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vocab, 0);
-    }
-
-    #[test]
-    fn version_1_database_gains_meta_columns() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        open(&p)
-            .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN sidechain_known;
-                 ALTER TABLE files DROP COLUMN agent_path;
-                 ALTER TABLE files DROP COLUMN meta_offset;
-                 ALTER TABLE files DROP COLUMN meta_settled;
-                 ALTER TABLE files DROP COLUMN reparse_offset;
-                 ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\")
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10);
-                 PRAGMA user_version = 1;",
-            )
-            .unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        assert_eq!((got.offset, got.meta_offset), (10, 0));
-        assert_eq!(got.meta, FileMeta::default());
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 1,
-                byte: None
-            }
-        );
-    }
-
-    #[test]
-    fn version_2_database_keeps_the_reparse_line_with_an_unknown_byte_position() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        open(&p)
-            .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN reparse_offset;
-                 ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\", reparse_line)
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10, 7);
-                 PRAGMA user_version = 2;",
-            )
-            .unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 7,
-                byte: None
-            }
-        );
-        assert_eq!(got.offset, 10);
-    }
-
-    #[test]
-    fn version_3_database_no_longer_trusts_its_byte_position() {
-        // A version 3 byte position may be stale: older binaries moved `reparse_line` alone.
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        open(&p)
-            .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\",
-                                   reparse_line, reparse_offset)
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 900, 7, 300);
-                 PRAGMA user_version = 3;",
-            )
-            .unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 7,
-                byte: None
-            }
-        );
     }
 
     #[test]
