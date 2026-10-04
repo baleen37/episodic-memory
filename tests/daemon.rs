@@ -645,3 +645,40 @@ fn symlink_to_ancestor_does_not_loop_discovery() {
         .collect();
     assert_eq!(paths, expected);
 }
+
+#[test]
+fn connection_without_hello_is_closed() {
+    let env = Env::new();
+    // A long idle timeout so an idle exit cannot be mistaken for the hello timeout.
+    let mut d = env
+        .cmd(&["daemon", "--fake-embedder", "--idle-secs", "60"])
+        .spawn()
+        .unwrap();
+    assert!(wait_until(Duration::from_secs(5), || UnixStream::connect(
+        env.socket()
+    )
+    .is_ok()));
+    let mut s = UnixStream::connect(env.socket()).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+    let start = Instant::now();
+    let mut buf = [0u8; 1];
+    let n = std::io::Read::read(&mut s, &mut buf).expect("daemon never closed the connection");
+    let waited = start.elapsed();
+    assert_eq!(n, 0);
+    assert!(
+        (Duration::from_secs(4)..Duration::from_secs(10)).contains(&waited),
+        "closed after {waited:?}"
+    );
+    assert!(d.try_wait().unwrap().is_none(), "daemon exited");
+    let _ = d.kill();
+    let _ = d.wait();
+}
+
+#[test]
+fn mcp_client_idle_past_hello_timeout_still_served() {
+    let env = Env::new();
+    let mut m = env.mcp();
+    thread::sleep(Duration::from_secs(7));
+    let r = m.request("tools/list", &json!({}));
+    assert_eq!(r["result"]["tools"].as_array().map(Vec::len), Some(2));
+}
