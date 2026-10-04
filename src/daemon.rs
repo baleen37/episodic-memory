@@ -285,7 +285,12 @@ fn embed_worker(
         match result {
             Ok(Ok(())) => {}
             Ok(Err(err)) => log_line(paths, &format!("embedding: {err:#}")),
-            Err(_) => log_line(paths, "embedding: panicked"),
+            Err(_) => {
+                log_line(paths, "embedding: panicked");
+                if let Ok(c) = crate::db::open(&paths.db()) {
+                    crate::embed::record_embed_error(&c, "embedding panicked");
+                }
+            }
         }
         st.touch();
         st.embedding.store(false, Ordering::SeqCst);

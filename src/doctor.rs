@@ -143,7 +143,14 @@ fn sync_check(last_sync: Option<&str>, last_error: Option<&str>) -> Check {
     }
 }
 
-fn pending_check(pending: i64) -> Check {
+fn pending_check(pending: i64, last_embed_error: Option<&str>) -> Check {
+    if let Some(err) = last_embed_error.filter(|e| !e.is_empty()) {
+        return check(
+            "embeddings",
+            Level::Warn,
+            format!("{pending} exchange(s) waiting for embedding; last error: {err}"),
+        );
+    }
     if pending > 0 {
         check(
             "embeddings",
@@ -216,7 +223,10 @@ fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
                     n.skipped
                 ),
             ),
-            pending_check(n.pending),
+            pending_check(
+                n.pending,
+                meta_get(&c, crate::embed::LAST_EMBED_ERROR).as_deref(),
+            ),
             sync,
         ],
     }
@@ -303,8 +313,8 @@ mod tests {
 
     #[test]
     fn pending_levels() {
-        assert_eq!(pending_check(0).level, Level::Ok);
-        assert_eq!(pending_check(3).level, Level::Warn);
+        assert_eq!(pending_check(0, None).level, Level::Ok);
+        assert_eq!(pending_check(3, None).level, Level::Warn);
     }
 
     #[test]
@@ -397,5 +407,54 @@ mod tests {
         assert_eq!(checks[1].level, Level::Ok);
         assert_eq!(checks[2].level, Level::Warn);
         assert!(checks[2].detail.contains("bad file"));
+    }
+
+    #[test]
+    fn embedding_failure_warns_until_a_batch_succeeds() {
+        struct Broken;
+        impl crate::embed::Embedder for Broken {
+            fn embed_passages(&self, _: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+                anyhow::bail!("model exploded")
+            }
+            fn embed_query(&self, _: &str) -> anyhow::Result<Vec<f32>> {
+                anyhow::bail!("model exploded")
+            }
+        }
+        let t = tempfile::tempdir().unwrap();
+        let paths = Paths::new(t.path().to_path_buf());
+        let embeddings = |paths: &Paths| {
+            db_checks(paths, false)
+                .into_iter()
+                .find(|c| c.name == "embeddings")
+                .unwrap()
+        };
+        {
+            let mut c = crate::db::open(&paths.db()).unwrap();
+            let tx = c.transaction().unwrap();
+            let e = crate::db::NewExchange {
+                archive_path: "a.jsonl".into(),
+                line_start: 1,
+                line_end: 2,
+                session_id: None,
+                project: "p".into(),
+                harness: "claude".into(),
+                is_sidechain: false,
+                ts: 0,
+                user_message: "q".into(),
+                assistant_message: "a".into(),
+                tool_names: String::new(),
+            };
+            crate::db::insert_exchange(&tx, &e, "q a").unwrap();
+            tx.commit().unwrap();
+            assert!(crate::embed::embed_pending(&mut c, &Broken).is_err());
+        }
+        let check = embeddings(&paths);
+        assert_eq!(check.level, Level::Warn);
+        assert!(check.detail.contains("model exploded"), "{}", check.detail);
+        {
+            let mut c = crate::db::open(&paths.db()).unwrap();
+            crate::embed::embed_pending(&mut c, &crate::embed::FakeEmbedder).unwrap();
+        }
+        assert_eq!(embeddings(&paths).level, Level::Ok);
     }
 }

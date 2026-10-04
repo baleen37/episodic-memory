@@ -140,6 +140,24 @@ pub fn to_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
+/// Meta key holding the embedding worker's last failure; a successful batch clears it.
+/// Separate from sync's `last_error`, which every sync run overwrites.
+pub const LAST_EMBED_ERROR: &str = "last_embed_error";
+
+/// Records an embedding failure for `doctor`. Best effort: a DB that cannot take the write
+/// already fails louder elsewhere.
+pub fn record_embed_error(conn: &Connection, error: &str) {
+    let _ = crate::db::meta_set(conn, LAST_EMBED_ERROR, error);
+}
+
+fn embed_batch(e: &dyn Embedder, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    let vectors = e.embed_passages(texts)?;
+    if vectors.len() != texts.len() || vectors.iter().any(|v| v.len() != DIMS) {
+        bail!("embedder returned unexpected vector count or dimension");
+    }
+    Ok(vectors)
+}
+
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
 /// Vectors are computed outside any transaction; each batch is written in one short immediate
 /// transaction. A row deleted or embedded by someone else in between is skipped.
@@ -151,12 +169,17 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
             return Ok(total);
         }
         let texts: Vec<String> = batch.iter().map(|p| p.text.clone()).collect();
-        let vectors = e.embed_passages(&texts)?;
-        if vectors.len() != batch.len() || vectors.iter().any(|v| v.len() != DIMS) {
-            bail!("embedder returned unexpected vector count or dimension");
-        }
+        let vectors = match embed_batch(e, &texts) {
+            Ok(v) => v,
+            Err(err) => {
+                record_embed_error(conn, &format!("{err:#}"));
+                return Err(err);
+            }
+        };
         let tx = conn.transaction()?;
         {
+            tx.prepare_cached("DELETE FROM meta WHERE key = ?")?
+                .execute([LAST_EMBED_ERROR])?;
             let mut mark = tx.prepare_cached(
                 "UPDATE exchanges SET embedded = 1 WHERE id = ? AND embedded = 0",
             )?;
