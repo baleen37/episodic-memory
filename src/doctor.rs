@@ -1,6 +1,6 @@
 use crate::daemon::{Hello, Status};
 use crate::db::{meta_get, open_readonly};
-use crate::paths::{candidate_roots_from_env, Paths, SourceRoot, VERSION};
+use crate::paths::{Paths, SourceRoot, VERSION, candidate_roots_from_env};
 use rusqlite::Connection;
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};

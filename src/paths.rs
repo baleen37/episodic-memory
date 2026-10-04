@@ -189,14 +189,16 @@ mod tests {
     fn socket_and_lock_naming() {
         let p = Paths::new(PathBuf::from("/tmp/x"));
         let ver = VERSION;
-        assert!(p
-            .daemon_socket()
-            .to_string_lossy()
-            .ends_with(&format!("daemon-{ver}.sock")));
-        assert!(p
-            .daemon_lock()
-            .to_string_lossy()
-            .ends_with(&format!("daemon-{ver}.lock")));
+        assert!(
+            p.daemon_socket()
+                .to_string_lossy()
+                .ends_with(&format!("daemon-{ver}.sock"))
+        );
+        assert!(
+            p.daemon_lock()
+                .to_string_lossy()
+                .ends_with(&format!("daemon-{ver}.lock"))
+        );
         assert_eq!(p.sync_lock(), PathBuf::from("/tmp/x/sync.lock"));
         assert!(!p.sync_lock().to_string_lossy().contains(ver));
     }

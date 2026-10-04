@@ -1,7 +1,7 @@
 //! Which conversation a host process (Claude Code or Codex) is running, so search can leave
 //! out the session that is asking.
 
-use crate::paths::{candidate_roots_from_env, SourceKind};
+use crate::paths::{SourceKind, candidate_roots_from_env};
 use rusqlite::{Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::process::Command;

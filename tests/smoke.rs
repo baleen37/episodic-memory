@@ -1,4 +1,4 @@
-use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
+use rusqlite::{Connection, ffi::sqlite3_auto_extension, params};
 use sqlite_vec::sqlite3_vec_init;
 
 fn vec_bytes(first: f32) -> Vec<u8> {
