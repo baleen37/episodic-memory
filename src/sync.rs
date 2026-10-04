@@ -11,8 +11,10 @@ use crate::project::resolve_project;
 use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub struct DiscoveredFile {
@@ -295,11 +297,19 @@ pub(crate) fn is_generation_name(name: &str) -> bool {
 }
 
 /// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
-/// Broken links and unreadable entries are skipped. Returns `(path relative to root, size)`.
+/// Broken links and unreadable entries are skipped, and each directory is entered once (by
+/// device and inode) so a link to an ancestor cannot loop. Returns `(path relative to root, size)`.
 fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut out = Vec::new();
+    let mut visited = HashSet::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        let Ok(meta) = fs::metadata(&dir) else {
+            continue;
+        };
+        if !visited.insert((meta.dev(), meta.ino())) {
+            continue;
+        }
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };

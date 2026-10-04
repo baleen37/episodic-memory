@@ -581,3 +581,41 @@ fn doctor_warns_on_last_error() {
         d.out
     );
 }
+
+#[test]
+fn symlink_to_ancestor_does_not_loop_discovery() {
+    let env = Env::new();
+    let projects = env.root.join("c/projects");
+    let demo = projects.join("demo");
+    // One link back to the source root and one to its own directory: following either without
+    // loop detection revisits the transcripts, and two links make the walk exponential.
+    std::os::unix::fs::symlink(&projects, demo.join("up")).unwrap();
+    std::os::unix::fs::symlink(&demo, demo.join("self")).unwrap();
+    env.run_sync_hook();
+    assert!(
+        wait_until(Duration::from_secs(15), || env.sync_count() >= 1),
+        "sync never finished"
+    );
+    let c = Connection::open_with_flags(
+        env.data.join("episodic.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    c.busy_timeout(Duration::from_secs(5)).unwrap();
+    let mut stmt = c
+        .prepare(
+            "SELECT source_path FROM files WHERE source_kind = 'claude-code-projects' \
+             ORDER BY source_path",
+        )
+        .unwrap();
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let expected: Vec<String> = ["main.jsonl", "noise.jsonl", "subagent.jsonl"]
+        .iter()
+        .map(|n| demo.join(n).to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(paths, expected);
+}
