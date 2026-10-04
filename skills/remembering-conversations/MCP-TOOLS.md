@@ -34,7 +34,7 @@ intersection returns no results; there is no OR fallback.
 
 ### Result Card
 
-Each result shows the project, date, score (0-1, relative to the top hit), the
+Each result shows the project, date, score, the
 first 200 characters of the user message and of the reply, and a location at the
 end:
 
@@ -44,6 +44,13 @@ end:
 
 Pass that path and line range to `read`. If the semantic model is not ready
 yet, the first line of the output says results are keyword-only.
+
+The score is absolute (0-1), not relative to the top hit: 1.00 means rank 1 on
+both the keyword and the semantic side, and a semantic-only rank-1 hit scores
+about 0.37. Weak semantic-only matches are dropped, so a query that matches
+nothing returns `No results.` If no result matches any keyword, the first line
+is `(no keyword match — semantic matches only)`: treat those results as loosely
+related, not as proof that the memory exists.
 
 ## read
 

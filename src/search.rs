@@ -10,6 +10,12 @@ const MAX_LIMIT: usize = 50;
 const SNIPPET_CHARS: usize = 200;
 /// Candidates fetched per side (BM25 and vector) for each concept of an array query.
 const MULTI_CONCEPT_CANDIDATES: usize = 300;
+/// Vector candidates whose cosine similarity to the query is below this are dropped before
+/// fusion, unless BM25 found them too. Calibrated on real data (spec §6).
+pub const MIN_VECTOR_SIMILARITY: f64 = 0.85;
+/// Highest possible fused score: BM25 rank 1 (with its bonus) plus vector rank 1.
+/// Scores are reported as `fused / MAX_FUSED`, an absolute 0-1 scale.
+const MAX_FUSED: f64 = 0.4 / 61.0 + 0.01 + 0.6 / 61.0;
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchParams {
@@ -37,6 +43,8 @@ pub struct Hit {
 pub struct SearchOutput {
     pub hits: Vec<Hit>,
     pub vector_used: bool,
+    /// At least one hit was found by BM25 (not only by vector similarity).
+    pub keyword_match: bool,
 }
 
 /// Reciprocal-rank fusion: `0.4/(60+r_bm25) + 0.6/(60+r_vec)` with 1-based ranks, a missing
@@ -140,13 +148,14 @@ fn bm25_ids(conn: &Connection, query: &str, f: &Filters, n: usize) -> Result<Vec
     )
 }
 
-fn vec_ids(
+/// Vector nearest neighbours as (id, cosine similarity), nearest first.
+fn vec_hits(
     conn: &Connection,
     e: &dyn Embedder,
     query: &str,
     f: &Filters,
     n: usize,
-) -> Result<Vec<i64>> {
+) -> Result<Vec<(i64, f64)>> {
     let bytes: Vec<u8> = e
         .embed_query(query)?
         .iter()
@@ -155,13 +164,15 @@ fn vec_ids(
     let (cond, mut params) = f.sql("");
     params.insert(0, SqlValue::Integer(n as i64));
     params.insert(0, SqlValue::Blob(bytes));
-    ids(
-        conn,
-        &format!(
-            "SELECT rowid FROM vec_exchanges WHERE embedding MATCH ? AND k = ?{cond} ORDER BY distance"
-        ),
-        params,
-    )
+    let mut stmt = conn.prepare(&format!(
+        "SELECT rowid, distance FROM vec_exchanges WHERE embedding MATCH ? AND k = ?{cond} ORDER BY distance"
+    ))?;
+    // L2 distance between unit vectors: cosine = 1 - d²/2.
+    let rows = stmt.query_map(params_from_iter(params), |r| {
+        let d: f64 = r.get(1)?;
+        Ok((r.get(0)?, 1.0 - d * d / 2.0))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 fn sidechain_set(conn: &Connection, all: &[&[i64]]) -> Result<HashSet<i64>> {
@@ -176,8 +187,11 @@ fn sidechain_set(conn: &Connection, all: &[&[i64]]) -> Result<HashSet<i64>> {
     Ok(out)
 }
 
-/// One concept's fused ranking (best first), cut to `limit`.
-/// `n` candidates are fetched per side.
+/// (exchange id, raw fused score, found by BM25).
+type Scored = (i64, f64, bool);
+
+/// One concept's fused ranking, best first, cut to `limit`. `n` candidates are fetched per side. Vector candidates below
+/// `MIN_VECTOR_SIMILARITY` are dropped before ranks are assigned, unless BM25 found them too.
 fn concept(
     conn: &Connection,
     e: Option<&dyn Embedder>,
@@ -185,16 +199,24 @@ fn concept(
     f: &Filters,
     limit: usize,
     n: usize,
-) -> Result<Vec<(i64, f64)>> {
+) -> Result<Vec<Scored>> {
     let bm = bm25_ids(conn, query, f, n)?;
-    let ve = match e {
-        Some(e) => vec_ids(conn, e, query, f, n)?,
+    let bm_set: HashSet<i64> = bm.iter().copied().collect();
+    let ve: Vec<i64> = match e {
+        Some(e) => vec_hits(conn, e, query, f, n)?
+            .into_iter()
+            .filter(|(id, cos)| *cos >= MIN_VECTOR_SIMILARITY || bm_set.contains(id))
+            .map(|(id, _)| id)
+            .collect(),
         None => Vec::new(),
     };
     let side = sidechain_set(conn, &[&bm, &ve])?;
     let mut ranked = rrf(&bm, &ve, &side);
     ranked.truncate(limit);
-    Ok(ranked)
+    Ok(ranked
+        .into_iter()
+        .map(|(id, s)| (id, s, bm_set.contains(&id)))
+        .collect())
 }
 
 fn load_hit(conn: &Connection, id: i64, score: f64) -> Result<Hit> {
@@ -256,34 +278,34 @@ fn search_in<Tz: TimeZone>(
     }
     let vector_used = e.is_some();
 
-    // (exchange id, score) best first, already normalized by the caller below.
-    let ranked: Vec<(i64, f64)> = if p.queries.len() == 1 {
+    // Best first; raw fused scores are put on the absolute scale below.
+    let ranked: Vec<Scored> = if p.queries.len() == 1 {
         concept(conn, e, &p.queries[0], &f, limit, 50.max(limit * 3))?
     } else {
         let n = MULTI_CONCEPT_CANDIDATES;
-        // path -> per-concept best (score, id)
-        let mut by_path: HashMap<String, Vec<Option<(f64, i64)>>> = HashMap::new();
+        // path -> per-concept best
+        let mut by_path: HashMap<String, Vec<Option<Scored>>> = HashMap::new();
         for (ci, q) in p.queries.iter().enumerate() {
-            for (id, score) in concept(conn, e, q, &f, 2 * n, n)? {
+            for (id, score, kw) in concept(conn, e, q, &f, 2 * n, n)? {
                 let slot = by_path
                     .entry(archive_path_of(conn, id)?)
                     .or_insert_with(|| vec![None; p.queries.len()]);
-                if slot[ci].is_none_or(|(s, _)| score > s) {
-                    slot[ci] = Some((score, id));
+                if slot[ci].is_none_or(|(_, s, _)| score > s) {
+                    slot[ci] = Some((id, score, kw));
                 }
             }
         }
-        let mut out: Vec<(i64, f64)> = by_path
+        let mut out: Vec<Scored> = by_path
             .into_values()
             .filter(|slot| slot.iter().all(Option::is_some))
             .map(|slot| {
                 let best = slot
                     .iter()
                     .flatten()
-                    .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+                    .max_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
                     .unwrap();
-                let mean = slot.iter().flatten().map(|s| s.0).sum::<f64>() / slot.len() as f64;
-                (best.1, mean)
+                let mean = slot.iter().flatten().map(|s| s.1).sum::<f64>() / slot.len() as f64;
+                (best.0, mean, slot.iter().flatten().any(|s| s.2))
             })
             .collect();
         out.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.0.cmp(&a.0)));
@@ -291,12 +313,16 @@ fn search_in<Tz: TimeZone>(
         out
     };
 
-    let top = ranked.first().map_or(1.0, |r| r.1);
+    let keyword_match = ranked.iter().any(|r| r.2);
     let hits = ranked
         .into_iter()
-        .map(|(id, s)| load_hit(conn, id, if top > 0.0 { s / top } else { 0.0 }))
+        .map(|(id, s, _)| load_hit(conn, id, (s / MAX_FUSED).clamp(0.0, 1.0)))
         .collect::<Result<Vec<_>>>()?;
-    Ok(SearchOutput { hits, vector_used })
+    Ok(SearchOutput {
+        hits,
+        vector_used,
+        keyword_match,
+    })
 }
 
 #[cfg(test)]
@@ -375,6 +401,103 @@ mod tests {
         o.hits.iter().map(|h| h.exchange_id).collect()
     }
 
+    /// BM25 rank 1 alone, as an absolute score.
+    const BM25_TOP: f64 = (0.4 / 61.0 + 0.01) / MAX_FUSED;
+
+    /// Test embedder with a chosen cosine: the query is axis 0, a passage containing `cosNN`
+    /// is `(NN/100, sqrt(1 - (NN/100)^2))`, any other passage is axis 1 (cosine 0).
+    struct AxisEmbedder;
+
+    fn cos_marker(text: &str) -> f32 {
+        text.split(|c: char| !c.is_alphanumeric())
+            .find_map(|t| t.strip_prefix("cos").and_then(|n| n.parse::<f32>().ok()))
+            .map_or(0.0, |n| n / 100.0)
+    }
+
+    impl Embedder for AxisEmbedder {
+        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    let c = cos_marker(t);
+                    let mut v = vec![0.0; crate::embed::DIMS];
+                    v[0] = c;
+                    v[1] = (1.0 - c * c).sqrt();
+                    v
+                })
+                .collect())
+        }
+        fn embed_query(&self, _: &str) -> Result<Vec<f32>> {
+            let mut v = vec![0.0; crate::embed::DIMS];
+            v[0] = 1.0;
+            Ok(v)
+        }
+    }
+
+    fn db_axis(rows: &[Ex]) -> (tempfile::TempDir, Connection) {
+        let (t, mut conn) = db_with(rows, false);
+        embed_pending(&mut conn, &AxisEmbedder).unwrap();
+        (t, conn)
+    }
+
+    /// `cosNN` markers just above and just below the floor.
+    fn above() -> String {
+        format!("cos{}", (MIN_VECTOR_SIMILARITY * 100.0).round() as i64 + 3)
+    }
+    fn below() -> String {
+        format!("cos{}", (MIN_VECTOR_SIMILARITY * 100.0).round() as i64 - 3)
+    }
+
+    #[test]
+    fn vector_only_candidates_below_floor_are_dropped() {
+        let (hi, lo) = (format!("alpha {}", above()), format!("beta {}", below()));
+        let (_t, conn) = db_axis(&[ex("/a/1", 1, &hi), ex("/a/2", 1, &lo)]);
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["gamma"])).unwrap();
+        assert!(o.vector_used);
+        assert!(!o.keyword_match);
+        assert_eq!(ids_of(&o), vec![1]);
+        // Vector-only rank 1 on the absolute scale.
+        assert!((o.hits[0].score - (0.6 / 61.0) / MAX_FUSED).abs() < 1e-9);
+
+        // Nothing above the floor: no results at all.
+        let (_t, conn) = db_axis(&[ex("/a/2", 1, &lo)]);
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["gamma"])).unwrap();
+        assert!(o.hits.is_empty());
+    }
+
+    #[test]
+    fn keyword_hit_with_low_cosine_is_kept() {
+        // The walrus row is nearer than the quokka row but below the floor and vector-only,
+        // so it is dropped before ranks are assigned and the quokka row becomes vector rank 1.
+        let other = format!("walrus {}", below());
+        let (_t, conn) = db_axis(&[ex("/a/1", 1, "quokka cos10"), ex("/a/2", 1, &other)]);
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["quokka"])).unwrap();
+        assert!(o.keyword_match);
+        assert_eq!(ids_of(&o), vec![1]);
+        assert_eq!(o.hits[0].score, 1.0);
+    }
+
+    #[test]
+    fn array_query_uses_the_absolute_scale() {
+        let both = format!("quokka walrus {}", above());
+        let (_t, conn) = db_axis(&[ex("/a/same", 1, &both)]);
+        // Each concept: BM25 rank 1 + vector rank 1 = 1.0, so the mean is 1.0.
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["quokka", "walrus"])).unwrap();
+        assert_eq!(o.hits.len(), 1);
+        assert!((o.hits[0].score - 1.0).abs() < 1e-12);
+        assert!(o.keyword_match);
+        // Vector-only for both concepts: the mean of two vector rank-1 scores.
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["gamma", "delta"])).unwrap();
+        assert_eq!(o.hits.len(), 1);
+        assert!((o.hits[0].score - (0.6 / 61.0) / MAX_FUSED).abs() < 1e-9);
+        assert!(!o.keyword_match);
+        // Below the floor, an array query finds nothing either.
+        let lo = format!("quokka {}", below());
+        let (_t, conn) = db_axis(&[ex("/a/x", 1, &lo)]);
+        let o = search(&conn, Some(&AxisEmbedder), &params(&["gamma", "delta"])).unwrap();
+        assert!(o.hits.is_empty());
+    }
+
     #[test]
     fn rrf_weights() {
         let r = rrf(&[1, 2], &[2, 3], &HashSet::new());
@@ -422,15 +545,17 @@ mod tests {
         );
         let o = search(&conn, None, &params(&["quokka"])).unwrap();
         assert!(!o.vector_used);
+        assert!(o.keyword_match);
         assert_eq!(ids_of(&o), vec![1]);
-        assert_eq!(o.hits[0].score, 1.0);
+        // BM25 rank 1 alone, on the absolute scale.
+        assert!((o.hits[0].score - BM25_TOP).abs() < 1e-12);
         assert_eq!(o.hits[0].archive_path, "/a/1");
         assert_eq!((o.hits[0].line_start, o.hits[0].line_end), (1, 2));
         assert_eq!(o.hits[0].project, "proj");
     }
 
     #[test]
-    fn hybrid_uses_vector_and_normalizes() {
+    fn hybrid_top_in_both_lists_scores_one() {
         let (_t, conn) = db_with(
             &[
                 ex("/a/1", 1, "quokka feeding schedule"),
@@ -505,7 +630,8 @@ mod tests {
         let o = search(&conn, None, &params(&["quokka", "walrus"])).unwrap();
         assert_eq!(o.hits.len(), 1);
         assert_eq!(o.hits[0].archive_path, "/a/same");
-        assert_eq!(o.hits[0].score, 1.0);
+        // Keyword-only on both concepts: at most BM25 rank 1, never rescaled to 1.0.
+        assert!(o.hits[0].score > 0.0 && o.hits[0].score <= BM25_TOP + 1e-12);
 
         // Concepts living in different conversations intersect to nothing.
         let (_t, conn) = db_with(
