@@ -1,5 +1,5 @@
 use crate::db::open_readonly;
-use crate::parse::{read_file_lines, render_line};
+use crate::parse::{read_file_lines_from, render_line};
 use crate::paths::{Paths, SourceKind};
 use crate::sync::is_generation_name;
 use anyhow::{Result, anyhow, bail};
@@ -100,12 +100,9 @@ pub fn read_archive(
     );
     let budget = OUTPUT_MAX - MARKER_RESERVE;
     let mut out = String::new();
-    let mut lines = read_file_lines(&full)?;
+    let mut lines = read_file_lines_from(&full, start)?;
     while let Some(line) = lines.next() {
         let (n, v) = line?;
-        if n < start {
-            continue;
-        }
         if n > end {
             break;
         }

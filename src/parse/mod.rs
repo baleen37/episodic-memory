@@ -47,6 +47,7 @@ pub(crate) type Line = (i64, Option<Value>);
 
 /// Yields (1-based line number, parsed JSON or None when the line is bad). Blank lines are skipped.
 /// I/O errors are yielded as `Err`; invalid UTF-8 or JSON is a bad line, not an error.
+#[cfg(test)]
 pub(crate) fn read_lines<R: BufRead>(reader: R) -> impl Iterator<Item = Result<Line>> {
     read_lines_from(reader, 1)
 }
@@ -81,8 +82,15 @@ fn read_lines_from<R: BufRead>(
     })
 }
 
-pub(crate) fn read_file_lines(path: &Path) -> Result<impl Iterator<Item = Result<Line>>> {
-    Ok(read_lines(BufReader::new(File::open(path)?)))
+/// `read_lines_from` over a file: lines before `from_line` are counted, never decoded.
+pub(crate) fn read_file_lines_from(
+    path: &Path,
+    from_line: i64,
+) -> Result<impl Iterator<Item = Result<Line>>> {
+    Ok(read_lines_from(
+        BufReader::new(File::open(path)?),
+        from_line,
+    ))
 }
 
 impl ParsedExchange {
@@ -156,7 +164,7 @@ fn parse_exchanges(
 ) -> Result<ParseOutput> {
     let mut out = ParseOutput::default();
     let mut cur: Option<ParsedExchange> = None;
-    for line in read_lines_from(BufReader::new(File::open(archive)?), from_line) {
+    for line in read_file_lines_from(archive, from_line)? {
         let (n, v) = line?;
         let Some(v) = v else {
             out.bad_lines += 1;
@@ -235,7 +243,7 @@ pub fn render_line(kind: SourceKind, value: &Value) -> Vec<String> {
 pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
     let p = provider(kind);
     let mut meta = p.initial_meta(rel_path);
-    for line in read_file_lines(archive)? {
+    for line in read_file_lines_from(archive, 1)? {
         if let (_, Some(v)) = line?
             && p.observe_meta(&mut meta, &v)
         {
@@ -253,4 +261,21 @@ pub fn parse_from(
     meta: &FileMeta,
 ) -> Result<ParseOutput> {
     parse_exchanges(provider(kind), archive, from_line, meta)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_lines_from_start_keep_physical_numbers() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("a.jsonl");
+        std::fs::write(&p, "{\"a\":1}\n{not json\n\n{\"a\":4}\n").unwrap();
+        let got: Vec<_> = read_file_lines_from(&p, 2)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(got, vec![(2, None), (4, Some(serde_json::json!({"a": 4})))]);
+    }
 }
