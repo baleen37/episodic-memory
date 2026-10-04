@@ -1,4 +1,4 @@
-use crate::parse::{FileMeta, ReparsePoint};
+use crate::parse::{FileMeta, ReparsePoint, UserSignal};
 use crate::paths::SourceKind;
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
@@ -258,7 +258,10 @@ pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
                 is_sidechain: r.get::<_, Option<bool>>(10)?.unwrap_or(false),
                 sidechain_known: r.get(13)?,
                 agent_path: r.get(14)?,
-                user_signal: r.get(11)?,
+                user_signal: r
+                    .get::<_, Option<String>>(11)?
+                    .as_deref()
+                    .and_then(UserSignal::parse),
             },
             meta_offset: r.get(15)?,
             meta_settled: r.get(16)?,
@@ -301,7 +304,7 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
         f.project,
         f.harness,
         f.meta.is_sidechain,
-        f.meta.user_signal,
+        f.meta.user_signal.map(UserSignal::as_str),
         f.skipped,
         f.meta.sidechain_known,
         f.meta.agent_path,
@@ -673,7 +676,7 @@ mod tests {
             is_sidechain: true,
             sidechain_known: true,
             agent_path: Some("/root/a".into()),
-            user_signal: Some("user_message".into()),
+            user_signal: Some(UserSignal::UserMessage),
         };
         let mut f = FileRow {
             meta: meta.clone(),

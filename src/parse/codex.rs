@@ -1,5 +1,6 @@
 use super::{
-    FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
+    FileMeta, ParsedExchange, Provider, UserSignal, render_result, render_text, render_tool,
+    value_text,
 };
 use serde_json::Value;
 
@@ -37,26 +38,21 @@ fn is_item_completed_user(v: &Value) -> bool {
 /// Provider adapter for Codex session transcripts.
 pub(crate) struct Codex;
 
-/// User signals, weakest first: an archive uses the strongest one any of its lines shows.
-const SIGNALS: [&str; 3] = ["response_item", "user_message", "item_completed"];
-
-fn raise_signal(meta: &mut FileMeta, signal: &str) {
-    let rank = |s: Option<&str>| SIGNALS.iter().position(|x| Some(*x) == s);
-    if rank(Some(signal)) > rank(meta.user_signal.as_deref()) {
-        meta.user_signal = Some(signal.to_string());
-    }
+/// An archive uses the strongest user signal any of its lines shows.
+fn raise_signal(meta: &mut FileMeta, signal: UserSignal) {
+    meta.user_signal = meta.user_signal.max(Some(signal));
 }
 
 impl Provider for Codex {
     fn initial_meta(&self, _archive_path: &str) -> FileMeta {
         FileMeta {
-            user_signal: Some(SIGNALS[0].to_string()),
+            user_signal: Some(UserSignal::ResponseItem),
             ..FileMeta::default()
         }
     }
 
     fn observe_meta(&self, meta: &mut FileMeta, v: &Value) -> bool {
-        // A fork copies its parent's lines after its own header, so the first header wins.
+        // A fork copies its parent's lines after its own session_meta line, so the first one wins.
         if !meta.sidechain_known && v["type"] == "session_meta" {
             meta.sidechain_known = true;
             let p = &v["payload"];
@@ -69,11 +65,11 @@ impl Provider for Codex {
             }
         }
         if is_item_completed_user(v) {
-            raise_signal(meta, "item_completed");
+            raise_signal(meta, UserSignal::ItemCompleted);
         } else if v["type"] == "event_msg" && v["payload"]["type"] == "user_message" {
-            raise_signal(meta, "user_message");
+            raise_signal(meta, UserSignal::UserMessage);
         }
-        meta.sidechain_known && meta.user_signal.as_deref() == Some("item_completed")
+        meta.sidechain_known && meta.user_signal == Some(UserSignal::ItemCompleted)
     }
 
     fn start_message(&self, v: &Value, meta: &FileMeta) -> Option<String> {
@@ -100,11 +96,11 @@ fn start_text(v: &Value, meta: &FileMeta) -> Option<String> {
         .then(|| block_texts(&p["content"], &["input_text"], "\n"))
         .flatten();
     }
-    match meta.user_signal.as_deref() {
-        Some("item_completed") => is_item_completed_user(v)
+    match meta.user_signal {
+        Some(UserSignal::ItemCompleted) => is_item_completed_user(v)
             .then(|| block_texts(&p["item"]["content"], &["text"], "\n"))
             .flatten(),
-        Some("user_message") => (v["type"] == "event_msg" && p["type"] == "user_message")
+        Some(UserSignal::UserMessage) => (v["type"] == "event_msg" && p["type"] == "user_message")
             .then(|| p["message"].as_str().map(String::from))
             .flatten(),
         _ => {
@@ -121,7 +117,7 @@ fn start_text(v: &Value, meta: &FileMeta) -> Option<String> {
 fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
     let p = &v["payload"];
     if v["type"] == "event_msg" && p["type"] == "agent_message" {
-        // Duplicated by a `response_item` answer unless the user interrupted the turn.
+        // Duplicated by a `response_item` answer unless the user interrupted the exchange.
         if let Some(t) = p["message"].as_str().filter(|t| !t.is_empty()) {
             if !c.fallback_answer.is_empty() {
                 c.fallback_answer.push_str("\n\n");
@@ -176,7 +172,7 @@ fn render_line(v: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{DO_NOT_INDEX, ParseOutput, parse_from, read_meta};
+    use crate::parse::{DO_NOT_INDEX, ParseOutput, UserSignal, parse_from, read_meta};
     use crate::paths::SourceKind;
     use std::path::Path;
 
@@ -210,7 +206,7 @@ mod tests {
         let (meta, out) = parse(&fx("modern"), 1);
         assert_eq!(meta.session_id.as_deref(), Some("codex-modern"));
         assert_eq!(meta.cwd.as_deref(), Some("/work/demo"));
-        assert_eq!(meta.user_signal.as_deref(), Some("item_completed"));
+        assert_eq!(meta.user_signal, Some(UserSignal::ItemCompleted));
         assert!(!meta.is_sidechain && meta.agent_path.is_none());
         let e = &out.exchanges;
         assert_eq!(e.len(), 2);
@@ -236,7 +232,7 @@ mod tests {
     #[test]
     fn legacy_falls_back_to_response_items_without_injections() {
         let (meta, out) = parse(&fx("legacy"), 1);
-        assert_eq!(meta.user_signal.as_deref(), Some("response_item"));
+        assert_eq!(meta.user_signal, Some(UserSignal::ResponseItem));
         let e = &out.exchanges;
         assert_eq!(e.len(), 2);
         assert_eq!(e[0].user_message, "Old Q1 hello");
@@ -282,7 +278,7 @@ mod tests {
         );
         std::fs::write(&p, content).unwrap();
         let (meta, out) = parse(p.to_str().unwrap(), 1);
-        assert_eq!(meta.user_signal.as_deref(), Some("user_message"));
+        assert_eq!(meta.user_signal, Some(UserSignal::UserMessage));
         assert_eq!(out.exchanges.len(), 1);
         assert_eq!(out.exchanges[0].line_end, 5);
         assert_eq!(out.bad_lines, 1);
@@ -330,7 +326,7 @@ mod tests {
             user("again"),
             streamed("done"),
             answer("done"),
-            user("open"), // the turn still running
+            user("open"), // the exchange still running
         ]
         .concat();
         std::fs::write(&p, content).unwrap();

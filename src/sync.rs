@@ -6,7 +6,7 @@ use crate::db::{
 use crate::log::log_line;
 use crate::parse::{ReparsePoint, initial_meta, observe_meta_from, parse_from};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
-use crate::project::ProjectCache;
+use crate::project::{ProjectCache, UNKNOWN_PROJECT};
 use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
@@ -90,7 +90,10 @@ fn index_file(
         return Ok(stats);
     }
 
-    let project = row.project.clone().unwrap_or_else(|| "unknown".into());
+    let project = row
+        .project
+        .clone()
+        .unwrap_or_else(|| UNKNOWN_PROJECT.into());
     if let Some(last) = out.exchanges.last() {
         row.reparse = ReparsePoint {
             line: last.line_start,
@@ -854,7 +857,7 @@ mod mirror {
         )
     }
 
-    fn turn(q: &str, a: &str) -> String {
+    fn exchange_lines(q: &str, a: &str) -> String {
         user(q) + &assistant(a)
     }
 
@@ -1014,7 +1017,7 @@ mod mirror {
         format!("{v}\n")
     }
 
-    fn codex_turn(q: &str, a: &str) -> String {
+    fn codex_exchange(q: &str, a: &str) -> String {
         codex_line(
             &serde_json::json!({"timestamp":"2026-01-02T03:04:05Z","type":"event_msg",
             "payload":{"type":"user_message","message":q}}),
@@ -1025,7 +1028,7 @@ mod mirror {
 
     #[test]
     fn codex_archive_whose_user_signal_flips_matches_one_shot() {
-        // Two turns known only from `user_message` events, then a client that also records
+        // Two exchanges known only from `user_message` events, then a client that also records
         // `item_completed`: from then on the archive's user signal is `item_completed`.
         let item_completed = |q: &str| {
             codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
@@ -1034,11 +1037,11 @@ mod mirror {
         };
         let body = codex_line(&serde_json::json!({"type":"session_meta",
             "payload":{"id":"x","cwd":"/nonexistent/demo"}}))
-            + &codex_turn("old one", "first answer")
-            + &codex_turn("old two", "second answer")
+            + &codex_exchange("old one", "first answer")
+            + &codex_exchange("old two", "second answer")
             + &item_completed("new three")
-            + &codex_turn("new three", "third answer")
-            + &codex_turn("old four", "fourth answer");
+            + &codex_exchange("new three", "third answer")
+            + &codex_exchange("old four", "fourth answer");
         let line_len = body.lines().map(str::len).max().unwrap() + 1;
         for chunk in [37, line_len] {
             assert_incremental_matches_one_shot(
@@ -1063,13 +1066,16 @@ mod mirror {
             + &decoy;
         let mut body = head.clone();
         for i in 0..60 {
-            body += &codex_turn(&format!("q{i}"), "padding answer padding answer");
+            body += &codex_exchange(&format!("q{i}"), "padding answer padding answer");
         }
         e.write(&body);
         e.sync();
-        assert_eq!(e.row().meta.user_signal.as_deref(), Some("user_message"));
+        assert_eq!(
+            e.row().meta.user_signal,
+            Some(crate::parse::UserSignal::UserMessage)
+        );
         // Turn the decoy into an `item_completed` event in the archive only. A sync that reread
-        // the head would switch the user signal and stop indexing `user_message` turns.
+        // the head would switch the user signal and stop indexing `user_message` exchanges.
         let archive = e.gen_path(0);
         let text = fs::read_to_string(&archive).unwrap();
         fs::write(
@@ -1077,19 +1083,22 @@ mod mirror {
             text.replacen("xtem_completed", "item_completed", 1),
         )
         .unwrap();
-        e.append(&codex_turn("fresh question", "fresh answer"));
+        e.append(&codex_exchange("fresh question", "fresh answer"));
         e.sync();
-        assert_eq!(e.row().meta.user_signal.as_deref(), Some("user_message"));
+        assert_eq!(
+            e.row().meta.user_signal,
+            Some(crate::parse::UserSignal::UserMessage)
+        );
         let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
         assert_eq!(users.len(), 61);
         assert_eq!(users.last().unwrap(), "fresh question");
     }
 
     /// One exchange per provider: a user message, then an answer (two archive lines).
-    fn provider_turn(kind: SourceKind, q: &str, a: &str) -> String {
+    fn provider_exchange(kind: SourceKind, q: &str, a: &str) -> String {
         match kind {
-            SourceKind::CodexSessions => codex_turn(q, a),
-            _ => turn(q, a),
+            SourceKind::CodexSessions => codex_exchange(q, a),
+            _ => exchange_lines(q, a),
         }
     }
 
@@ -1104,9 +1113,9 @@ mod mirror {
             let mut e = env_for(kind, rel);
             // The long answer keeps the head out of the 4096 tail bytes compared with the source.
             e.write(
-                &(provider_turn(kind, "q1 x", "a1")
-                    + &provider_turn(kind, "q2", &"long answer ".repeat(500))
-                    + &provider_turn(kind, "q3", "a3")),
+                &(provider_exchange(kind, "q1 x", "a1")
+                    + &provider_exchange(kind, "q2", &"long answer ".repeat(500))
+                    + &provider_exchange(kind, "q3", "a3")),
             );
             e.sync();
             // Split archive line 1 in two, keeping its byte length. A sync that counted lines
@@ -1114,7 +1123,7 @@ mod mirror {
             let archive = e.gen_path(0);
             let text = fs::read_to_string(&archive).unwrap();
             fs::write(&archive, text.replacen("q1 x", "q1\nx", 1)).unwrap();
-            e.append(&provider_turn(kind, "q4", "a4"));
+            e.append(&provider_exchange(kind, "q4", "a4"));
             e.sync();
             assert_eq!(e.row().generation, 0);
             let got: Vec<(i64, String)> = e.exchanges().into_iter().map(|x| (x.1, x.2)).collect();
@@ -1138,16 +1147,16 @@ mod mirror {
     fn new_generation_indexes_like_a_fresh_sync() {
         for (kind, rel) in PROVIDERS {
             let mut e = env_for(kind, rel);
-            e.write(&(provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2")));
+            e.write(&(provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2")));
             e.sync();
             // Rewritten source: shorter, so it starts generation 1 from line 1.
-            let body = provider_turn(kind, "fresh", "answer");
+            let body = provider_exchange(kind, "fresh", "answer");
             e.write(&body);
             e.sync();
-            e.append(&provider_turn(kind, "next", "answer"));
+            e.append(&provider_exchange(kind, "next", "answer"));
             e.sync();
             assert_eq!(e.row().generation, 1);
-            let body = body + &provider_turn(kind, "next", "answer");
+            let body = body + &provider_exchange(kind, "next", "answer");
             assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
         }
     }
@@ -1156,15 +1165,16 @@ mod mirror {
     fn crash_repair_truncation_indexes_like_a_fresh_sync() {
         for (kind, rel) in PROVIDERS {
             let mut e = env_for(kind, rel);
-            let mut body = provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2");
+            let mut body =
+                provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2");
             e.write(&body);
             e.sync();
             // An append that reached the archive but was never committed.
             let mut h = OpenOptions::new().append(true).open(e.gen_path(0)).unwrap();
-            h.write_all(provider_turn(kind, "lost lost", "gone").as_bytes())
+            h.write_all(provider_exchange(kind, "lost lost", "gone").as_bytes())
                 .unwrap();
             h.write_all(b"{\"partial").unwrap();
-            let more = provider_turn(kind, "q3", "a3");
+            let more = provider_exchange(kind, "q3", "a3");
             e.append(&more);
             body += &more;
             e.sync();
@@ -1178,7 +1188,8 @@ mod mirror {
         // Rows from schema version 2 store only the reparse line.
         for (kind, rel) in PROVIDERS {
             let mut e = env_for(kind, rel);
-            let mut body = provider_turn(kind, "q1", "a1") + &provider_turn(kind, "q2", "a2");
+            let mut body =
+                provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2");
             e.write(&body);
             e.sync();
             let mut row = e.row();
@@ -1187,7 +1198,7 @@ mod mirror {
             let tx = e.conn.transaction().unwrap();
             upsert_file(&tx, &row).unwrap();
             tx.commit().unwrap();
-            let more = provider_turn(kind, "q3", "a3");
+            let more = provider_exchange(kind, "q3", "a3");
             e.append(&more);
             body += &more;
             e.sync();
@@ -1203,7 +1214,7 @@ mod mirror {
         for (kind, rel) in PROVIDERS {
             let mut e = env_for(kind, rel);
             let mut body = (1..=3)
-                .map(|i| provider_turn(kind, &format!("q{i}"), "a"))
+                .map(|i| provider_exchange(kind, &format!("q{i}"), "a"))
                 .collect::<String>();
             e.write(&body);
             e.sync();
@@ -1215,7 +1226,7 @@ mod mirror {
                     [&row.source_path],
                 )
                 .unwrap();
-            let more = provider_turn(kind, "q4", "a");
+            let more = provider_exchange(kind, "q4", "a");
             e.append(&more);
             body += &more;
             e.sync();
@@ -1226,7 +1237,10 @@ mod mirror {
     #[test]
     fn indexes_fresh_file_and_fills_session_info() {
         let mut e = env();
-        e.write(&(turn("alpha question", "alpha answer") + &turn("beta q", "beta a")));
+        e.write(
+            &(exchange_lines("alpha question", "alpha answer")
+                + &exchange_lines("beta q", "beta a")),
+        );
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let row = e.row();
         assert_eq!(row.meta.session_id.as_deref(), Some("s1"));
@@ -1241,7 +1255,7 @@ mod mirror {
     #[test]
     fn open_turn_is_indexed_once_answered() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &user("still thinking")));
+        e.write(&(exchange_lines("q1", "a1") + &user("still thinking")));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
         e.append(&assistant("now answered"));
         e.sync();
@@ -1256,8 +1270,8 @@ mod mirror {
         e.sync();
         let row = e.row();
         assert!(row.meta.cwd.is_none());
-        assert_eq!(row.project.as_deref(), Some("unknown"));
-        e.append(&turn("q1", "a1"));
+        assert_eq!(row.project.as_deref(), Some(UNKNOWN_PROJECT));
+        e.append(&exchange_lines("q1", "a1"));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
         let row = e.row();
         assert_eq!(row.meta.cwd.as_deref(), Some("/nonexistent/demo"));
@@ -1272,11 +1286,15 @@ mod mirror {
     #[test]
     fn reindexes_only_last_exchange() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &turn("q2", "a2") + &turn("q3", "a3")));
+        e.write(
+            &(exchange_lines("q1", "a1")
+                + &exchange_lines("q2", "a2")
+                + &exchange_lines("q3", "a3")),
+        );
         e.sync();
         let before = e.exchanges();
         assert_eq!(before.len(), 3);
-        e.append(&turn("q4", "a4"));
+        e.append(&exchange_lines("q4", "a4"));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let after = e.exchanges();
         assert_eq!(after.len(), 4);
@@ -1290,15 +1308,15 @@ mod mirror {
     #[test]
     fn do_not_index_skips_and_purges() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &turn("q2", "a2")));
+        e.write(&(exchange_lines("q1", "a1") + &exchange_lines("q2", "a2")));
         e.sync();
         assert_eq!(e.exchanges().len(), 2);
-        e.append(&turn(crate::parse::DO_NOT_INDEX, "ok"));
+        e.append(&exchange_lines(crate::parse::DO_NOT_INDEX, "ok"));
         assert_eq!(e.sync(), FileOutcome::Skipped);
         assert_eq!(e.exchanges().len(), 0);
         assert_eq!(e.fts_hits("q1"), 0);
         assert!(e.row().skipped);
-        e.append(&turn("q5", "a5"));
+        e.append(&exchange_lines("q5", "a5"));
         assert_eq!(e.sync(), FileOutcome::Skipped);
         assert_eq!(e.exchanges().len(), 0);
         assert!(e.archive(0).contains("q5"));
@@ -1308,7 +1326,11 @@ mod mirror {
     fn oversize_exchange_skipped() {
         let mut e = env();
         let big = "x".repeat(300 * 1024);
-        e.write(&(turn("small one", "a1") + &turn(&big, "a2") + &turn("small two", "a3")));
+        e.write(
+            &(exchange_lines("small one", "a1")
+                + &exchange_lines(&big, "a2")
+                + &exchange_lines("small two", "a3")),
+        );
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
         assert_eq!(users, vec!["small one", "small two"]);
@@ -1319,7 +1341,11 @@ mod mirror {
     #[test]
     fn fts_row_per_exchange() {
         let mut e = env();
-        e.write(&(turn("alpha", "one") + &turn("bravo", "two") + &turn("charlie", "three")));
+        e.write(
+            &(exchange_lines("alpha", "one")
+                + &exchange_lines("bravo", "two")
+                + &exchange_lines("charlie", "three")),
+        );
         e.sync();
         for w in ["alpha", "bravo", "charlie"] {
             assert_eq!(e.fts_hits(w), 1, "{w}");
@@ -1334,7 +1360,7 @@ mod mirror {
     #[test]
     fn bad_line_does_not_abort() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + "{not json\n" + &turn("q2", "a2")));
+        e.write(&(exchange_lines("q1", "a1") + "{not json\n" + &exchange_lines("q2", "a2")));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         assert_eq!(e.exchanges().len(), 2);
         let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
@@ -1344,7 +1370,7 @@ mod mirror {
     #[test]
     fn incomplete_tail_does_not_reparse() {
         let mut e = env();
-        e.write(&turn("q1", "a1"));
+        e.write(&exchange_lines("q1", "a1"));
         e.sync();
         let before = e.exchanges();
         e.append("{\"type\":\"user\",\"mess");
@@ -1405,7 +1431,7 @@ mod orchestration {
         fs::write(path, body).unwrap();
     }
 
-    fn turn(q: &str, a: &str) -> String {
+    fn exchange_lines(q: &str, a: &str) -> String {
         format!(
             "{}\n{}\n",
             serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
@@ -1444,17 +1470,17 @@ mod orchestration {
         let e = env();
         let k = SourceKind::ClaudeCodeProjects;
         // Source present, archive is a matching prefix: adopt at archive size, then sync only the tail.
-        let first = turn("q1", "a1");
+        let first = exchange_lines("q1", "a1");
         put(&e.archive(k, "p/match.jsonl", 0), &first);
         put(
             &e.root.join("p/match.jsonl"),
-            &(first.clone() + &turn("q2", "a2")),
+            &(first.clone() + &exchange_lines("q2", "a2")),
         );
         // Source present, tail differs: old archive kept, new generation.
         put(&e.archive(k, "p/diff.jsonl", 0), &first);
         put(
             &e.root.join("p/diff.jsonl"),
-            &turn("different long question", "different long answer"),
+            &exchange_lines("different long question", "different long answer"),
         );
         // Source missing: archive only.
         put(&e.archive(k, "p/gone.jsonl", 0), &first);
@@ -1524,7 +1550,7 @@ mod orchestration {
         );
         assert_eq!(
             fs::read_to_string(e.archive(k, "p/match.jsonl", 0)).unwrap(),
-            first + &turn("q2", "a2")
+            first + &exchange_lines("q2", "a2")
         );
         // And the mismatched one mirrors into gen-1.
         let f = df
@@ -1541,7 +1567,7 @@ mod orchestration {
     #[test]
     fn import_skips_legacy_and_generations() {
         let e = env();
-        let body = turn("q", "a");
+        let body = exchange_lines("q", "a");
         put(
             &e.paths.archive_root().join("claude-projects/a.jsonl"),
             &body,
@@ -1579,7 +1605,7 @@ mod orchestration {
     #[test]
     fn run_sync_respects_sync_lock() {
         let e = env();
-        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/s.jsonl"), &exchange_lines("q", "a"));
         let held = fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -1599,7 +1625,7 @@ mod orchestration {
     #[test]
     fn run_sync_indexes_and_leaves_embedding_pending() {
         let e = env();
-        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/s.jsonl"), &exchange_lines("q", "a"));
         let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!(
             (stats.files_synced, stats.new_exchanges, stats.errors),
@@ -1627,9 +1653,9 @@ mod orchestration {
     #[test]
     fn run_sync_logs_file_errors_and_continues() {
         let e = env();
-        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/a.jsonl"), &exchange_lines("q", "a"));
         // A source whose archive location is blocked by a directory fails; the other still syncs.
-        put(&e.root.join("p/b.jsonl"), &turn("q2", "a2"));
+        put(&e.root.join("p/b.jsonl"), &exchange_lines("q2", "a2"));
         fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
         let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!((stats.errors, stats.files_synced), (1, 1));
@@ -1651,7 +1677,7 @@ mod orchestration {
     #[test]
     fn older_index_version_reindexes_once() {
         let e = env();
-        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/a.jsonl"), &exchange_lines("q", "a"));
         run_sync_with_roots(&e.paths, &e.roots).unwrap();
         let conn = e.conn();
         assert_eq!(

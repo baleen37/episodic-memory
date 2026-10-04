@@ -184,8 +184,8 @@ for kind in claude codex codex_um; do
 done
 
 # MCP over stdio: one client process, one request per line, timed until its response line.
-# The MCP host is this shell ($$, the parent of the exec'd `mcp`). Give it a Claude session file like a real
-# Claude Code host, so search finds the host session there instead of running lsof per search (Codex path).
+# The MCP host is this shell ($$, the parent of the exec'd `mcp`). Give it a Claude pid session file
+# like a real Claude Code host, so search finds the host session there instead of running lsof per search (Codex path).
 mkdir -p "$CLAUDE/sessions"
 printf '{"pid":%d,"sessionId":"bench-host"}\n' "$$" >"$CLAUDE/sessions/$$.json"
 mkfifo "$T/in" "$T/out"

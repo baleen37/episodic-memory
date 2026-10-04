@@ -20,7 +20,37 @@ pub struct FileMeta {
     /// `session_meta`); later lines no longer change it.
     pub sidechain_known: bool,
     pub agent_path: Option<String>,
-    pub user_signal: Option<String>,
+    pub user_signal: Option<UserSignal>,
+}
+
+/// The event kind a Codex archive's exchange start messages come from, weakest first: an
+/// archive uses the strongest one any of its lines shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UserSignal {
+    ResponseItem,
+    UserMessage,
+    ItemCompleted,
+}
+
+impl UserSignal {
+    /// The text stored in the `files.user_signal` column.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UserSignal::ResponseItem => "response_item",
+            UserSignal::UserMessage => "user_message",
+            UserSignal::ItemCompleted => "item_completed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            UserSignal::ResponseItem,
+            UserSignal::UserMessage,
+            UserSignal::ItemCompleted,
+        ]
+        .into_iter()
+        .find(|x| x.as_str() == s)
+    }
 }
 
 impl FileMeta {
@@ -42,7 +72,7 @@ pub struct ParsedExchange {
     pub assistant_message: String,
     pub tool_names: Vec<String>,
     /// Answer text seen only in transient events (Codex `agent_message`); it becomes the answer
-    /// when the turn recorded none, which happens when the user interrupts it.
+    /// when the exchange recorded none, which happens when the user interrupts it.
     pub fallback_answer: String,
 }
 
@@ -145,7 +175,7 @@ impl ParsedExchange {
         }
     }
 
-    /// The exchange as indexed, or None when the turn produced neither an answer nor a tool
+    /// The exchange as indexed, or None when the exchange produced neither an answer nor a tool
     /// call (interrupted before any output, resubmitted, or a local command like `/clear`).
     fn finish(mut self) -> Option<Self> {
         if self.assistant_message.is_empty() {
@@ -193,7 +223,7 @@ pub(crate) fn provider(kind: SourceKind) -> &'static dyn Provider {
 }
 
 /// Exchange loop shared by all providers. Bad lines extend the open exchange.
-/// Turns without an answer or tool call are dropped; a still-open last turn is picked up again
+/// Exchanges without an answer or tool call are dropped; a still-open last exchange is picked up again
 /// by the next sync, which reparses from the last returned exchange.
 fn parse_exchanges(
     p: &dyn Provider,

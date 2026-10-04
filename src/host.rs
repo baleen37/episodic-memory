@@ -30,7 +30,7 @@ impl HostSession {
     }
 
     /// Session id the host is running now, when it can be determined. `/clear` or `/new`
-    /// switches the session without restarting the host: the Claude session file is read on
+    /// switches the session without restarting the host: the Claude pid session file is read on
     /// every call; the open-file lookup (Codex) is reused for `OPEN_FILE_CACHE`.
     pub fn current(&mut self, conn: &Connection) -> Option<String> {
         self.current_in(conn, claude_dir().as_deref())
