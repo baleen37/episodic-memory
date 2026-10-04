@@ -92,7 +92,7 @@ impl SourceKind {
         SourceKind::CodexSessions,
     ];
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             SourceKind::ClaudeCodeProjects => "claude-code-projects",
             SourceKind::ClaudeCodeTranscripts => "claude-code-transcripts",
@@ -104,7 +104,7 @@ impl SourceKind {
         Self::ALL.into_iter().find(|k| k.as_str() == s)
     }
 
-    pub fn harness(&self) -> &'static str {
+    pub fn harness(self) -> &'static str {
         match self {
             SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => "claude",
             SourceKind::CodexSessions => "codex",
@@ -156,6 +156,7 @@ mod tests {
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 
+    #[allow(clippy::unnecessary_wraps)]
     fn os(s: &str) -> Option<OsString> {
         Some(OsString::from(s))
     }
@@ -189,14 +190,16 @@ mod tests {
     fn socket_and_lock_naming() {
         let p = Paths::new(PathBuf::from("/tmp/x"));
         let ver = VERSION;
-        assert!(p
-            .daemon_socket()
-            .to_string_lossy()
-            .ends_with(&format!("daemon-{ver}.sock")));
-        assert!(p
-            .daemon_lock()
-            .to_string_lossy()
-            .ends_with(&format!("daemon-{ver}.lock")));
+        assert!(
+            p.daemon_socket()
+                .to_string_lossy()
+                .ends_with(&format!("daemon-{ver}.sock"))
+        );
+        assert!(
+            p.daemon_lock()
+                .to_string_lossy()
+                .ends_with(&format!("daemon-{ver}.lock"))
+        );
         assert_eq!(p.sync_lock(), PathBuf::from("/tmp/x/sync.lock"));
         assert!(!p.sync_lock().to_string_lossy().contains(ver));
     }

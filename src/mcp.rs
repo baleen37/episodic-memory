@@ -1,19 +1,18 @@
 use crate::db;
 use crate::embed::Embedder;
-use crate::host::session_of;
-use crate::paths::Paths;
+use crate::host::HostSession;
+use crate::paths::{Paths, VERSION};
 use crate::read::read_archive;
-use crate::search::{search, Hit, SearchParams};
+use crate::search::{Hit, MAX_LIMIT, SearchParams, search};
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
-use serde_json::{json, Map, Value};
+use rusqlite::Connection;
+use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 10;
-const MAX_LIMIT: usize = 50;
 const KEYWORD_ONLY: &str = "(vector search unavailable: model loading — keyword results only)";
 const KEYWORD_ONLY_FAILED: &str =
     "(vector search unavailable: model unavailable — keyword results only)";
@@ -29,14 +28,17 @@ pub struct Ctx {
 /// Newline-delimited JSON-RPC 2.0 over `r`/`w` until EOF on `r`. `host_pid` is the Claude Code
 /// or Codex process behind the connection; search leaves out the session it is running.
 pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32>) -> Result<()> {
+    // One DB connection for the whole MCP connection, opened by the first search.
+    let mut conn = None;
+    let mut host = host_pid.map(HostSession::new);
     for line in r.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let resp = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&msg, ctx, host_pid),
-            Err(_) => Some(error(Value::Null, -32700, "Parse error")),
+            Ok(msg) => handle(&msg, ctx, &mut conn, &mut host),
+            Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
         };
         if let Some(resp) = resp {
             serde_json::to_writer(&mut w, &resp)?;
@@ -47,12 +49,17 @@ pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32
     Ok(())
 }
 
-fn error(id: Value, code: i64, message: &str) -> Value {
+fn error(id: &Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
 /// Messages without an `id` are notifications and get no response.
-fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
+fn handle(
+    msg: &Value,
+    ctx: &Ctx,
+    conn: &mut Option<Connection>,
+    host: &mut Option<HostSession>,
+) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result = match msg.get("method").and_then(Value::as_str).unwrap_or("") {
@@ -71,7 +78,7 @@ fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
             let out = match params.get("name").and_then(Value::as_str) {
-                Some("search") => search_tool(args, ctx, host_pid),
+                Some("search") => search_tool(args, ctx, conn, host),
                 Some("read") => read_tool(args, ctx),
                 other => Err(format!("unknown tool: {}", other.unwrap_or(""))),
             };
@@ -82,7 +89,7 @@ fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
                 }
             }
         }
-        _ => return Some(error(id, -32601, "Method not found")),
+        _ => return Some(error(&id, -32601, "Method not found")),
     };
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
@@ -191,14 +198,26 @@ fn search_params(args: &Map<String, Value>) -> Result<SearchParams, String> {
 fn search_tool(
     args: &Map<String, Value>,
     ctx: &Ctx,
-    host_pid: Option<u32>,
+    conn: &mut Option<Connection>,
+    host: &mut Option<HostSession>,
 ) -> Result<String, String> {
     let mut params = search_params(args)?;
-    let conn = db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?;
-    params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
-    let embedder = ctx.embedder.read().ok().and_then(|g| g.clone());
-    let out = match search(&conn, embedder.as_deref(), &params) {
-        Err(_) if embedder.is_some() => search(&conn, None, &params),
+    let conn = match conn {
+        Some(c) => c,
+        None => {
+            conn.insert(db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?)
+        }
+    };
+    params.exclude_session = host.as_mut().and_then(|h| h.current(conn));
+    let embedder = crate::locks::read(&ctx.embedder).clone();
+    let out = match search(conn, embedder.as_deref(), &params) {
+        Err(e) if embedder.is_some() => {
+            crate::log::log_line(
+                &ctx.paths,
+                &format!("vector search failed, keyword-only fallback: {e:#}"),
+            );
+            search(conn, None, &params)
+        }
         r => r,
     }
     .map_err(|e| format!("search failed: {e:#}"))?;
@@ -274,7 +293,7 @@ mod tests {
     use crate::embed::FakeEmbedder;
     use crate::paths::{SourceKind, SourceRoot};
     use crate::sync::run_sync_with_roots;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn indexed_ctx() -> (tempfile::TempDir, Ctx) {
         let t = tempfile::tempdir().unwrap();
@@ -293,7 +312,9 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&paths, &roots).unwrap();
+        crate::embed::embed_pending(&mut crate::db::open(&paths.db()).unwrap(), &FakeEmbedder)
+            .unwrap();
         let embedder: Arc<dyn Embedder> = Arc::new(FakeEmbedder);
         let ctx = Ctx {
             paths,
@@ -305,7 +326,7 @@ mod tests {
 
     /// Feeds each request as one line and returns the parsed response lines.
     fn exchange(ctx: &Ctx, reqs: &[Value]) -> Vec<Value> {
-        let input: String = reqs.iter().map(|r| format!("{r}\n")).collect();
+        let input: String = reqs.iter().map(|r| r.to_string() + "\n").collect();
         let mut out = Vec::new();
         serve(input.as_bytes(), &mut out, ctx, None).unwrap();
         String::from_utf8(out)
@@ -315,7 +336,7 @@ mod tests {
             .collect()
     }
 
-    fn call(id: i64, name: &str, args: Value) -> Value {
+    fn call(id: i64, name: &str, args: &Value) -> Value {
         json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})
     }
 
@@ -352,7 +373,7 @@ mod tests {
                 json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                 json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
-                call(3, "search", json!({"query":"list files"})),
+                call(3, "search", &json!({"query":"list files"})),
             ],
         );
         assert_eq!(resps.len(), 3, "notification must not get a response");
@@ -402,7 +423,7 @@ mod tests {
     fn keyword_only_notice_without_embedder() {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = None;
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with("(vector search unavailable: model loading — keyword results only)\n"),
@@ -416,7 +437,7 @@ mod tests {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = None;
         ctx.load_failed.store(true, Ordering::SeqCst);
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with(
@@ -440,23 +461,29 @@ mod tests {
     fn embedder_error_falls_back_to_keywords() {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = Some(Arc::new(Broken));
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         assert_ne!(r["result"]["isError"], true, "{r}");
         assert!(text(r).starts_with(KEYWORD_ONLY), "{}", text(r));
         assert!(text(r).contains("main.jsonl:"));
+        let log = std::fs::read_to_string(ctx.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|l| l.contains("vector search failed") && l.contains("broken")),
+            "{log}"
+        );
     }
 
     #[test]
     fn no_results_and_array_query() {
         let (_t, ctx) = indexed_ctx();
-        let r = call(2, "search", json!({"query":["list","files"], "limit": 99}));
+        let r = call(2, "search", &json!({"query":["list","files"], "limit": 99}));
         let r = &exchange(&ctx, &[r])[0];
         assert!(text(r).starts_with("1. ["), "{}", text(r));
         // No keyword match and no vector neighbour above the floor: nothing at all.
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         assert_eq!(text(r), "No results.");
         *ctx.embedder.write().unwrap() = None;
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         assert_eq!(text(r), format!("{KEYWORD_ONLY}\nNo results."));
     }
 
@@ -482,14 +509,14 @@ mod tests {
         crate::embed::embed_pending(&mut conn, &Same).unwrap();
         *ctx.embedder.write().unwrap() = Some(Arc::new(Same));
 
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with(&format!("{SEMANTIC_ONLY}\n1. [")),
             "{body}"
         );
 
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(body.starts_with("1. ["), "{body}");
         assert!(!body.contains(SEMANTIC_ONLY), "{body}");
@@ -511,7 +538,7 @@ mod tests {
         let reqs: Vec<Value> = bad
             .iter()
             .enumerate()
-            .map(|(i, a)| call(i as i64, "search", a.clone()))
+            .map(|(i, a)| call(i as i64, "search", a))
             .collect();
         for (r, a) in exchange(&ctx, &reqs).iter().zip(&bad) {
             assert_eq!(r["result"]["isError"], true, "{a} -> {r}");
@@ -534,11 +561,11 @@ mod tests {
                 call(
                     1,
                     "read",
-                    json!({"path": path, "startLine": 1, "endLine": 2}),
+                    &json!({"path": path, "startLine": 1, "endLine": 2}),
                 ),
-                call(2, "read", json!({"path": "/etc/passwd"})),
-                call(3, "read", json!({"path": path, "startLine": 0})),
-                call(4, "read", json!({})),
+                call(2, "read", &json!({"path": "/etc/passwd"})),
+                call(3, "read", &json!({"path": path, "startLine": 0})),
+                call(4, "read", &json!({})),
             ],
         );
         assert_ne!(r[0]["result"]["isError"], true, "{}", r[0]);
@@ -564,12 +591,17 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&ctx.paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&ctx.paths, &roots).unwrap();
+        crate::embed::embed_pending(
+            &mut crate::db::open(&ctx.paths.db()).unwrap(),
+            &FakeEmbedder,
+        )
+        .unwrap();
         let path = ctx
             .paths
             .archive_root()
             .join("claude-code-projects/demo/secret.jsonl");
-        let r = exchange(&ctx, &[call(1, "read", json!({"path": path}))]);
+        let r = exchange(&ctx, &[call(1, "read", &json!({"path": path}))]);
         assert_eq!(r[0]["result"]["isError"], true, "{}", r[0]);
         assert_eq!(text(&r[0]), "conversation is marked DO NOT INDEX");
     }
@@ -591,5 +623,58 @@ mod tests {
         assert_eq!(r[1]["error"]["code"], -32601);
         assert_eq!(r[2]["id"], 8);
         assert_eq!(r[2]["result"], json!({}));
+    }
+
+    /// Yields one request line per `read`, running `between` before the second line, so the
+    /// test can act while `serve` is mid-connection.
+    struct Lines<F: FnMut()> {
+        requests: Vec<String>,
+        next: usize,
+        between: F,
+    }
+
+    impl<F: FnMut()> std::io::Read for Lines<F> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let Some(line) = self.requests.get(self.next) else {
+                return Ok(0);
+            };
+            if self.next == 1 {
+                (self.between)();
+            }
+            assert!(line.len() <= buf.len());
+            buf[..line.len()].copy_from_slice(line.as_bytes());
+            self.next += 1;
+            Ok(line.len())
+        }
+    }
+
+    #[test]
+    fn searches_on_one_connection_reuse_one_database_connection() {
+        let (_t, ctx) = indexed_ctx();
+        let search = call(1, "search", &json!({"query":"list files"})).to_string() + "\n";
+        let db = ctx.paths.db();
+        let moved = db.with_extension("moved");
+        let reader = std::io::BufReader::new(Lines {
+            requests: vec![search.clone(), search],
+            next: 0,
+            // A connection opened per search would now find no database and create an empty one.
+            between: || {
+                for suffix in ["", "-wal", "-shm"] {
+                    let from = format!("{}{suffix}", db.display());
+                    if std::path::Path::new(&from).exists() {
+                        std::fs::rename(&from, format!("{}{suffix}", moved.display())).unwrap();
+                    }
+                }
+            },
+        });
+        let mut out = Vec::new();
+        serve(reader, &mut out, &ctx, None).unwrap();
+        let r: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(text(&r[0]).contains("Q1 how do I list files?"), "{}", r[0]);
+        assert_eq!(text(&r[1]), text(&r[0]));
     }
 }

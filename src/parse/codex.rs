@@ -1,13 +1,11 @@
 use super::{
-    parse_exchanges, read_file_lines, render_result, render_text, render_tool, value_text,
-    FileMeta, ParseOutput, ParsedExchange,
+    FileMeta, ParsedExchange, Provider, UserSignal, render_result, render_text, render_tool,
+    value_text,
 };
-use anyhow::Result;
 use serde_json::Value;
-use std::path::Path;
 
 /// `response_item` user messages that are injected context, not human input
-/// (only consulted for the "response_item" fallback signal).
+/// (only consulted for the `response_item` fallback signal).
 const INJECTED_PREFIXES: [&str; 6] = [
     "# AGENTS.md instructions",
     "<environment_context>",
@@ -37,15 +35,26 @@ fn is_item_completed_user(v: &Value) -> bool {
         && v["payload"]["item"]["type"] == "UserMessage"
 }
 
-pub fn read_meta(archive: &Path) -> Result<FileMeta> {
-    let mut meta = FileMeta::default();
-    let mut seen_meta = false;
-    let (mut has_user_message, mut has_item_completed) = (false, false);
-    for line in read_file_lines(archive)? {
-        let (_, v) = line?;
-        let Some(v) = v else { continue };
-        if !seen_meta && v["type"] == "session_meta" {
-            seen_meta = true;
+/// Provider adapter for Codex session transcripts.
+pub(crate) struct Codex;
+
+/// An archive uses the strongest user signal any of its lines shows.
+fn raise_signal(meta: &mut FileMeta, signal: UserSignal) {
+    meta.user_signal = meta.user_signal.max(Some(signal));
+}
+
+impl Provider for Codex {
+    fn initial_meta(&self, _archive_path: &str) -> FileMeta {
+        FileMeta {
+            user_signal: Some(UserSignal::ResponseItem),
+            ..FileMeta::default()
+        }
+    }
+
+    fn observe_meta(&self, meta: &mut FileMeta, v: &Value) -> bool {
+        // A fork copies its parent's lines after its own session_meta line, so the first one wins.
+        if !meta.sidechain_known && v["type"] == "session_meta" {
+            meta.sidechain_known = true;
             let p = &v["payload"];
             meta.session_id = p["id"].as_str().map(String::from);
             meta.cwd = p["cwd"].as_str().map(String::from);
@@ -55,24 +64,25 @@ pub fn read_meta(archive: &Path) -> Result<FileMeta> {
                 meta.agent_path = sub["thread_spawn"]["agent_path"].as_str().map(String::from);
             }
         }
-        if is_item_completed_user(&v) {
-            has_item_completed = true;
-            if seen_meta {
-                break;
-            }
+        if is_item_completed_user(v) {
+            raise_signal(meta, UserSignal::ItemCompleted);
         } else if v["type"] == "event_msg" && v["payload"]["type"] == "user_message" {
-            has_user_message = true;
+            raise_signal(meta, UserSignal::UserMessage);
         }
+        meta.sidechain_known && meta.user_signal == Some(UserSignal::ItemCompleted)
     }
-    let signal = if has_item_completed {
-        "item_completed"
-    } else if has_user_message {
-        "user_message"
-    } else {
-        "response_item"
-    };
-    meta.user_signal = Some(signal.to_string());
-    Ok(meta)
+
+    fn start_message(&self, v: &Value, meta: &FileMeta) -> Option<String> {
+        start_text(v, meta)
+    }
+
+    fn fold_line(&self, exchange: &mut ParsedExchange, v: &Value) {
+        add_answer_and_tools(exchange, v);
+    }
+
+    fn render_line(&self, v: &Value) -> Vec<String> {
+        render_line(v)
+    }
 }
 
 /// Text of an exchange-starting line, or None when the line does not start one.
@@ -86,11 +96,11 @@ fn start_text(v: &Value, meta: &FileMeta) -> Option<String> {
         .then(|| block_texts(&p["content"], &["input_text"], "\n"))
         .flatten();
     }
-    match meta.user_signal.as_deref() {
-        Some("item_completed") => is_item_completed_user(v)
+    match meta.user_signal {
+        Some(UserSignal::ItemCompleted) => is_item_completed_user(v)
             .then(|| block_texts(&p["item"]["content"], &["text"], "\n"))
             .flatten(),
-        Some("user_message") => (v["type"] == "event_msg" && p["type"] == "user_message")
+        Some(UserSignal::UserMessage) => (v["type"] == "event_msg" && p["type"] == "user_message")
             .then(|| p["message"].as_str().map(String::from))
             .flatten(),
         _ => {
@@ -107,7 +117,7 @@ fn start_text(v: &Value, meta: &FileMeta) -> Option<String> {
 fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
     let p = &v["payload"];
     if v["type"] == "event_msg" && p["type"] == "agent_message" {
-        // Duplicated by a `response_item` answer unless the user interrupted the turn.
+        // Duplicated by a `response_item` answer unless the user interrupted the exchange.
         if let Some(t) = p["message"].as_str().filter(|t| !t.is_empty()) {
             if !c.fallback_answer.is_empty() {
                 c.fallback_answer.push_str("\n\n");
@@ -135,17 +145,8 @@ fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
     }
 }
 
-pub fn parse_from(archive: &Path, from_line: i64, meta: &FileMeta) -> Result<ParseOutput> {
-    parse_exchanges(
-        archive,
-        from_line,
-        |v| start_text(v, meta),
-        add_answer_and_tools,
-    )
-}
-
 /// Renders `response_item` lines only; `event_msg` duplicates them.
-pub fn render_line(v: &Value) -> Vec<String> {
+fn render_line(v: &Value) -> Vec<String> {
     if v["type"] != "response_item" {
         return Vec::new();
     }
@@ -171,7 +172,7 @@ pub fn render_line(v: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{parse_from, read_meta, ParseOutput, DO_NOT_INDEX};
+    use crate::parse::{DO_NOT_INDEX, ParseOutput, UserSignal, parse_from, read_meta};
     use crate::paths::SourceKind;
     use std::path::Path;
 
@@ -187,7 +188,16 @@ mod tests {
     fn parse(path: &str, from: i64) -> (crate::parse::FileMeta, ParseOutput) {
         let p = Path::new(path);
         let meta = read_meta(K, p, "2026/01/02/rollout.jsonl").unwrap();
-        let out = parse_from(K, p, from, &meta).unwrap();
+        let out = parse_from(
+            K,
+            p,
+            crate::parse::ReparsePoint {
+                line: from,
+                byte: None,
+            },
+            &meta,
+        )
+        .unwrap();
         (meta, out)
     }
 
@@ -196,7 +206,7 @@ mod tests {
         let (meta, out) = parse(&fx("modern"), 1);
         assert_eq!(meta.session_id.as_deref(), Some("codex-modern"));
         assert_eq!(meta.cwd.as_deref(), Some("/work/demo"));
-        assert_eq!(meta.user_signal.as_deref(), Some("item_completed"));
+        assert_eq!(meta.user_signal, Some(UserSignal::ItemCompleted));
         assert!(!meta.is_sidechain && meta.agent_path.is_none());
         let e = &out.exchanges;
         assert_eq!(e.len(), 2);
@@ -207,7 +217,7 @@ mod tests {
         assert_eq!(e[0].tool_names, vec!["exec"]);
         assert_eq!(e[1].tool_names, vec!["apply_patch", "exec"]);
         assert_eq!(e[1].assistant_message, "Looking.\n\nHere it is.");
-        assert_eq!(e[0].ts, 1767323045000);
+        assert_eq!(e[0].ts, 1_767_323_045_000);
         assert_eq!(out.bad_lines, 0);
         assert!(!out.do_not_index);
     }
@@ -222,7 +232,7 @@ mod tests {
     #[test]
     fn legacy_falls_back_to_response_items_without_injections() {
         let (meta, out) = parse(&fx("legacy"), 1);
-        assert_eq!(meta.user_signal.as_deref(), Some("response_item"));
+        assert_eq!(meta.user_signal, Some(UserSignal::ResponseItem));
         let e = &out.exchanges;
         assert_eq!(e.len(), 2);
         assert_eq!(e[0].user_message, "Old Q1 hello");
@@ -268,7 +278,7 @@ mod tests {
         );
         std::fs::write(&p, content).unwrap();
         let (meta, out) = parse(p.to_str().unwrap(), 1);
-        assert_eq!(meta.user_signal.as_deref(), Some("user_message"));
+        assert_eq!(meta.user_signal, Some(UserSignal::UserMessage));
         assert_eq!(out.exchanges.len(), 1);
         assert_eq!(out.exchanges[0].line_end, 5);
         assert_eq!(out.bad_lines, 1);
@@ -294,13 +304,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("r.jsonl");
         let user = |t: &str| {
-            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"{t}\"}}}}\n")
+            format!(
+                "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"{t}\"}}}}\n"
+            )
         };
         let streamed = |t: &str| {
-            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"{t}\"}}}}\n")
+            format!(
+                "{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"{t}\"}}}}\n"
+            )
         };
         let answer = |t: &str| {
-            format!("{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{t}\"}}]}}}}\n")
+            format!(
+                "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{t}\"}}]}}}}\n"
+            )
         };
         let content = [
             "{\"type\":\"session_meta\",\"payload\":{\"id\":\"x\"}}\n".to_string(),
@@ -310,7 +326,7 @@ mod tests {
             user("again"),
             streamed("done"),
             answer("done"),
-            user("open"), // the turn still running
+            user("open"), // the exchange still running
         ]
         .concat();
         std::fs::write(&p, content).unwrap();

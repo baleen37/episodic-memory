@@ -1,8 +1,9 @@
+use crate::archive::generation_stem;
 use crate::db::open_readonly;
-use crate::parse::{read_file_lines, render_line};
+use crate::parse::{read_file_lines_from, render_line, truncate_bytes};
 use crate::paths::{Paths, SourceKind};
-use crate::sync::is_generation_name;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
+use std::fmt::Write as _;
 use std::path::{Component, Path};
 
 const OUTPUT_MAX: usize = 61440;
@@ -16,24 +17,12 @@ fn kind_of(first: &str) -> Result<SourceKind> {
         .ok_or_else(|| anyhow!("unknown archive source: {first}"))
 }
 
-fn cut(s: &str, max: usize) -> &str {
-    let mut end = max.min(s.len());
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 /// `<stem>.gen-N.jsonl` -> `<stem>.jsonl`; other names are unchanged.
 fn generation_base(p: &Path) -> std::path::PathBuf {
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
-    match name.as_deref() {
-        Some(n) if is_generation_name(n) => {
-            let stem = n.strip_suffix(".jsonl").unwrap_or(n);
-            let head = stem.rsplit_once(".gen-").map_or(stem, |(h, _)| h);
-            p.with_file_name(format!("{head}.jsonl"))
-        }
-        _ => p.to_path_buf(),
+    match name.as_deref().and_then(generation_stem) {
+        Some(stem) => p.with_file_name(format!("{stem}.jsonl")),
+        None => p.to_path_buf(),
     }
 }
 
@@ -100,12 +89,9 @@ pub fn read_archive(
     );
     let budget = OUTPUT_MAX - MARKER_RESERVE;
     let mut out = String::new();
-    let mut lines = read_file_lines(&full)?;
+    let mut lines = read_file_lines_from(&full, start)?;
     while let Some(line) = lines.next() {
         let (n, v) = line?;
-        if n < start {
-            continue;
-        }
         if n > end {
             break;
         }
@@ -114,20 +100,23 @@ pub fn read_archive(
         if items.is_empty() {
             continue;
         }
-        let block: String = items.iter().map(|i| format!("L{n} {i}\n\n")).collect();
+        let mut block = String::new();
+        for i in &items {
+            let _ = write!(block, "L{n} {i}\n\n");
+        }
         if out.len() + block.len() <= budget {
             out.push_str(&block);
             continue;
         }
         if out.is_empty() {
             // Progress is always at least one line: emit it cut to fit.
-            out.push_str(cut(&block, budget - 16));
-            out.push_str("…[truncated]\n\n");
+            out.push_str(&truncate_bytes(&block, budget - 16));
+            out.push_str("\n\n");
             if lines.next().is_some_and(|l| l.is_ok_and(|(m, _)| m <= end)) {
-                out.push_str(&format!("_(continue with startLine={})_", n + 1));
+                let _ = write!(out, "_(continue with startLine={})_", n + 1);
             }
         } else {
-            out.push_str(&format!("_(continue with startLine={n})_"));
+            let _ = write!(out, "_(continue with startLine={n})_");
         }
         return Ok(out);
     }
@@ -165,7 +154,7 @@ mod tests {
         json!({"type":"user","message":{"role":"user","content":t}}).to_string()
     }
 
-    fn assistant_tool(name: &str, input: serde_json::Value) -> String {
+    fn assistant_tool(name: &str, input: &serde_json::Value) -> String {
         json!({"type":"assistant","message":{"content":[
             {"type":"text","text":"on it"},
             {"type":"tool_use","name":name,"input":input}]}})
@@ -191,7 +180,7 @@ mod tests {
             "claude-code-projects/p/s.jsonl",
             &[
                 user("hello there"),
-                assistant_tool("Bash", json!({"command":"ls"})),
+                assistant_tool("Bash", &json!({"command":"ls"})),
                 tool_result("file-a\nfile-b"),
                 json!({"type":"summary"}).to_string(),
             ],
@@ -360,7 +349,7 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root,
         }];
-        crate::sync::run_sync_with_roots(&paths, None, &roots).unwrap();
+        crate::sync::run_sync_with_roots(&paths, &roots).unwrap();
         (t, paths)
     }
 

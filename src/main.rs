@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use daemon::{DaemonOpts, DEFAULT_IDLE_SECS};
+use daemon::{DEFAULT_IDLE_SECS, DaemonOpts};
 use paths::Paths;
 
 mod archive;
@@ -9,6 +9,7 @@ mod db;
 mod doctor;
 mod embed;
 mod host;
+mod locks;
 mod log;
 mod mcp;
 mod parse;
@@ -33,6 +34,9 @@ struct Hidden {
     idle_secs: u64,
     #[arg(long, hide = true)]
     fake_embedder: bool,
+    /// With `--fake-embedder`: sleep this long per embedding batch, to simulate a slow model.
+    #[arg(long, hide = true, default_value_t = 0)]
+    fake_embed_delay_ms: u64,
 }
 
 impl Hidden {
@@ -40,14 +44,24 @@ impl Hidden {
         DaemonOpts {
             idle_secs: self.idle_secs,
             fake_embedder: self.fake_embedder,
+            fake_embed_delay_ms: self.fake_embed_delay_ms,
         }
     }
+}
+
+#[derive(Args)]
+struct SyncArgs {
+    #[command(flatten)]
+    hidden: Hidden,
+    /// Test-only: return after the daemon finishes the sync this call triggered.
+    #[arg(long, hide = true)]
+    wait: bool,
 }
 
 #[derive(Subcommand)]
 enum Command {
     /// Sync transcripts into the memory index
-    Sync(Hidden),
+    Sync(SyncArgs),
     /// Run the MCP server
     Mcp(Hidden),
     /// Run the background daemon
@@ -60,7 +74,14 @@ fn main() {
     let cli = Cli::parse();
     let paths = Paths::from_env();
     match cli.command {
-        Command::Sync(h) => client::run_sync_hook(&paths, &h.opts()),
+        Command::Sync(a) if a.wait => {
+            if let Err(e) = client::run_sync_wait(&paths, &a.hidden.opts()) {
+                log::log_line(&paths, &format!("sync --wait: {e:#}"));
+                eprintln!("episodic-memory: {e:#}");
+                std::process::exit(1);
+            }
+        }
+        Command::Sync(a) => client::run_sync_hook(&paths, &a.hidden.opts()),
         Command::Mcp(h) => {
             if let Err(e) = client::run_mcp(&paths, &h.opts()) {
                 log::log_line(&paths, &format!("mcp: {e:#}"));
@@ -78,7 +99,7 @@ fn main() {
             }
         }
         Command::Daemon(h) => {
-            if let Err(e) = daemon::run(paths.clone(), h.opts()) {
+            if let Err(e) = daemon::run(&paths, h.opts()) {
                 log::log_line(&paths, &format!("daemon: {e:#}"));
                 std::process::exit(1);
             }

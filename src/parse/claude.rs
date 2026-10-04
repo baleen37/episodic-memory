@@ -1,8 +1,8 @@
+#[cfg(test)]
+use super::ParseOutput;
 use super::{
-    parse_exchanges, read_file_lines, render_result, render_text, render_tool, value_text,
-    FileMeta, ParseOutput, ParsedExchange,
+    FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
 };
-use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
 
@@ -23,10 +23,10 @@ impl Exclusions {
         if v["isMeta"].as_bool() == Some(true) || v["isCompactSummary"].as_bool() == Some(true) {
             return true;
         }
-        if let Some(kind) = v["origin"]["kind"].as_str() {
-            if kind != "human" {
-                return true;
-            }
+        if let Some(kind) = v["origin"]["kind"].as_str()
+            && kind != "human"
+        {
+            return true;
         }
         let t = text.trim_start();
         Self::TEXT_PREFIXES.iter().any(|p| t.starts_with(p))
@@ -52,43 +52,46 @@ fn start_text(v: &Value) -> Option<String> {
     }
 }
 
-pub fn read_meta(archive: &Path, rel_path: &str) -> Result<FileMeta> {
-    let mut meta = FileMeta {
-        is_sidechain: Path::new(rel_path)
-            .components()
-            .any(|c| c.as_os_str() == "subagents"),
-        ..FileMeta::default()
-    };
-    let mut sidechain_seen = false;
-    for line in read_file_lines(archive)? {
-        let (_, v) = line?;
-        let Some(v) = v else { continue };
+/// Provider adapter for Claude Code transcripts.
+pub(crate) struct ClaudeCode;
+
+impl Provider for ClaudeCode {
+    fn initial_meta(&self, archive_path: &str) -> FileMeta {
+        FileMeta {
+            is_sidechain: Path::new(archive_path)
+                .components()
+                .any(|c| c.as_os_str() == "subagents"),
+            ..FileMeta::default()
+        }
+    }
+
+    fn observe_meta(&self, meta: &mut FileMeta, v: &Value) -> bool {
         if meta.session_id.is_none() {
             meta.session_id = v["sessionId"].as_str().map(String::from);
         }
         if meta.cwd.is_none() {
             meta.cwd = v["cwd"].as_str().map(String::from);
         }
-        if !sidechain_seen {
-            if let Some(b) = v["isSidechain"].as_bool() {
-                sidechain_seen = true;
-                meta.is_sidechain |= b;
-            }
+        if !meta.sidechain_known
+            && let Some(b) = v["isSidechain"].as_bool()
+        {
+            meta.sidechain_known = true;
+            meta.is_sidechain |= b;
         }
-        if meta.session_id.is_some() && meta.cwd.is_some() && sidechain_seen {
-            break;
-        }
+        meta.session_id.is_some() && meta.cwd.is_some() && meta.sidechain_known
     }
-    Ok(meta)
-}
 
-pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<ParseOutput> {
-    parse_exchanges(
-        archive,
-        from_line,
-        |v| start_text(v).filter(|t| !Exclusions::excludes(v, t)),
-        add_answer_and_tools,
-    )
+    fn start_message(&self, v: &Value, _meta: &FileMeta) -> Option<String> {
+        start_text(v).filter(|t| !Exclusions::excludes(v, t))
+    }
+
+    fn fold_line(&self, exchange: &mut ParsedExchange, v: &Value) {
+        add_answer_and_tools(exchange, v);
+    }
+
+    fn render_line(&self, v: &Value) -> Vec<String> {
+        render_line(v)
+    }
 }
 
 fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
@@ -109,10 +112,10 @@ fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
                 if let Some(name) = b["name"].as_str() {
                     c.push_tool(name);
                     // A subagent's final report arrives as this tool's input, not as text.
-                    if name == "SubagentHandback" {
-                        if let Some(t) = b["input"]["message"].as_str() {
-                            c.push_answer(t);
-                        }
+                    if name == "SubagentHandback"
+                        && let Some(t) = b["input"]["message"].as_str()
+                    {
+                        c.push_answer(t);
                     }
                 }
             }
@@ -132,7 +135,7 @@ fn result_text(content: &Value) -> String {
     }
 }
 
-pub fn render_line(v: &Value) -> Vec<String> {
+fn render_line(v: &Value) -> Vec<String> {
     let role = match v["type"].as_str() {
         Some("user") => "User",
         Some("assistant") => "Assistant",
@@ -183,7 +186,16 @@ mod tests {
     fn parse(path: &str, from: i64) -> ParseOutput {
         let p = Path::new(path);
         let meta = crate::parse::read_meta(K, p, "proj/s.jsonl").unwrap();
-        crate::parse::parse_from(K, p, from, &meta).unwrap()
+        crate::parse::parse_from(
+            K,
+            p,
+            crate::parse::ReparsePoint {
+                line: from,
+                byte: None,
+            },
+            &meta,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -201,7 +213,7 @@ mod tests {
         assert_eq!(e[1].tool_names, vec!["Bash", "Read"]);
         assert_eq!(e[1].assistant_message, "Let me look.\n\nSecond part.");
         assert_eq!(e[2].assistant_message, "A3 welcome.");
-        assert_eq!(e[0].ts, 1767323045000);
+        assert_eq!(e[0].ts, 1_767_323_045_000);
     }
 
     #[test]

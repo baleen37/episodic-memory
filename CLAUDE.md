@@ -21,6 +21,7 @@ cargo build --release            # release binary at target/release/episodic-mem
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no network)
+scripts/bench.sh                 # benchmark on synthetic data in a temp dir (needs the release binary)
 ```
 
 ## Key Files
@@ -34,18 +35,19 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `src/parse/{mod,claude,codex}.rs` | Transcript parsers: exchange boundaries, exclusion rules, tools, DO NOT INDEX |
 | `src/project.rs` | project name = git common-dir parent directory name |
 | `src/terms.rs` | FTS terms and query building (Hangul bigrams, quoting) |
-| `src/sync.rs` | Sync orchestration per file, then embedding pass |
+| `src/sync.rs` | Sync orchestration per file (indexing only; no embedding) |
 | `src/embed.rs` | fastembed multilingual-e5-small (384-dim), passage/query prefixes |
 | `src/search.rs` | BM25 + KNN (cosine floor `MIN_VECTOR_SIMILARITY`), weighted RRF (K=60, 0.4/0.6), absolute 0-1 scores, array AND query |
 | `src/read.rs` | Archive line reader (markdown render, 4KB per item, 60KB cap, continue marker) |
 | `src/mcp.rs` | MCP JSON-RPC tools `search` and `read` |
 | `src/host.rs` | Session id of the Claude Code / Codex process behind an MCP connection (search excludes it) |
-| `src/daemon.rs` | Singleton daemon: unix socket, model, sync jobs, idle exit |
+| `src/daemon.rs` | Singleton daemon: unix socket, model, sync jobs, embedding worker, idle exit |
 | `src/client.rs` | `sync` hook client and `mcp` stdio-to-socket bridge; starts daemon if absent |
 | `src/doctor.rs` | `doctor`: read-only health checks (daemon via `{"client":"status"}`, DB opened read-only), `[ok]/[warn]/[fail]` lines, exit 1 on fail |
 | `src/log.rs` | Logging to `<data>/logs/` |
 | `bin/episodic-memory` | Bash wrapper: finds or downloads the versioned binary, then execs it |
 | `scripts/sync-versions.sh` | Writes the release version into Cargo.toml, Cargo.lock, both plugin.json |
+| `scripts/bench.sh` | Benchmark on synthetic transcripts (first/no-op/incremental sync, search); baseline in `scripts/bench-baseline.txt` |
 | `hooks/hooks.json` | SessionStart (`startup\|resume\|clear\|compact`) runs `episodic-memory sync` |
 | `.github/workflows/release.yml` | semantic-release, then per-target build and asset upload, then marketplace notify |
 
@@ -57,7 +59,9 @@ MCP client        -> bin/episodic-memory mcp  -> unix socket -> daemon (search, 
 daemon sync job   -> discover *.jsonl under source roots (stat size only)
                   -> append new bytes to conversation-archive/<source_kind>/<rel path>
                   -> parse archive from reparse_line into exchanges (FTS terms inline)
-                  -> embed pending exchanges (8 per batch) into vec_exchanges
+                  -> release sync.lock, wake the embedding worker (mpsc, wake-ups collapse)
+embedding worker  -> embed pending exchanges (8 per batch) into vec_exchanges,
+                     vectors outside transactions, one short write transaction per batch
 ```
 
 - The archive is the source of truth; `read` renders archive text, never the host transcript.
@@ -66,6 +70,7 @@ daemon sync job   -> discover *.jsonl under source roots (stat size only)
 - A rewritten source starts a new archive generation (`<name>.gen-N.jsonl`); the old file is kept.
 - One daemon per version (`daemon-{VER}.sock/.lock`); one sync at a time (`sync.lock`).
 - Before the model is ready, search is BM25-only and says so.
+- `sync --wait` returns once indexing is done (keyword-searchable); embedding may still be running.
 
 ## Pitfalls
 
@@ -74,6 +79,8 @@ daemon sync job   -> discover *.jsonl under source roots (stat size only)
 - `delete_exchanges_from` in `src/db.rs` is the only way to delete exchanges. It clears `fts_exchanges` and `vec_exchanges` first because virtual tables have no FKs.
 - Env vars are limited to three: `EPISODIC_MEMORY_DIR` (data dir, tests), `EPISODIC_MEMORY_DISABLE=1` (sync no-op), `EPISODIC_MEMORY_BIN` (wrapper override). Do not add more.
 - Tests must not mutate process env; pass values as parameters.
-- `sync` always exits 0; errors go to `logs/`.
+- `sync` always exits 0; errors go to `logs/`. Exception: the hidden test-only `sync --wait` exits 1 on failure.
+- Hidden test-only flags (`hide = true` in `src/main.rs`): `--wait` (sync only), and `--idle-secs`, `--fake-embedder`, `--fake-embed-delay-ms` (on `sync`, `mcp`, `daemon`; `sync` and `mcp` forward them to a daemon they spawn).
+- While an older-version daemon is still alive, it and the new one each reindex everything when they see the other's `index_version`; this ping-pong is transient and stops once the old daemon exits (idle exit).
 - Do not touch `~/.config/episodic-memory` from tests; use `EPISODIC_MEMORY_DIR` with a temp dir.
 - The wrapper reads the version from `.claude-plugin/plugin.json`; release bumps it via `scripts/sync-versions.sh`.

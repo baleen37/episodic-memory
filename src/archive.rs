@@ -19,7 +19,15 @@ pub fn archive_path_for(paths: &Paths, kind: SourceKind, rel: &Path, generation:
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let stem = name.strip_suffix(".jsonl").unwrap_or(&name);
-    base.with_file_name(format!("{stem}.gen-{generation}.jsonl"))
+    base.with_file_name(format!("{stem}{GEN_INFIX}{generation}.jsonl"))
+}
+
+const GEN_INFIX: &str = ".gen-";
+
+/// `<stem>` of a generation file name `<stem>.gen-<N>.jsonl` (N all digits); None otherwise.
+pub fn generation_stem(name: &str) -> Option<&str> {
+    let (stem, n) = name.strip_suffix(".jsonl")?.rsplit_once(GEN_INFIX)?;
+    (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).then_some(stem)
 }
 
 /// Position just after the last '\n' in `f[from..len)`, or `from` if there is none.
@@ -108,6 +116,14 @@ mod tests {
             archive_path_for(&p, SourceKind::ClaudeCodeProjects, rel, 2),
             PathBuf::from("/d/conversation-archive/claude-code-projects/proj/abc.gen-2.jsonl")
         );
+    }
+
+    #[test]
+    fn generation_stem_needs_numeric_suffix() {
+        assert_eq!(generation_stem("s.gen-12.jsonl"), Some("s"));
+        assert_eq!(generation_stem("s.gen-x.jsonl"), None);
+        assert_eq!(generation_stem("s.gen-.jsonl"), None);
+        assert_eq!(generation_stem("s.jsonl"), None);
     }
 
     #[test]

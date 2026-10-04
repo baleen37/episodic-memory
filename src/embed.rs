@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
+use crate::parse::truncate_chars;
+use anyhow::{Result, bail};
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -33,10 +34,7 @@ impl E5Embedder {
     }
 
     fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        let mut m = self
-            .model
-            .lock()
-            .map_err(|_| anyhow::anyhow!("embedding model lock poisoned"))?;
+        let mut m = crate::locks::lock(&self.model);
         Ok(m.embed(texts, Some(BATCH))?)
     }
 }
@@ -58,10 +56,10 @@ impl Embedder for E5Embedder {
 pub struct FakeEmbedder;
 
 fn fnv1a(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
 }
@@ -78,7 +76,9 @@ impl FakeEmbedder {
         }
         let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
-            v.iter_mut().for_each(|x| *x /= norm);
+            for x in &mut v {
+                *x /= norm;
+            }
         }
         v
     }
@@ -94,34 +94,35 @@ impl Embedder for FakeEmbedder {
     }
 }
 
-struct Pending {
-    id: i64,
-    project: String,
-    ts: i64,
-    is_sidechain: i64,
-    text: String,
+/// `FakeEmbedder` that sleeps for the given time per passage batch (daemon tests only).
+pub struct SlowFakeEmbedder(pub std::time::Duration);
+
+impl Embedder for SlowFakeEmbedder {
+    fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        std::thread::sleep(self.0);
+        FakeEmbedder.embed_passages(texts)
+    }
+
+    fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+        FakeEmbedder.embed_query(q)
+    }
 }
 
-fn truncate_chars(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((i, _)) => &s[..i],
-        None => s,
-    }
+struct Pending {
+    id: i64,
+    text: String,
 }
 
 fn next_batch(conn: &Connection) -> Result<Vec<Pending>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project, ts, is_sidechain, user_message, assistant_message, tool_names
+        "SELECT id, user_message, assistant_message, tool_names
          FROM exchanges WHERE embedded = 0 ORDER BY id LIMIT ?",
     )?;
     let rows = stmt.query_map([BATCH as i64], |r| {
-        let (u, a, t): (String, String, String) = (r.get(4)?, r.get(5)?, r.get(6)?);
+        let (u, a, t): (String, String, String) = (r.get(1)?, r.get(2)?, r.get(3)?);
         let doc = format!("User: {u}\n\nAssistant: {a}\n\nTools: {t}");
         Ok(Pending {
             id: r.get(0)?,
-            project: r.get(1)?,
-            ts: r.get(2)?,
-            is_sidechain: r.get(3)?,
             text: truncate_chars(&doc, DOC_MAX_CHARS).to_string(),
         })
     })?;
@@ -133,7 +134,29 @@ pub fn to_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
+/// Meta key holding the embedding worker's last failure; a successful batch clears it.
+/// Separate from sync's `last_error`, which every sync run overwrites.
+pub const LAST_EMBED_ERROR: &str = "last_embed_error";
+
+/// Records an embedding failure for `doctor`. Best effort: a DB that cannot take the write
+/// already fails louder elsewhere.
+pub fn record_embed_error(conn: &Connection, error: &str) {
+    let _ = crate::db::meta_set(conn, LAST_EMBED_ERROR, error);
+}
+
+fn embed_batch(e: &dyn Embedder, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    let vectors = e.embed_passages(texts)?;
+    if vectors.len() != texts.len() || vectors.iter().any(|v| v.len() != DIMS) {
+        bail!("embedder returned unexpected vector count or dimension");
+    }
+    Ok(vectors)
+}
+
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
+/// Vectors are computed outside any transaction; each batch is written in one short immediate
+/// transaction. A row deleted or embedded by someone else in between is skipped. The vector's
+/// `project`/`ts`/`is_sidechain` are copied from `exchanges` inside that transaction, so a meta
+/// backfill committed while the batch was being embedded is not lost.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
     loop {
@@ -142,31 +165,39 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
             return Ok(total);
         }
         let texts: Vec<String> = batch.iter().map(|p| p.text.clone()).collect();
-        let vectors = e.embed_passages(&texts)?;
-        if vectors.len() != batch.len() || vectors.iter().any(|v| v.len() != DIMS) {
-            bail!("embedder returned unexpected vector count or dimension");
-        }
+        let vectors = match embed_batch(e, &texts) {
+            Ok(v) => v,
+            Err(err) => {
+                record_embed_error(conn, &format!("{err:#}"));
+                return Err(err);
+            }
+        };
         let tx = conn.transaction()?;
         {
+            tx.prepare_cached("DELETE FROM meta WHERE key = ?")?
+                .execute([LAST_EMBED_ERROR])?;
+            let mut mark = tx.prepare_cached(
+                "UPDATE exchanges SET embedded = 1 WHERE id = ? AND embedded = 0",
+            )?;
             let mut insert = tx.prepare_cached(
                 "INSERT INTO vec_exchanges(rowid, embedding, project, ts, is_sidechain)
-                 VALUES (?, ?, ?, ?, ?)",
+                 SELECT id, ?2, project, ts, is_sidechain FROM exchanges WHERE id = ?1",
             )?;
-            let mut mark = tx.prepare_cached("UPDATE exchanges SET embedded = 1 WHERE id = ?")?;
             for (p, v) in batch.iter().zip(&vectors) {
-                insert.execute(params![p.id, to_blob(v), p.project, p.ts, p.is_sidechain])?;
-                mark.execute([p.id])?;
+                if mark.execute([p.id])? == 1 {
+                    insert.execute(params![p.id, to_blob(v)])?;
+                    total += 1;
+                }
             }
         }
         tx.commit()?;
-        total += batch.len();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{insert_exchange, NewExchange};
+    use crate::db::{NewExchange, insert_exchange};
 
     fn dot(a: &[f32], b: &[f32]) -> f32 {
         a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -242,6 +273,68 @@ mod tests {
         assert_eq!(embed_pending(&mut conn, &FakeEmbedder).unwrap(), 0);
     }
 
+    /// Deletes exchange 1 (as a concurrent sync reindex would) while the batch is embedded.
+    struct DeletesFirst(std::path::PathBuf);
+
+    impl Embedder for DeletesFirst {
+        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            let mut c = crate::db::open(&self.0).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::db::delete_exchanges_from(&tx, "/a", 1).unwrap();
+            tx.commit().unwrap();
+            FakeEmbedder.embed_passages(texts)
+        }
+        fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+            FakeEmbedder.embed_query(q)
+        }
+    }
+
+    #[test]
+    fn exchange_deleted_during_embedding_gets_no_vector() {
+        let t = tempfile::tempdir().unwrap();
+        let db = t.path().join("e.db");
+        let mut conn = crate::db::open(&db).unwrap();
+        add(&mut conn, 1, "q");
+        assert_eq!(embed_pending(&mut conn, &DeletesFirst(db)).unwrap(), 0);
+        let vecs: i64 = conn
+            .query_row("SELECT count(*) FROM vec_exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(vecs, 0);
+    }
+
+    /// Commits a late meta backfill (as a concurrent sync would) after the batch was read.
+    struct BackfillsMeta(std::path::PathBuf);
+
+    impl Embedder for BackfillsMeta {
+        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            let mut c = crate::db::open(&self.0).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::db::update_exchange_meta(&tx, "/a", Some("s"), "demo", true).unwrap();
+            tx.commit().unwrap();
+            FakeEmbedder.embed_passages(texts)
+        }
+        fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+            FakeEmbedder.embed_query(q)
+        }
+    }
+
+    #[test]
+    fn meta_backfilled_during_embedding_reaches_the_vector() {
+        let t = tempfile::tempdir().unwrap();
+        let db = t.path().join("e.db");
+        let mut conn = crate::db::open(&db).unwrap();
+        add(&mut conn, 1, "q");
+        assert_eq!(embed_pending(&mut conn, &BackfillsMeta(db)).unwrap(), 1);
+        let (p, side): (String, i64) = conn
+            .query_row(
+                "SELECT project, is_sidechain FROM vec_exchanges WHERE rowid = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((p.as_str(), side), ("demo", 1));
+    }
+
     #[test]
     fn doc_text_is_truncated_to_2000_chars() {
         let t = tempfile::tempdir().unwrap();
@@ -253,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // requires model download (~470MB)
+    #[ignore = "requires model download (~470MB)"]
     fn e5_embedder_loads_and_embeds_384() {
         let cache =
             std::env::var("FASTEMBED_CACHE_DIR").unwrap_or_else(|_| "/tmp/fastembed-cache".into());

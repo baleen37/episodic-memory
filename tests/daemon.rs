@@ -1,12 +1,12 @@
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -183,7 +183,7 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn send(&mut self, method: &str, params: Value) -> i64 {
+    fn send(&mut self, method: &str, params: &Value) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         let msg = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
@@ -194,7 +194,7 @@ impl Mcp {
     fn send_initialize(&mut self) -> i64 {
         self.send(
             "initialize",
-            json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
+            &json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}),
         )
     }
 
@@ -203,7 +203,7 @@ impl Mcp {
         assert_eq!(init["result"]["serverInfo"]["name"], "episodic-memory");
     }
 
-    fn request(&mut self, method: &str, params: Value) -> Value {
+    fn request(&mut self, method: &str, params: &Value) -> Value {
         let id = self.send(method, params);
         self.recv(id)
     }
@@ -221,7 +221,7 @@ impl Mcp {
     fn search(&mut self, query: &str) -> (bool, String) {
         let r = self.request(
             "tools/call",
-            json!({"name":"search","arguments":{"query":query}}),
+            &json!({"name":"search","arguments":{"query":query}}),
         );
         let text = r["result"]["content"][0]["text"]
             .as_str()
@@ -270,14 +270,14 @@ fn three_mcp_clients_one_daemon() {
     let env = Env::new();
     // All three race to find (or spawn) the daemon before any of them talks to it.
     let mut clients: Vec<Mcp> = (0..3).map(|_| env.spawn_mcp()).collect();
-    let ids: Vec<i64> = clients.iter_mut().map(|m| m.send_initialize()).collect();
+    let ids: Vec<i64> = clients.iter_mut().map(Mcp::send_initialize).collect();
     for (m, id) in clients.iter_mut().zip(ids) {
         m.check_initialize(id);
     }
     let handles: Vec<_> = clients
         .into_iter()
         .map(|mut m| {
-            let r = m.request("tools/list", json!({}));
+            let r = m.request("tools/list", &json!({}));
             let names: Vec<String> = r["result"]["tools"]
                 .as_array()
                 .unwrap()
@@ -306,6 +306,29 @@ fn sync_hook_triggers_indexing() {
         text.contains("main.jsonl:")
     });
     assert!(found, "search never returned the synced exchange");
+}
+
+#[test]
+fn sync_wait_returns_after_the_triggered_sync_commits() {
+    let env = Env::new();
+    // No daemon yet: --wait spawns it and still waits for the indexed state.
+    let st = env.fast("sync").arg("--wait").status().unwrap();
+    assert!(st.success());
+    let mut m = env.mcp();
+    let (err, text) = m.search("list files");
+    assert!(!err && text.contains("main.jsonl:"), "{text}");
+
+    // Daemon running: a transcript written now is searchable as soon as --wait returns.
+    std::fs::write(
+        env.root.join("c/projects/demo/fresh.jsonl"),
+        "{\"type\":\"user\",\"sessionId\":\"fresh\",\"cwd\":\"/work/demo\",\"timestamp\":\"2026-01-04T00:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"how do I calibrate the zeppelin\"}}\n\
+         {\"type\":\"assistant\",\"sessionId\":\"fresh\",\"timestamp\":\"2026-01-04T00:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"zeppelin calibrated\"}]}}\n",
+    )
+    .unwrap();
+    let st = env.fast("sync").arg("--wait").status().unwrap();
+    assert!(st.success());
+    let (err, text) = m.search("zeppelin");
+    assert!(!err && text.contains("fresh.jsonl:"), "{text}");
 }
 
 #[test]
@@ -375,15 +398,18 @@ fn idle_exit() {
 }
 
 #[test]
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn search_during_sync_sees_committed_state() {
+    use std::fmt::Write as _;
     let env = Env::new();
     // A large synthetic transcript so the first sync takes a while.
     let mut big = String::new();
     for i in 0..3000 {
-        big.push_str(&format!(
+        let _ = write!(
+            big,
             "{{\"type\":\"user\",\"sessionId\":\"big\",\"cwd\":\"/work/big\",\"timestamp\":\"2026-01-03T00:00:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"bulk question {i} about widgets\"}}}}\n\
              {{\"type\":\"assistant\",\"sessionId\":\"big\",\"timestamp\":\"2026-01-03T00:00:01.000Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"bulk answer {i} widgets ok\"}}]}}}}\n"
-        ));
+        );
     }
     std::fs::write(env.root.join("c/projects/demo/big.jsonl"), big).unwrap();
 
@@ -401,10 +427,10 @@ fn search_during_sync_sees_committed_state() {
             let Some((s, e)) = range.split_once('-') else {
                 continue;
             };
-            if let (Ok(s), Ok(e)) = (s.parse(), e.parse()) {
-                if path.ends_with(".jsonl") {
-                    seen.push((path.to_string(), s, e));
-                }
+            if let (Ok(s), Ok(e)) = (s.parse(), e.parse())
+                && path.ends_with(".jsonl")
+            {
+                seen.push((path.to_string(), s, e));
             }
         }
         rounds += 1;
@@ -539,7 +565,7 @@ fn doctor_after_sync_reports_running_daemon() {
     assert!(d.line("model").starts_with("[ok]"));
     let db = d.line("db");
     assert!(
-        db.starts_with("[ok]") && db.contains("user_version 1"),
+        db.starts_with("[ok]") && db.contains("user_version 4"),
         "{db}"
     );
     let n: i64 = db
@@ -579,5 +605,142 @@ fn doctor_warns_on_last_error() {
         l.starts_with("[warn]") && l.contains("synthetic failure"),
         "{}",
         d.out
+    );
+}
+
+#[test]
+fn symlink_to_ancestor_does_not_loop_discovery() {
+    let env = Env::new();
+    let projects = env.root.join("c/projects");
+    let demo = projects.join("demo");
+    // One link back to the source root and one to its own directory: following either without
+    // loop detection revisits the transcripts, and two links make the walk exponential.
+    std::os::unix::fs::symlink(&projects, demo.join("up")).unwrap();
+    std::os::unix::fs::symlink(&demo, demo.join("self")).unwrap();
+    env.run_sync_hook();
+    assert!(
+        wait_until(Duration::from_secs(15), || env.sync_count() >= 1),
+        "sync never finished"
+    );
+    let c = Connection::open_with_flags(
+        env.data.join("episodic.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    c.busy_timeout(Duration::from_secs(5)).unwrap();
+    let mut stmt = c
+        .prepare(
+            "SELECT source_path FROM files WHERE source_kind = 'claude-code-projects' \
+             ORDER BY source_path",
+        )
+        .unwrap();
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let expected: Vec<String> = ["main.jsonl", "noise.jsonl", "subagent.jsonl"]
+        .iter()
+        .map(|n| demo.join(n).to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(paths, expected);
+}
+
+#[test]
+fn connection_without_hello_is_closed() {
+    let env = Env::new();
+    // A long idle timeout so an idle exit cannot be mistaken for the hello timeout.
+    let mut d = env
+        .cmd(&["daemon", "--fake-embedder", "--idle-secs", "60"])
+        .spawn()
+        .unwrap();
+    assert!(wait_until(Duration::from_secs(5), || UnixStream::connect(
+        env.socket()
+    )
+    .is_ok()));
+    let mut s = UnixStream::connect(env.socket()).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+    let start = Instant::now();
+    let mut buf = [0u8; 1];
+    let n = std::io::Read::read(&mut s, &mut buf).expect("daemon never closed the connection");
+    let waited = start.elapsed();
+    assert_eq!(n, 0);
+    assert!(
+        (Duration::from_secs(4)..Duration::from_secs(10)).contains(&waited),
+        "closed after {waited:?}"
+    );
+    assert!(d.try_wait().unwrap().is_none(), "daemon exited");
+    let _ = d.kill();
+    let _ = d.wait();
+}
+
+#[test]
+fn mcp_client_idle_past_hello_timeout_still_served() {
+    let env = Env::new();
+    let mut m = env.mcp();
+    thread::sleep(Duration::from_secs(7));
+    let r = m.request("tools/list", &json!({}));
+    assert_eq!(r["result"]["tools"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn keyword_search_does_not_wait_for_embedding_backlog() {
+    use std::fmt::Write as _;
+    let env = Env::new();
+    // 2,000 exchanges at 25ms per batch of 8: about 6 seconds of embedding backlog.
+    let mut big = String::new();
+    for i in 0..2000 {
+        let _ = write!(
+            big,
+            "{{\"type\":\"user\",\"sessionId\":\"big\",\"cwd\":\"/work/big\",\"timestamp\":\"2026-01-03T00:00:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"backlog question {i}\"}}}}\n\
+             {{\"type\":\"assistant\",\"sessionId\":\"big\",\"timestamp\":\"2026-01-03T00:00:01.000Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"backlog answer {i}\"}}]}}}}\n"
+        );
+    }
+    std::fs::write(env.root.join("c/projects/demo/big.jsonl"), big).unwrap();
+    let slow_sync_wait = || {
+        let t = Instant::now();
+        let st = env
+            .fast("sync")
+            .args(["--fake-embed-delay-ms", "25", "--wait"])
+            .status()
+            .unwrap();
+        assert!(st.success());
+        t.elapsed()
+    };
+    let pending = || -> i64 {
+        let c = Connection::open_with_flags(
+            env.data.join("episodic.db"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        c.busy_timeout(Duration::from_secs(5)).unwrap();
+        c.query_row(
+            "SELECT count(*) FROM exchanges WHERE embedded = 0",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+
+    // `sync --wait` means indexed, not embedded: it returns with the backlog still pending.
+    slow_sync_wait();
+    assert!(pending() > 1000, "sync waited for the embedding backlog");
+
+    std::fs::write(
+        env.root.join("c/projects/demo/fresh.jsonl"),
+        "{\"type\":\"user\",\"sessionId\":\"fresh\",\"cwd\":\"/work/demo\",\"timestamp\":\"2026-01-04T00:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"how do I calibrate the zeppelin\"}}\n\
+         {\"type\":\"assistant\",\"sessionId\":\"fresh\",\"timestamp\":\"2026-01-04T00:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"zeppelin calibrated\"}]}}\n",
+    )
+    .unwrap();
+    let took = slow_sync_wait();
+    assert!(took < Duration::from_secs(3), "sync --wait took {took:?}");
+    assert!(pending() > 0, "backlog drained before the check");
+    let mut m = env.mcp();
+    let (err, text) = m.search("zeppelin");
+    assert!(!err && text.contains("fresh.jsonl:"), "{text}");
+
+    assert!(
+        wait_until(Duration::from_secs(60), || pending() == 0),
+        "embedding backlog never drained"
     );
 }

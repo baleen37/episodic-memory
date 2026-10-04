@@ -1,4 +1,4 @@
-use rusqlite::{ffi::sqlite3_auto_extension, params, Connection};
+use rusqlite::{Connection, ffi::sqlite3_auto_extension, params};
 use sqlite_vec::sqlite3_vec_init;
 
 fn vec_bytes(first: f32) -> Vec<u8> {
@@ -51,7 +51,7 @@ fn fts5_contentless_delete_and_vec0_metadata_knn() {
 }
 
 #[test]
-#[ignore] // requires model download (~470MB)
+#[ignore = "requires model download (~470MB)"]
 fn e5_small_embeds_384() {
     use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
     let cache =

@@ -1,18 +1,19 @@
-use crate::archive::{append_tail, archive_path_for, tails_match};
+use crate::archive::{append_tail, archive_path_for, generation_stem, tails_match};
 use crate::db::{
-    delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set, upsert_file, FileRow,
-    NewExchange,
+    FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
+    update_exchange_meta, upsert_file,
 };
-use crate::embed::{embed_pending, Embedder};
 use crate::log::log_line;
-use crate::parse::{parse_from, read_meta, FileMeta};
-use crate::paths::{candidate_roots_from_env, try_lock, Paths, SourceKind, SourceRoot};
-use crate::project::resolve_project;
+use crate::parse::{ReparsePoint, initial_meta, observe_meta_from, parse_from};
+use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
+use crate::project::{ProjectCache, UNKNOWN_PROJECT};
 use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub struct DiscoveredFile {
@@ -32,7 +33,7 @@ pub enum FileOutcome {
 
 /// Bumped when parsing or project resolution changes what an indexed file should contain;
 /// a database indexed under an older version is reindexed once (`reindex_all`).
-const INDEX_VERSION: &str = "2";
+const INDEX_VERSION: &str = "3";
 
 /// Exchanges larger than this (either message, UTF-8 bytes) are not indexed (obra#139).
 const MAX_MESSAGE_BYTES: usize = 262_144;
@@ -45,7 +46,11 @@ struct IndexStats {
 }
 
 /// Spec §5 steps 6–9.
-fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
+fn index_file(
+    tx: &Transaction,
+    row: &mut FileRow,
+    projects: &mut ProjectCache,
+) -> Result<IndexStats> {
     let kind = row.source_kind;
     let mut stats = IndexStats::default();
     if row.skipped {
@@ -53,35 +58,51 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
     }
     let archive = PathBuf::from(&row.archive_path);
 
-    // Session info is read on the first parse of a non-empty archive and persisted. Claude
-    // transcripts often open with lines lacking `cwd` (`mode`, `last-prompt`, ...), so it is
-    // re-read (and the project recomputed) until a `cwd` is known. Codex subagent parsing needs
-    // `agent_path`, which `files` does not store, so Codex re-reads the head on every call;
-    // Claude otherwise reuses the persisted values. The archive path keeps the source's
-    // relative path, so "subagents" detection works on it directly.
-    let read_session = row.offset > 0 && (row.harness.is_none() || row.cwd.is_none());
-    let meta = if read_session || kind == SourceKind::CodexSessions {
-        read_meta(kind, &archive, &row.archive_path)?
-    } else {
-        FileMeta {
-            session_id: row.session_id.clone(),
-            cwd: row.cwd.clone(),
-            is_sidechain: row.is_sidechain.unwrap_or(false),
-            agent_path: None,
-            user_signal: row.user_signal.clone(),
-        }
-    };
-    if read_session {
-        row.session_id = meta.session_id.clone();
-        row.cwd = meta.cwd.clone();
-        row.is_sidechain = Some(meta.is_sidechain);
-        row.user_signal = meta.user_signal.clone();
-        row.harness = Some(kind.harness().to_string());
-        row.project = Some(resolve_project(meta.cwd.as_deref()));
+    // File meta is learned only from the archive bytes appended since it was last observed
+    // (`meta_offset`), until the provider reports it settled. The project follows the `cwd`:
+    // transcripts often open with lines lacking one (`mode`, `last-prompt`, ...).
+    let old_meta = row.meta.clone();
+    if row.meta_offset == 0 {
+        row.meta = initial_meta(kind, &row.archive_path);
+        row.meta_settled = false;
     }
+    if !row.meta_settled && row.meta_offset < row.offset {
+        row.meta_settled =
+            observe_meta_from(kind, &archive, row.meta_offset as u64, &mut row.meta)?;
+    }
+    row.meta_offset = row.offset;
+    // ADR 0001: meta that decides exchange boundaries changed, so every exchange already
+    // indexed may have the wrong boundaries. Reparse the whole archive.
+    if !row.meta.same_boundaries(&old_meta) {
+        row.reparse = ReparsePoint::START;
+    }
+    let old_project = row.project.clone();
+    if row.harness.is_none() || row.meta.cwd != old_meta.cwd {
+        row.harness = Some(kind.harness().to_string());
+        row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
+    }
+    let project = row
+        .project
+        .clone()
+        .unwrap_or_else(|| UNKNOWN_PROJECT.into());
 
-    delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
-    let out = parse_from(kind, &archive, row.reparse_line, &meta)?;
+    delete_exchanges_from(tx, &row.archive_path, row.reparse.line)?;
+    // Meta that does not decide boundaries may be learned after exchanges were indexed; the
+    // exchanges kept before the reparse point get it too, as a one-shot sync would give them.
+    if row.reparse.line > 1
+        && (row.meta.session_id != old_meta.session_id
+            || row.meta.is_sidechain != old_meta.is_sidechain
+            || row.project != old_project)
+    {
+        update_exchange_meta(
+            tx,
+            &row.archive_path,
+            row.meta.session_id.as_deref(),
+            &project,
+            row.meta.is_sidechain,
+        )?;
+    }
+    let out = parse_from(kind, &archive, row.reparse, &row.meta)?;
     stats.bad_lines = out.bad_lines;
     if out.do_not_index {
         row.skipped = true;
@@ -89,9 +110,11 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
         return Ok(stats);
     }
 
-    let project = row.project.clone().unwrap_or_else(|| "unknown".into());
     if let Some(last) = out.exchanges.last() {
-        row.reparse_line = last.line_start;
+        row.reparse = ReparsePoint {
+            line: last.line_start,
+            byte: Some(last.byte_start),
+        };
     }
     for e in out.exchanges {
         if e.user_message.len() > MAX_MESSAGE_BYTES || e.assistant_message.len() > MAX_MESSAGE_BYTES
@@ -109,10 +132,10 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
             archive_path: row.archive_path.clone(),
             line_start: e.line_start,
             line_end: e.line_end,
-            session_id: row.session_id.clone(),
+            session_id: row.meta.session_id.clone(),
             project: project.clone(),
             harness: kind.harness().to_string(),
-            is_sidechain: row.is_sidechain.unwrap_or(false),
+            is_sidechain: row.meta.is_sidechain,
             ts: e.ts,
             user_message: e.user_message,
             assistant_message: e.assistant_message,
@@ -204,7 +227,9 @@ fn start_new_generation(
     row.generation = generation;
     row.archive_path = path_str(&archive_path_for(paths, f.kind, &f.rel, generation));
     row.offset = 0;
-    row.reparse_line = 1;
+    row.reparse = ReparsePoint::START;
+    row.meta_offset = 0;
+    row.harness = None;
     upsert_file(&tx, row)?;
     tx.commit()?;
     Ok(())
@@ -228,7 +253,12 @@ fn register_new(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Res
 
 /// Spec §5 "파일 하나 처리": mirrors the source's new complete lines into the archive
 /// (append-only, never overwriting), then indexes them in one transaction.
-pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Result<FileOutcome> {
+pub fn sync_file(
+    conn: &mut Connection,
+    paths: &Paths,
+    f: &DiscoveredFile,
+    projects: &mut ProjectCache,
+) -> Result<FileOutcome> {
     let source_key = path_str(&f.source_path);
     let mut row = match get_file(conn, &source_key)? {
         Some(row) if row.offset as u64 == f.size => return Ok(FileOutcome::Unchanged),
@@ -257,8 +287,9 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
     let tx = conn.transaction()?;
     row.offset = new_offset as i64;
     // Nothing new to parse unless the append moved the offset or the first parse is pending.
-    let stats = if row.offset != old_offset || row.harness.is_none() {
-        index_file(&tx, &mut row)?
+    // An archive with no complete line yet does not exist, so there is nothing to parse.
+    let stats = if row.offset != old_offset || (row.harness.is_none() && row.offset > 0) {
+        index_file(&tx, &mut row, projects)?
     } else {
         IndexStats::default()
     };
@@ -284,22 +315,22 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
 
 // ---- Task 9: discovery, archive import, sync orchestration ----
 
-pub(crate) fn is_generation_name(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".jsonl") else {
-        return false;
-    };
-    match stem.rsplit_once(".gen-") {
-        Some((_, digits)) => !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()),
-        None => false,
-    }
-}
-
 /// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
-/// Broken links and unreadable entries are skipped. Returns `(path relative to root, size)`.
+/// Broken links and unreadable entries are skipped, and each directory is entered once (by
+/// device and inode) so a link to an ancestor cannot loop. Returns `(path relative to root, size)`.
+// Hosts write lowercase `.jsonl`; matching stays exact.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut out = Vec::new();
+    let mut visited = HashSet::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        let Ok(meta) = fs::metadata(&dir) else {
+            continue;
+        };
+        if !visited.insert((meta.dev(), meta.ino())) {
+            continue;
+        }
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
@@ -312,10 +343,11 @@ fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
                 stack.push(path);
             } else if meta.is_file() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if name.ends_with(".jsonl") && !is_generation_name(&name) {
-                    if let Ok(rel) = path.strip_prefix(root) {
-                        out.push((rel.to_path_buf(), meta.len()));
-                    }
+                if name.ends_with(".jsonl")
+                    && generation_stem(&name).is_none()
+                    && let Ok(rel) = path.strip_prefix(root)
+                {
+                    out.push((rel.to_path_buf(), meta.len()));
                 }
             }
         }
@@ -345,6 +377,7 @@ pub fn import_archive_with_roots(
     conn: &mut Connection,
     paths: &Paths,
     candidates: &[SourceRoot],
+    projects: &mut ProjectCache,
 ) -> Result<usize> {
     let mut registered = 0;
     let mut failures = 0;
@@ -354,7 +387,7 @@ pub fn import_archive_with_roots(
         };
         let archive_dir = paths.archive_root().join(kind.as_str());
         for (rel, _) in walk_jsonl(&archive_dir) {
-            match import_one(conn, paths, kind, &root.root, &rel) {
+            match import_one(conn, paths, kind, &root.root, &rel, projects) {
                 Ok(true) => registered += 1,
                 Ok(false) => {}
                 Err(e) => {
@@ -376,7 +409,7 @@ pub fn import_archive_with_roots(
 
 /// Rebuilds every indexed file's exchanges and session info (project included) from its
 /// archive. A file that fails is logged and left as it was.
-fn reindex_all(conn: &mut Connection, paths: &Paths) -> Result<()> {
+fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache) -> Result<()> {
     let sources: Vec<String> = conn
         .prepare(r#"SELECT source_path FROM files WHERE "offset" > 0 AND skipped = 0"#)?
         .query_map([], |r| r.get(0))?
@@ -386,10 +419,11 @@ fn reindex_all(conn: &mut Connection, paths: &Paths) -> Result<()> {
             let Some(mut row) = get_file(conn, &source)? else {
                 return Ok(());
             };
-            row.reparse_line = 1;
+            row.reparse = ReparsePoint::START;
+            row.meta_offset = 0;
             row.harness = None;
             let tx = conn.transaction()?;
-            index_file(&tx, &mut row)?;
+            index_file(&tx, &mut row, projects)?;
             upsert_file(&tx, &row)?;
             tx.commit()?;
             Ok(())
@@ -408,6 +442,7 @@ fn import_one(
     kind: SourceKind,
     root: &Path,
     rel: &Path,
+    projects: &mut ProjectCache,
 ) -> Result<bool> {
     let archive0 = path_str(&archive_path_for(paths, kind, rel, 0));
     let source = root.join(rel);
@@ -435,7 +470,7 @@ fn import_one(
     let tx = conn.transaction()?;
     upsert_file(&tx, &row)?;
     if row.offset > 0 {
-        index_file(&tx, &mut row)?;
+        index_file(&tx, &mut row, projects)?;
         upsert_file(&tx, &row)?;
     }
     tx.commit()?;
@@ -448,7 +483,6 @@ pub struct SyncStats {
     pub files_synced: usize,
     pub new_exchanges: usize,
     pub errors: usize,
-    pub embedded: usize,
 }
 
 impl SyncStats {
@@ -460,31 +494,30 @@ impl SyncStats {
     }
 }
 
-pub fn run_sync(paths: &Paths, embedder: Option<&dyn Embedder>) -> Result<SyncStats> {
-    run_sync_with_roots(paths, embedder, &candidate_roots_from_env())
+pub fn run_sync(paths: &Paths) -> Result<SyncStats> {
+    run_sync_with_roots(paths, &candidate_roots_from_env())
 }
 
+/// Indexes new transcript bytes under the sync lock. Embedding is not part of sync: the
+/// daemon's embedding worker picks up `embedded = 0` exchanges afterwards.
 /// `roots` are the candidate roots per kind; missing ones are ignored for discovery.
-pub fn run_sync_with_roots(
-    paths: &Paths,
-    embedder: Option<&dyn Embedder>,
-    roots: &[SourceRoot],
-) -> Result<SyncStats> {
+pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncStats> {
     let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
     };
     let mut conn = crate::db::open(&paths.db())?;
+    let mut projects = ProjectCache::default();
     if meta_get(&conn, "imported").is_none() {
-        import_archive_with_roots(&mut conn, paths, roots)?;
+        import_archive_with_roots(&mut conn, paths, roots, &mut projects)?;
     }
     if meta_get(&conn, "index_version").as_deref() != Some(INDEX_VERSION) {
-        reindex_all(&mut conn, paths)?;
+        reindex_all(&mut conn, paths, &mut projects)?;
     }
 
     let mut stats = SyncStats::default();
     let mut last_error = String::new();
     for f in discover_in(roots) {
-        match sync_file(&mut conn, paths, &f) {
+        match sync_file(&mut conn, paths, &f, &mut projects) {
             Ok(FileOutcome::Synced { new_exchanges }) => {
                 stats.files_synced += 1;
                 stats.new_exchanges += new_exchanges;
@@ -497,17 +530,6 @@ pub fn run_sync_with_roots(
             }
         }
     }
-    if let Some(e) = embedder {
-        match embed_pending(&mut conn, e) {
-            Ok(n) => stats.embedded = n,
-            Err(err) => {
-                stats.errors += 1;
-                last_error = format!("embedding: {err:#}");
-                log_line(paths, &last_error);
-            }
-        }
-    }
-
     meta_set(&conn, "last_sync", &chrono::Utc::now().to_rfc3339())?;
     let count: i64 = meta_get(&conn, "sync_count")
         .and_then(|v| v.parse().ok())
@@ -534,17 +556,21 @@ mod mirror {
     }
 
     fn env() -> Env {
+        env_for(SourceKind::ClaudeCodeProjects, "proj/s1.jsonl")
+    }
+
+    fn env_for(kind: SourceKind, rel: &str) -> Env {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().join("data"));
         fs::create_dir_all(&paths.data).unwrap();
         let conn = crate::db::open(&paths.db()).unwrap();
         let root = t.path().join("src-root");
-        let src = root.join("proj/s1.jsonl");
+        let src = root.join(rel);
         fs::create_dir_all(src.parent().unwrap()).unwrap();
         let f = DiscoveredFile {
-            kind: SourceKind::ClaudeCodeProjects,
+            kind,
             source_path: src.clone(),
-            rel: PathBuf::from("proj/s1.jsonl"),
+            rel: PathBuf::from(rel),
             size: 0,
         };
         Env {
@@ -566,7 +592,13 @@ mod mirror {
         }
         fn sync(&mut self) -> FileOutcome {
             self.f.size = fs::metadata(&self.src).unwrap().len();
-            sync_file(&mut self.conn, &self.paths, &self.f).unwrap()
+            sync_file(
+                &mut self.conn,
+                &self.paths,
+                &self.f,
+                &mut ProjectCache::default(),
+            )
+            .unwrap()
         }
         fn row(&self) -> FileRow {
             get_file(&self.conn, self.src.to_str().unwrap())
@@ -659,7 +691,7 @@ mod mirror {
         assert_eq!(row.generation, 1);
         assert!(row.archive_path.ends_with("proj/s1.gen-1.jsonl"));
         assert_eq!(row.offset as usize, lines(100..102).len());
-        assert_eq!(row.reparse_line, 1);
+        assert_eq!(row.reparse, ReparsePoint::START);
     }
 
     #[test]
@@ -721,7 +753,7 @@ mod mirror {
         row.generation = 1;
         row.archive_path = e.gen_path(1).to_str().unwrap().into();
         row.offset = 0;
-        row.reparse_line = 1;
+        row.reparse = ReparsePoint::START;
         let tx = e.conn.transaction().unwrap();
         upsert_file(&tx, &row).unwrap();
         tx.commit().unwrap();
@@ -818,7 +850,7 @@ mod mirror {
         e.sync();
         fs::remove_file(&e.src).unwrap();
         e.f.size = 999;
-        assert!(sync_file(&mut e.conn, &e.paths, &e.f).is_err());
+        assert!(sync_file(&mut e.conn, &e.paths, &e.f, &mut ProjectCache::default()).is_err());
         assert_eq!(e.archive(0), lines(0..1));
     }
 
@@ -841,7 +873,7 @@ mod mirror {
         )
     }
 
-    fn turn(q: &str, a: &str) -> String {
+    fn exchange_lines(q: &str, a: &str) -> String {
         user(q) + &assistant(a)
     }
 
@@ -866,25 +898,427 @@ mod mirror {
         }
     }
 
+    // ---- Incremental file meta ----
+
+    type Indexed = (
+        i64,
+        i64,
+        Option<String>,
+        String,
+        String,
+        bool,
+        i64,
+        String,
+        String,
+        String,
+    );
+
+    impl Env {
+        /// Every exchange column a search or `read` can observe, in archive order.
+        fn indexed(&self) -> Vec<Indexed> {
+            self.conn
+                .prepare(
+                    "SELECT line_start, line_end, session_id, project, harness, is_sidechain, ts,
+                            user_message, assistant_message, tool_names
+                     FROM exchanges ORDER BY line_start",
+                )
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                    ))
+                })
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        }
+    }
+
+    fn fixture(provider: &str, name: &str) -> String {
+        fs::read_to_string(format!(
+            "{}/tests/fixtures/{provider}/{name}.jsonl",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    }
+
+    /// Syncs `body` once, and again in appends of `chunk` bytes with a sync after each, then
+    /// requires both to index the same exchanges and file meta.
+    fn assert_incremental_matches_one_shot(kind: SourceKind, rel: &str, body: &str, chunk: usize) {
+        let mut once = env_for(kind, rel);
+        once.write(body);
+        once.sync();
+        let mut steps = env_for(kind, rel);
+        steps.write("");
+        for piece in body.as_bytes().chunks(chunk) {
+            steps.append(std::str::from_utf8(piece).unwrap());
+            steps.sync();
+        }
+        assert!(!once.indexed().is_empty(), "{rel}: fixture indexes nothing");
+        assert_eq!(
+            steps.indexed(),
+            once.indexed(),
+            "{rel} in {chunk}-byte appends"
+        );
+        let (a, b) = (steps.row(), once.row());
+        assert_eq!(a.meta, b.meta, "{rel} in {chunk}-byte appends");
+        assert_eq!(a.project, b.project);
+    }
+
+    #[test]
+    fn incremental_sync_matches_one_shot_for_every_fixture() {
+        let cases = [
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "main",
+                "p/main.jsonl",
+            ),
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "noise",
+                "p/noise.jsonl",
+            ),
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "subagent",
+                "p/s/subagents/agent-1.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "modern",
+                "2026/01/02/modern.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "legacy",
+                "2026/01/02/legacy.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "subagent",
+                "2026/01/02/sub.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "fork",
+                "2026/01/02/fork.jsonl",
+            ),
+        ];
+        for (kind, provider, name, rel) in cases {
+            let body = fixture(provider, name);
+            let line_len = body.lines().map(str::len).max().unwrap() + 1;
+            for chunk in [37, line_len, body.len()] {
+                assert_incremental_matches_one_shot(kind, rel, &body, chunk);
+            }
+        }
+    }
+
+    fn codex_line(v: &serde_json::Value) -> String {
+        format!("{v}\n")
+    }
+
+    fn codex_exchange(q: &str, a: &str) -> String {
+        codex_line(
+            &serde_json::json!({"timestamp":"2026-01-02T03:04:05Z","type":"event_msg",
+            "payload":{"type":"user_message","message":q}}),
+        ) + &codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
+                "type":"response_item","payload":{"type":"message","role":"assistant",
+                "content":[{"type":"output_text","text":a}]}}))
+    }
+
+    #[test]
+    fn codex_archive_whose_user_signal_flips_matches_one_shot() {
+        // Two exchanges known only from `user_message` events, then a client that also records
+        // `item_completed`: from then on the archive's user signal is `item_completed`.
+        let item_completed = |q: &str| {
+            codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
+                "type":"event_msg","payload":{"type":"item_completed",
+                "item":{"type":"UserMessage","content":[{"type":"text","text":q}]}}}))
+        };
+        let body = codex_line(&serde_json::json!({"type":"session_meta",
+            "payload":{"id":"x","cwd":"/nonexistent/demo"}}))
+            + &codex_exchange("old one", "first answer")
+            + &codex_exchange("old two", "second answer")
+            + &item_completed("new three")
+            + &codex_exchange("new three", "third answer")
+            + &codex_exchange("old four", "fourth answer");
+        let line_len = body.lines().map(str::len).max().unwrap() + 1;
+        for chunk in [37, line_len] {
+            assert_incremental_matches_one_shot(
+                SourceKind::CodexSessions,
+                "2026/01/02/flip.jsonl",
+                &body,
+                chunk,
+            );
+        }
+    }
+
+    #[test]
+    fn appended_codex_lines_are_observed_without_rereading_the_head() {
+        let mut e = env_for(SourceKind::CodexSessions, "2026/01/02/r.jsonl");
+        // The head holds a line that only differs from an `item_completed` user message in one
+        // byte, followed by more than the 4096 tail bytes compared against the source.
+        let decoy = codex_line(&serde_json::json!({"type":"event_msg","payload":{
+            "type":"xtem_completed","item":{"type":"UserMessage",
+            "content":[{"type":"text","text":"decoy"}]}}}));
+        let head = codex_line(&serde_json::json!({"type":"session_meta",
+            "payload":{"id":"x","cwd":"/nonexistent/demo"}}))
+            + &decoy;
+        let mut body = head.clone();
+        for i in 0..60 {
+            body += &codex_exchange(&format!("q{i}"), "padding answer padding answer");
+        }
+        e.write(&body);
+        e.sync();
+        assert_eq!(
+            e.row().meta.user_signal,
+            Some(crate::parse::UserSignal::UserMessage)
+        );
+        // Turn the decoy into an `item_completed` event in the archive only. A sync that reread
+        // the head would switch the user signal and stop indexing `user_message` exchanges.
+        let archive = e.gen_path(0);
+        let text = fs::read_to_string(&archive).unwrap();
+        fs::write(
+            &archive,
+            text.replacen("xtem_completed", "item_completed", 1),
+        )
+        .unwrap();
+        e.append(&codex_exchange("fresh question", "fresh answer"));
+        e.sync();
+        assert_eq!(
+            e.row().meta.user_signal,
+            Some(crate::parse::UserSignal::UserMessage)
+        );
+        let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
+        assert_eq!(users.len(), 61);
+        assert_eq!(users.last().unwrap(), "fresh question");
+    }
+
+    /// One exchange per provider: a user message, then an answer (two archive lines).
+    fn provider_exchange(kind: SourceKind, q: &str, a: &str) -> String {
+        match kind {
+            SourceKind::CodexSessions => codex_exchange(q, a),
+            _ => exchange_lines(q, a),
+        }
+    }
+
+    const PROVIDERS: [(SourceKind, &str); 2] = [
+        (SourceKind::ClaudeCodeProjects, "p/r.jsonl"),
+        (SourceKind::CodexSessions, "2026/01/02/r.jsonl"),
+    ];
+
+    #[test]
+    fn sync_resumes_at_the_reparse_point_without_rereading_the_head() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            // The long answer keeps the head out of the 4096 tail bytes compared with the source.
+            e.write(
+                &(provider_exchange(kind, "q1 x", "a1")
+                    + &provider_exchange(kind, "q2", &"long answer ".repeat(500))
+                    + &provider_exchange(kind, "q3", "a3")),
+            );
+            e.sync();
+            // Split archive line 1 in two, keeping its byte length. A sync that counted lines
+            // from byte 0 to reach the reparse point would see every later line shifted by one.
+            let archive = e.gen_path(0);
+            let text = fs::read_to_string(&archive).unwrap();
+            fs::write(&archive, text.replacen("q1 x", "q1\nx", 1)).unwrap();
+            e.append(&provider_exchange(kind, "q4", "a4"));
+            e.sync();
+            assert_eq!(e.row().generation, 0);
+            let got: Vec<(i64, String)> = e.exchanges().into_iter().map(|x| (x.1, x.2)).collect();
+            assert_eq!(
+                got[2..],
+                [(5, "q3".to_string()), (7, "q4".to_string())],
+                "{kind:?}"
+            );
+        }
+    }
+
+    /// Indexed exchanges of a fresh sync of `body`, for comparison with an incremental one.
+    fn one_shot(kind: SourceKind, rel: &str, body: &str) -> Vec<Indexed> {
+        let mut once = env_for(kind, rel);
+        once.write(body);
+        once.sync();
+        once.indexed()
+    }
+
+    #[test]
+    fn new_generation_indexes_like_a_fresh_sync() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            e.write(&(provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2")));
+            e.sync();
+            // Rewritten source: shorter, so it starts generation 1 from line 1.
+            let body = provider_exchange(kind, "fresh", "answer");
+            e.write(&body);
+            e.sync();
+            e.append(&provider_exchange(kind, "next", "answer"));
+            e.sync();
+            assert_eq!(e.row().generation, 1);
+            let body = body + &provider_exchange(kind, "next", "answer");
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn crash_repair_truncation_indexes_like_a_fresh_sync() {
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body =
+                provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2");
+            e.write(&body);
+            e.sync();
+            // An append that reached the archive but was never committed.
+            let mut h = OpenOptions::new().append(true).open(e.gen_path(0)).unwrap();
+            h.write_all(provider_exchange(kind, "lost lost", "gone").as_bytes())
+                .unwrap();
+            h.write_all(b"{\"partial").unwrap();
+            let more = provider_exchange(kind, "q3", "a3");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.archive(0), body);
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn reparse_point_without_a_byte_position_is_located_by_line() {
+        // Rows from schema version 2 store only the reparse line.
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body =
+                provider_exchange(kind, "q1", "a1") + &provider_exchange(kind, "q2", "a2");
+            e.write(&body);
+            e.sync();
+            let mut row = e.row();
+            assert!(row.reparse.line > 1);
+            row.reparse.byte = None;
+            let tx = e.conn.transaction().unwrap();
+            upsert_file(&tx, &row).unwrap();
+            tx.commit().unwrap();
+            let more = provider_exchange(kind, "q3", "a3");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+            assert!(e.row().reparse.byte.is_some());
+        }
+    }
+
+    #[test]
+    fn reparse_line_moved_by_an_older_binary_is_located_by_line() {
+        // Binaries before the byte position existed update `reparse_line` only, leaving the
+        // stored byte position pointing at an earlier line.
+        for (kind, rel) in PROVIDERS {
+            let mut e = env_for(kind, rel);
+            let mut body = (1..=3)
+                .map(|i| provider_exchange(kind, &format!("q{i}"), "a"))
+                .collect::<String>();
+            e.write(&body);
+            e.sync();
+            let row = e.row();
+            assert_eq!(row.reparse.line, 5);
+            e.conn
+                .execute(
+                    "UPDATE files SET reparse_line = 7 WHERE source_path = ?",
+                    [&row.source_path],
+                )
+                .unwrap();
+            let more = provider_exchange(kind, "q4", "a");
+            e.append(&more);
+            body += &more;
+            e.sync();
+            assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn file_meta_learned_late_reaches_exchanges_indexed_earlier() {
+        // The first exchanges carry no sessionId, cwd or isSidechain; a later line does.
+        let bare = |q: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
+                    "message":{"role":"user","content":q}})
+            ) + &assistant("a")
+        };
+        let late = format!(
+            "{}\n",
+            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
+                "isSidechain":true,"timestamp":"2026-01-02T03:04:05Z",
+                "message":{"role":"user","content":"q3"}})
+        ) + &assistant("a");
+        let first = bare("q1") + &bare("q2");
+        let mut e = env_for(SourceKind::ClaudeCodeProjects, "p/r.jsonl");
+        e.write(&first);
+        e.sync();
+        crate::embed::embed_pending(&mut e.conn, &crate::embed::FakeEmbedder).unwrap();
+        e.append(&late);
+        e.sync();
+        let want = one_shot(
+            SourceKind::ClaudeCodeProjects,
+            "p/r.jsonl",
+            &(first + &late),
+        );
+        assert_eq!(e.indexed(), want);
+        let vec_meta: Vec<(String, i64)> = e
+            .conn
+            .prepare(
+                "SELECT v.project, v.is_sidechain FROM vec_exchanges v
+                 JOIN exchanges x ON x.id = v.rowid",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(!vec_meta.is_empty());
+        assert!(
+            vec_meta.iter().all(|m| *m == ("demo".to_string(), 1)),
+            "{vec_meta:?}"
+        );
+    }
+
     #[test]
     fn indexes_fresh_file_and_fills_session_info() {
         let mut e = env();
-        e.write(&(turn("alpha question", "alpha answer") + &turn("beta q", "beta a")));
+        e.write(
+            &(exchange_lines("alpha question", "alpha answer")
+                + &exchange_lines("beta q", "beta a")),
+        );
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let row = e.row();
-        assert_eq!(row.session_id.as_deref(), Some("s1"));
-        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.meta.session_id.as_deref(), Some("s1"));
+        assert_eq!(row.meta.cwd.as_deref(), Some("/nonexistent/demo"));
         assert_eq!(row.project.as_deref(), Some("demo"));
         assert_eq!(row.harness.as_deref(), Some("claude"));
-        assert_eq!(row.is_sidechain, Some(false));
-        assert_eq!(row.reparse_line, 3);
+        assert!(row.meta.sidechain_known && !row.meta.is_sidechain);
+        assert_eq!(row.reparse.line, 3);
         assert_eq!(e.exchanges().len(), 2);
     }
 
     #[test]
     fn open_turn_is_indexed_once_answered() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &user("still thinking")));
+        e.write(&(exchange_lines("q1", "a1") + &user("still thinking")));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
         e.append(&assistant("now answered"));
         e.sync();
@@ -898,12 +1332,12 @@ mod mirror {
         e.write("{\"type\":\"mode\",\"mode\":\"default\",\"sessionId\":\"s1\"}\n");
         e.sync();
         let row = e.row();
-        assert!(row.cwd.is_none());
-        assert_eq!(row.project.as_deref(), Some("unknown"));
-        e.append(&turn("q1", "a1"));
+        assert!(row.meta.cwd.is_none());
+        assert_eq!(row.project.as_deref(), Some(UNKNOWN_PROJECT));
+        e.append(&exchange_lines("q1", "a1"));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
         let row = e.row();
-        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.meta.cwd.as_deref(), Some("/nonexistent/demo"));
         assert_eq!(row.project.as_deref(), Some("demo"));
         let project: String = e
             .conn
@@ -915,11 +1349,15 @@ mod mirror {
     #[test]
     fn reindexes_only_last_exchange() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &turn("q2", "a2") + &turn("q3", "a3")));
+        e.write(
+            &(exchange_lines("q1", "a1")
+                + &exchange_lines("q2", "a2")
+                + &exchange_lines("q3", "a3")),
+        );
         e.sync();
         let before = e.exchanges();
         assert_eq!(before.len(), 3);
-        e.append(&turn("q4", "a4"));
+        e.append(&exchange_lines("q4", "a4"));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let after = e.exchanges();
         assert_eq!(after.len(), 4);
@@ -933,15 +1371,15 @@ mod mirror {
     #[test]
     fn do_not_index_skips_and_purges() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + &turn("q2", "a2")));
+        e.write(&(exchange_lines("q1", "a1") + &exchange_lines("q2", "a2")));
         e.sync();
         assert_eq!(e.exchanges().len(), 2);
-        e.append(&turn(crate::parse::DO_NOT_INDEX, "ok"));
+        e.append(&exchange_lines(crate::parse::DO_NOT_INDEX, "ok"));
         assert_eq!(e.sync(), FileOutcome::Skipped);
         assert_eq!(e.exchanges().len(), 0);
         assert_eq!(e.fts_hits("q1"), 0);
         assert!(e.row().skipped);
-        e.append(&turn("q5", "a5"));
+        e.append(&exchange_lines("q5", "a5"));
         assert_eq!(e.sync(), FileOutcome::Skipped);
         assert_eq!(e.exchanges().len(), 0);
         assert!(e.archive(0).contains("q5"));
@@ -951,7 +1389,11 @@ mod mirror {
     fn oversize_exchange_skipped() {
         let mut e = env();
         let big = "x".repeat(300 * 1024);
-        e.write(&(turn("small one", "a1") + &turn(&big, "a2") + &turn("small two", "a3")));
+        e.write(
+            &(exchange_lines("small one", "a1")
+                + &exchange_lines(&big, "a2")
+                + &exchange_lines("small two", "a3")),
+        );
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
         assert_eq!(users, vec!["small one", "small two"]);
@@ -962,7 +1404,11 @@ mod mirror {
     #[test]
     fn fts_row_per_exchange() {
         let mut e = env();
-        e.write(&(turn("alpha", "one") + &turn("bravo", "two") + &turn("charlie", "three")));
+        e.write(
+            &(exchange_lines("alpha", "one")
+                + &exchange_lines("bravo", "two")
+                + &exchange_lines("charlie", "three")),
+        );
         e.sync();
         for w in ["alpha", "bravo", "charlie"] {
             assert_eq!(e.fts_hits(w), 1, "{w}");
@@ -977,7 +1423,7 @@ mod mirror {
     #[test]
     fn bad_line_does_not_abort() {
         let mut e = env();
-        e.write(&(turn("q1", "a1") + "{not json\n" + &turn("q2", "a2")));
+        e.write(&(exchange_lines("q1", "a1") + "{not json\n" + &exchange_lines("q2", "a2")));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         assert_eq!(e.exchanges().len(), 2);
         let log = fs::read_to_string(e.paths.logs().join("episodic-memory.log")).unwrap();
@@ -987,7 +1433,7 @@ mod mirror {
     #[test]
     fn incomplete_tail_does_not_reparse() {
         let mut e = env();
-        e.write(&turn("q1", "a1"));
+        e.write(&exchange_lines("q1", "a1"));
         e.sync();
         let before = e.exchanges();
         e.append("{\"type\":\"user\",\"mess");
@@ -1017,7 +1463,6 @@ mod mirror {
 #[cfg(test)]
 mod orchestration {
     use super::*;
-    use crate::embed::FakeEmbedder;
     use fs2::FileExt;
 
     struct Env {
@@ -1049,7 +1494,7 @@ mod orchestration {
         fs::write(path, body).unwrap();
     }
 
-    fn turn(q: &str, a: &str) -> String {
+    fn exchange_lines(q: &str, a: &str) -> String {
         format!(
             "{}\n{}\n",
             serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
@@ -1073,7 +1518,8 @@ mod orchestration {
                 .unwrap()
         }
         fn import(&self, conn: &mut Connection) -> usize {
-            import_archive_with_roots(conn, &self.paths, &self.roots).unwrap()
+            import_archive_with_roots(conn, &self.paths, &self.roots, &mut ProjectCache::default())
+                .unwrap()
         }
     }
 
@@ -1082,21 +1528,22 @@ mod orchestration {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn import_registers_existing_archive() {
         let e = env();
         let k = SourceKind::ClaudeCodeProjects;
         // Source present, archive is a matching prefix: adopt at archive size, then sync only the tail.
-        let first = turn("q1", "a1");
+        let first = exchange_lines("q1", "a1");
         put(&e.archive(k, "p/match.jsonl", 0), &first);
         put(
             &e.root.join("p/match.jsonl"),
-            &(first.clone() + &turn("q2", "a2")),
+            &(first.clone() + &exchange_lines("q2", "a2")),
         );
         // Source present, tail differs: old archive kept, new generation.
         put(&e.archive(k, "p/diff.jsonl", 0), &first);
         put(
             &e.root.join("p/diff.jsonl"),
-            &turn("different long question", "different long answer"),
+            &exchange_lines("different long question", "different long answer"),
         );
         // Source missing: archive only.
         put(&e.archive(k, "p/gone.jsonl", 0), &first);
@@ -1151,7 +1598,7 @@ mod orchestration {
             .unwrap();
         // The last (possibly in-progress) exchange is re-parsed, so q1 is rebuilt along with q2.
         assert_eq!(
-            sync_file(&mut conn, &e.paths, f).unwrap(),
+            sync_file(&mut conn, &e.paths, f, &mut ProjectCache::default()).unwrap(),
             FileOutcome::Synced { new_exchanges: 2 }
         );
         assert_eq!(
@@ -1166,14 +1613,14 @@ mod orchestration {
         );
         assert_eq!(
             fs::read_to_string(e.archive(k, "p/match.jsonl", 0)).unwrap(),
-            first + &turn("q2", "a2")
+            first + &exchange_lines("q2", "a2")
         );
         // And the mismatched one mirrors into gen-1.
         let f = df
             .iter()
             .find(|f| f.rel == Path::new("p/diff.jsonl"))
             .unwrap();
-        sync_file(&mut conn, &e.paths, f).unwrap();
+        sync_file(&mut conn, &e.paths, f, &mut ProjectCache::default()).unwrap();
         assert_eq!(
             fs::metadata(e.archive(k, "p/diff.jsonl", 1)).unwrap().len(),
             f.size
@@ -1183,7 +1630,7 @@ mod orchestration {
     #[test]
     fn import_skips_legacy_and_generations() {
         let e = env();
-        let body = turn("q", "a");
+        let body = exchange_lines("q", "a");
         put(
             &e.paths.archive_root().join("claude-projects/a.jsonl"),
             &body,
@@ -1216,15 +1663,12 @@ mod orchestration {
             .map(|f| f.rel.to_string_lossy().into_owned())
             .collect();
         assert_eq!(rels, vec!["a/y.jsonl", "b/x.jsonl"]);
-        assert!(is_generation_name("s.gen-12.jsonl"));
-        assert!(!is_generation_name("s.gen-x.jsonl"));
-        assert!(!is_generation_name("s.jsonl"));
     }
 
     #[test]
     fn run_sync_respects_sync_lock() {
         let e = env();
-        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/s.jsonl"), &exchange_lines("q", "a"));
         let held = fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -1232,28 +1676,23 @@ mod orchestration {
             .open(e.paths.sync_lock())
             .unwrap();
         held.lock_exclusive().unwrap();
-        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!(stats, SyncStats::skipped());
         assert!(!e.paths.db().exists());
         held.unlock().unwrap();
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert!(!stats.skipped);
         assert_eq!(stats.new_exchanges, 1);
     }
 
     #[test]
-    fn run_sync_without_embedder_leaves_pending() {
+    fn run_sync_indexes_and_leaves_embedding_pending() {
         let e = env();
-        put(&e.root.join("p/s.jsonl"), &turn("q", "a"));
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        put(&e.root.join("p/s.jsonl"), &exchange_lines("q", "a"));
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!(
-            (
-                stats.files_synced,
-                stats.new_exchanges,
-                stats.embedded,
-                stats.errors
-            ),
-            (1, 1, 0, 0)
+            (stats.files_synced, stats.new_exchanges, stats.errors),
+            (1, 1, 0)
         );
         let conn = e.conn();
         assert_eq!(
@@ -1267,28 +1706,30 @@ mod orchestration {
         );
         drop(conn);
 
-        let stats = run_sync_with_roots(&e.paths, Some(&FakeEmbedder), &e.roots).unwrap();
-        assert_eq!((stats.new_exchanges, stats.embedded), (0, 1));
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
+        assert_eq!(stats.new_exchanges, 0);
         let conn = e.conn();
-        assert_eq!(count(&conn, "SELECT count(*) FROM vec_exchanges"), 1);
+        assert_eq!(count(&conn, "SELECT count(*) FROM vec_exchanges"), 0);
         assert_eq!(meta_get(&conn, "sync_count").as_deref(), Some("2"));
     }
 
     #[test]
     fn run_sync_logs_file_errors_and_continues() {
         let e = env();
-        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
+        put(&e.root.join("p/a.jsonl"), &exchange_lines("q", "a"));
         // A source whose archive location is blocked by a directory fails; the other still syncs.
-        put(&e.root.join("p/b.jsonl"), &turn("q2", "a2"));
+        put(&e.root.join("p/b.jsonl"), &exchange_lines("q2", "a2"));
         fs::create_dir_all(e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)).unwrap();
-        let stats = run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
         assert_eq!((stats.errors, stats.files_synced), (1, 1));
-        assert!(e
-            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
-            .is_dir());
-        assert!(!e
-            .archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 1)
-            .exists());
+        assert!(
+            e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 0)
+                .is_dir()
+        );
+        assert!(
+            !e.archive(SourceKind::ClaudeCodeProjects, "p/a.jsonl", 1)
+                .exists()
+        );
         let conn = e.conn();
         let last = meta_get(&conn, "last_error").unwrap();
         assert!(last.contains("a.jsonl"), "{last}");
@@ -1299,8 +1740,8 @@ mod orchestration {
     #[test]
     fn older_index_version_reindexes_once() {
         let e = env();
-        put(&e.root.join("p/a.jsonl"), &turn("q", "a"));
-        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        put(&e.root.join("p/a.jsonl"), &exchange_lines("q", "a"));
+        run_sync_with_roots(&e.paths, &e.roots).unwrap();
         let conn = e.conn();
         assert_eq!(
             meta_get(&conn, "index_version").as_deref(),
@@ -1312,7 +1753,7 @@ mod orchestration {
              UPDATE meta SET value = '1' WHERE key = 'index_version';",
         )
         .unwrap();
-        run_sync_with_roots(&e.paths, None, &e.roots).unwrap();
+        run_sync_with_roots(&e.paths, &e.roots).unwrap();
         let project = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
         assert_eq!(project("SELECT project FROM files"), "demo");
         assert_eq!(project("SELECT project FROM exchanges"), "demo");
