@@ -110,16 +110,16 @@ mod tests {
     use super::*;
     use crate::db::{self, NewExchange};
 
-    fn norm(s: String) -> String {
+    fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     #[test]
     fn to_terms_cases() {
-        assert_eq!(norm(to_terms("검색추천")), "검색 색추 추천");
-        assert_eq!(norm(to_terms("API검색")), "API 검색");
-        assert_eq!(norm(to_terms("가 나")), "가 나");
-        assert_eq!(norm(to_terms("sync 버그를")), "sync 버그 그를");
+        assert_eq!(norm(&to_terms("검색추천")), "검색 색추 추천");
+        assert_eq!(norm(&to_terms("API검색")), "API 검색");
+        assert_eq!(norm(&to_terms("가 나")), "가 나");
+        assert_eq!(norm(&to_terms("sync 버그를")), "sync 버그 그를");
     }
 
     #[test]

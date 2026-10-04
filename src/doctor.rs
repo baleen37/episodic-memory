@@ -65,7 +65,7 @@ fn parse_status(line: &str) -> Option<Status> {
 
 fn binary_check(os: &str, arch: &str, exe: Option<PathBuf>) -> Check {
     let exe = exe.map_or("unknown".to_string(), |p| p.display().to_string());
-    let detail = format!("v{} at {exe} ({arch}-{os})", VERSION);
+    let detail = format!("v{VERSION} at {exe} ({arch}-{os})");
     if SUPPORTED.contains(&(os, arch)) {
         check("binary", Level::Ok, detail)
     } else {

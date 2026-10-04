@@ -34,7 +34,7 @@ pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32
         }
         let resp = match serde_json::from_str::<Value>(&line) {
             Ok(msg) => handle(&msg, ctx, host_pid),
-            Err(_) => Some(error(Value::Null, -32700, "Parse error")),
+            Err(_) => Some(error(&Value::Null, -32700, "Parse error")),
         };
         if let Some(resp) = resp {
             serde_json::to_writer(&mut w, &resp)?;
@@ -45,7 +45,7 @@ pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32
     Ok(())
 }
 
-fn error(id: Value, code: i64, message: &str) -> Value {
+fn error(id: &Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
@@ -80,7 +80,7 @@ fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
                 }
             }
         }
-        _ => return Some(error(id, -32601, "Method not found")),
+        _ => return Some(error(&id, -32601, "Method not found")),
     };
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
@@ -196,7 +196,13 @@ fn search_tool(
     params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
     let embedder = crate::locks::read(&ctx.embedder).clone();
     let out = match search(&conn, embedder.as_deref(), &params) {
-        Err(_) if embedder.is_some() => search(&conn, None, &params),
+        Err(e) if embedder.is_some() => {
+            crate::log::log_line(
+                &ctx.paths,
+                &format!("vector search failed, keyword-only fallback: {e:#}"),
+            );
+            search(&conn, None, &params)
+        }
         r => r,
     }
     .map_err(|e| format!("search failed: {e:#}"))?;
@@ -303,7 +309,7 @@ mod tests {
 
     /// Feeds each request as one line and returns the parsed response lines.
     fn exchange(ctx: &Ctx, reqs: &[Value]) -> Vec<Value> {
-        let input: String = reqs.iter().map(|r| format!("{r}\n")).collect();
+        let input: String = reqs.iter().map(|r| r.to_string() + "\n").collect();
         let mut out = Vec::new();
         serve(input.as_bytes(), &mut out, ctx, None).unwrap();
         String::from_utf8(out)
@@ -313,7 +319,7 @@ mod tests {
             .collect()
     }
 
-    fn call(id: i64, name: &str, args: Value) -> Value {
+    fn call(id: i64, name: &str, args: &Value) -> Value {
         json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})
     }
 
@@ -350,7 +356,7 @@ mod tests {
                 json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                 json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
-                call(3, "search", json!({"query":"list files"})),
+                call(3, "search", &json!({"query":"list files"})),
             ],
         );
         assert_eq!(resps.len(), 3, "notification must not get a response");
@@ -400,7 +406,7 @@ mod tests {
     fn keyword_only_notice_without_embedder() {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = None;
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with("(vector search unavailable: model loading — keyword results only)\n"),
@@ -414,7 +420,7 @@ mod tests {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = None;
         ctx.load_failed.store(true, Ordering::SeqCst);
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with(
@@ -438,23 +444,29 @@ mod tests {
     fn embedder_error_falls_back_to_keywords() {
         let (_t, ctx) = indexed_ctx();
         *ctx.embedder.write().unwrap() = Some(Arc::new(Broken));
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         assert_ne!(r["result"]["isError"], true, "{r}");
         assert!(text(r).starts_with(KEYWORD_ONLY), "{}", text(r));
         assert!(text(r).contains("main.jsonl:"));
+        let log = std::fs::read_to_string(ctx.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|l| l.contains("vector search failed") && l.contains("broken")),
+            "{log}"
+        );
     }
 
     #[test]
     fn no_results_and_array_query() {
         let (_t, ctx) = indexed_ctx();
-        let r = call(2, "search", json!({"query":["list","files"], "limit": 99}));
+        let r = call(2, "search", &json!({"query":["list","files"], "limit": 99}));
         let r = &exchange(&ctx, &[r])[0];
         assert!(text(r).starts_with("1. ["), "{}", text(r));
         // No keyword match and no vector neighbour above the floor: nothing at all.
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         assert_eq!(text(r), "No results.");
         *ctx.embedder.write().unwrap() = None;
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         assert_eq!(text(r), format!("{KEYWORD_ONLY}\nNo results."));
     }
 
@@ -480,14 +492,14 @@ mod tests {
         crate::embed::embed_pending(&mut conn, &Same).unwrap();
         *ctx.embedder.write().unwrap() = Some(Arc::new(Same));
 
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"zzqqxx"}))])[0];
         let body = text(r);
         assert!(
             body.starts_with(&format!("{SEMANTIC_ONLY}\n1. [")),
             "{body}"
         );
 
-        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let r = &exchange(&ctx, &[call(1, "search", &json!({"query":"list files"}))])[0];
         let body = text(r);
         assert!(body.starts_with("1. ["), "{body}");
         assert!(!body.contains(SEMANTIC_ONLY), "{body}");
@@ -509,7 +521,7 @@ mod tests {
         let reqs: Vec<Value> = bad
             .iter()
             .enumerate()
-            .map(|(i, a)| call(i as i64, "search", a.clone()))
+            .map(|(i, a)| call(i as i64, "search", a))
             .collect();
         for (r, a) in exchange(&ctx, &reqs).iter().zip(&bad) {
             assert_eq!(r["result"]["isError"], true, "{a} -> {r}");
@@ -532,11 +544,11 @@ mod tests {
                 call(
                     1,
                     "read",
-                    json!({"path": path, "startLine": 1, "endLine": 2}),
+                    &json!({"path": path, "startLine": 1, "endLine": 2}),
                 ),
-                call(2, "read", json!({"path": "/etc/passwd"})),
-                call(3, "read", json!({"path": path, "startLine": 0})),
-                call(4, "read", json!({})),
+                call(2, "read", &json!({"path": "/etc/passwd"})),
+                call(3, "read", &json!({"path": path, "startLine": 0})),
+                call(4, "read", &json!({})),
             ],
         );
         assert_ne!(r[0]["result"]["isError"], true, "{}", r[0]);
@@ -567,7 +579,7 @@ mod tests {
             .paths
             .archive_root()
             .join("claude-code-projects/demo/secret.jsonl");
-        let r = exchange(&ctx, &[call(1, "read", json!({"path": path}))]);
+        let r = exchange(&ctx, &[call(1, "read", &json!({"path": path}))]);
         assert_eq!(r[0]["result"]["isError"], true, "{}", r[0]);
         assert_eq!(text(&r[0]), "conversation is marked DO NOT INDEX");
     }

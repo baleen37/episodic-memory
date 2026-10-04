@@ -2,7 +2,7 @@ use crate::daemon::{DEFAULT_IDLE_SECS, DaemonOpts, Hello, socket_path};
 use crate::log::log_line;
 use crate::paths::Paths;
 use anyhow::{Result, bail};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -80,7 +80,7 @@ pub fn run_mcp(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     }
 }
 
-/// SessionStart hook: asks the daemon for a sync, or starts it (it syncs on startup).
+/// `SessionStart` hook: asks the daemon for a sync, or starts it (it syncs on startup).
 /// Never fails and never writes to stdout.
 pub fn run_sync_hook(paths: &Paths, opts: &DaemonOpts) {
     if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {
@@ -95,6 +95,22 @@ fn try_sync_hook(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     match UnixStream::connect(socket_path(paths)?) {
         Ok(mut s) => s.write_all(Hello::Sync.line().as_bytes())?,
         Err(_) => spawn_daemon(opts)?,
+    }
+    Ok(())
+}
+
+/// `sync --wait`: asks the daemon (spawning it if absent) for a sync and returns once a sync
+/// that started after the request has finished.
+pub fn run_sync_wait(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
+    if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {
+        return Ok(());
+    }
+    let mut stream = connect_or_spawn(paths, opts, MCP_CONNECT_TIMEOUT)?;
+    stream.write_all(Hello::SyncWait.line().as_bytes())?;
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply)?;
+    if reply.is_empty() {
+        bail!("daemon closed the connection before the sync finished");
     }
     Ok(())
 }

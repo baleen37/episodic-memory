@@ -17,6 +17,8 @@ pub const DEFAULT_IDLE_SECS: u64 = 600;
 /// Below the smallest `sun_path` (104 bytes on macOS) with room to spare.
 const MAX_SOCKET_PATH: usize = 100;
 const MAX_HELLO: u64 = 4096;
+/// A connection that sends no hello line within this time is closed, so it cannot hold a thread.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy)]
 pub struct DaemonOpts {
@@ -43,6 +45,8 @@ pub enum Hello {
         host_pid: Option<u32>,
     },
     Sync,
+    /// Like `Sync`, but the daemon replies one line once that sync has finished.
+    SyncWait,
     Status,
 }
 
@@ -68,12 +72,17 @@ pub struct Status {
 struct Sched {
     running: bool,
     pending: bool,
+    /// Sync runs started and finished since daemon start.
+    started: u64,
+    finished: u64,
 }
 
 struct State {
     ctx: Ctx,
     sched: Mutex<Sched>,
     wake: Condvar,
+    /// Notified each time a sync run finishes.
+    done: Condvar,
     /// MCP connections from accept until EOF.
     clients: AtomicUsize,
     /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
@@ -87,6 +96,7 @@ impl State {
             ctx,
             sched: Mutex::new(Sched::default()),
             wake: Condvar::new(),
+            done: Condvar::new(),
             clients: AtomicUsize::new(0),
             loading: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
@@ -96,6 +106,18 @@ impl State {
     fn request_sync(&self) {
         locks::lock(&self.sched).pending = true;
         self.wake.notify_one();
+    }
+
+    /// Requests a sync and blocks until a run that started after the request has finished.
+    fn sync_and_wait(&self) {
+        let mut s = locks::lock(&self.sched);
+        // A running sync may have read its sources before this request; wait for the next one.
+        let target = s.started + 1;
+        s.pending = true;
+        self.wake.notify_one();
+        while s.finished < target {
+            s = locks::wait(&self.done, s);
+        }
     }
 
     fn touch(&self) {
@@ -130,14 +152,14 @@ impl State {
 
 /// Runs until idle. Returns `Ok` without doing anything when another daemon of this version
 /// holds the daemon lock.
-pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
+pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     let Some(mut lock) = try_lock(&paths.daemon_lock())? else {
         return Ok(());
     };
     lock.set_len(0)?;
     writeln!(lock, "{}", std::process::id())?;
 
-    let socket = socket_path(&paths)?;
+    let socket = socket_path(paths)?;
     // Only the lock holder may replace the socket file.
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket)?;
@@ -182,7 +204,7 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
                 std::thread::spawn(move || handle_conn(stream, &st));
             }
             Err(e) => {
-                log_line(&paths, &format!("daemon accept: {e}"));
+                log_line(paths, &format!("daemon accept: {e}"));
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
@@ -200,6 +222,7 @@ fn scheduler(st: &State, sync: impl Fn(&Paths, Option<&dyn Embedder>) -> Result<
             }
             s.pending = false;
             s.running = true;
+            s.started += 1;
         }
         let embedder = locks::read(&st.ctx.embedder).clone();
         let paths = &st.ctx.paths;
@@ -213,7 +236,10 @@ fn scheduler(st: &State, sync: impl Fn(&Paths, Option<&dyn Embedder>) -> Result<
         }
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
-        locks::lock(&st.sched).running = false;
+        let mut s = locks::lock(&st.sched);
+        s.running = false;
+        s.finished += 1;
+        st.done.notify_all();
     }
 }
 
@@ -260,6 +286,8 @@ fn handle_conn(stream: UnixStream, st: &State) {
     let Ok(writer) = stream.try_clone() else {
         return;
     };
+    // Fails (EINVAL on macOS) only when the peer already closed; its buffered hello still reads.
+    let _ = stream.set_read_timeout(Some(HELLO_TIMEOUT));
     let mut reader = BufReader::new(stream);
     let mut hello = String::new();
     if reader
@@ -272,6 +300,8 @@ fn handle_conn(stream: UnixStream, st: &State) {
     }
     match serde_json::from_str::<Hello>(hello.trim()).ok() {
         Some(Hello::Mcp { host_pid }) => {
+            // MCP clients stay connected and idle between requests.
+            let _ = reader.get_ref().set_read_timeout(None);
             st.clients.fetch_add(1, Ordering::SeqCst);
             if let Err(e) = serve(&mut reader, &writer, &st.ctx, host_pid) {
                 log_line(&st.ctx.paths, &format!("mcp connection: {e:#}"));
@@ -280,6 +310,10 @@ fn handle_conn(stream: UnixStream, st: &State) {
             st.touch();
         }
         Some(Hello::Sync) => st.request_sync(),
+        Some(Hello::SyncWait) => {
+            st.sync_and_wait();
+            let _ = writeln!(&writer, "done");
+        }
         // Neither a client nor activity: doctor must not keep the daemon alive.
         Some(Hello::Status) => {
             let status = serde_json::to_string(&st.status()).expect("status serializes");
@@ -305,7 +339,12 @@ mod tests {
 
     #[test]
     fn hello_lines_roundtrip_and_accept_bare_mcp() {
-        for h in [Hello::Mcp { host_pid: Some(7) }, Hello::Sync, Hello::Status] {
+        for h in [
+            Hello::Mcp { host_pid: Some(7) },
+            Hello::Sync,
+            Hello::SyncWait,
+            Hello::Status,
+        ] {
             assert_eq!(serde_json::from_str::<Hello>(h.line().trim()).unwrap(), h);
         }
         assert_eq!(
