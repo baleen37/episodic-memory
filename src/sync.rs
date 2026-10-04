@@ -11,8 +11,10 @@ use crate::project::resolve_project;
 use crate::terms::to_terms;
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub struct DiscoveredFile {
@@ -55,18 +57,19 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
 
     // Session info is read on the first parse of a non-empty archive and persisted. Claude
     // transcripts often open with lines lacking `cwd` (`mode`, `last-prompt`, ...), so it is
-    // re-read (and the project recomputed) until a `cwd` is known. Codex subagent parsing needs
-    // `agent_path`, which `files` does not store, so Codex re-reads the head on every call;
-    // Claude otherwise reuses the persisted values. The archive path keeps the source's
-    // relative path, so "subagents" detection works on it directly.
+    // re-read (and the project recomputed) until a `cwd` is known. A file with a user signal
+    // re-reads the head on every call: the signal can change as lines arrive, and `files` does
+    // not store `agent_path`. Other files reuse the persisted values. The archive path keeps the
+    // source's relative path, so "subagents" detection works on it directly.
     let read_session = row.offset > 0 && (row.harness.is_none() || row.cwd.is_none());
-    let meta = if read_session || kind == SourceKind::CodexSessions {
+    let meta = if read_session || row.user_signal.is_some() {
         read_meta(kind, &archive, &row.archive_path)?
     } else {
         FileMeta {
             session_id: row.session_id.clone(),
             cwd: row.cwd.clone(),
             is_sidechain: row.is_sidechain.unwrap_or(false),
+            sidechain_known: row.is_sidechain.is_some(),
             agent_path: None,
             user_signal: row.user_signal.clone(),
         }
@@ -295,11 +298,19 @@ pub(crate) fn is_generation_name(name: &str) -> bool {
 }
 
 /// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
-/// Broken links and unreadable entries are skipped. Returns `(path relative to root, size)`.
+/// Broken links and unreadable entries are skipped, and each directory is entered once (by
+/// device and inode) so a link to an ancestor cannot loop. Returns `(path relative to root, size)`.
 fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut out = Vec::new();
+    let mut visited = HashSet::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        let Ok(meta) = fs::metadata(&dir) else {
+            continue;
+        };
+        if !visited.insert((meta.dev(), meta.ino())) {
+            continue;
+        }
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
