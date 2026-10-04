@@ -80,7 +80,7 @@ embedding worker  -> embed pending exchanges (8 per batch) into vec_exchanges,
 - Env vars are limited to three: `EPISODIC_MEMORY_DIR` (data dir, tests), `EPISODIC_MEMORY_DISABLE=1` (sync no-op), `EPISODIC_MEMORY_BIN` (wrapper override). Do not add more.
 - Tests must not mutate process env; pass values as parameters.
 - `sync` always exits 0; errors go to `logs/`. Exception: the hidden test-only `sync --wait` exits 1 on failure.
-- Hidden test-only flags (`hide = true` in `src/main.rs`): `--wait` (sync only), and `--idle-secs`, `--fake-embedder`, `--fake-embed-delay-ms` (on `sync`, `mcp`, `daemon`; `sync` and `mcp` forward them to a daemon they spawn).
+- Hidden test-only flags (`hide = true` in `src/main.rs`): `--wait` (sync only), and `--idle-secs`, `--fake-embedder` (on `sync`, `mcp`, `daemon`; `sync` and `mcp` forward them to a daemon they spawn).
 - While an older-version daemon is still alive, it and the new one each reindex everything when they see the other's `index_version`; this ping-pong is transient and stops once the old daemon exits (idle exit).
 - Do not touch `~/.config/episodic-memory` from tests; use `EPISODIC_MEMORY_DIR` with a temp dir.
 - The wrapper reads the version from `.claude-plugin/plugin.json`; release bumps it via `scripts/sync-versions.sh`.

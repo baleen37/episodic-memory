@@ -53,14 +53,6 @@ impl UserSignal {
     }
 }
 
-impl FileMeta {
-    /// True when both decide exchange start messages alike: they agree on every field an
-    /// adapter's `start_message` may read.
-    pub fn same_boundaries(&self, other: &FileMeta) -> bool {
-        self.agent_path == other.agent_path && self.user_signal == other.user_signal
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedExchange {
     pub line_start: i64,

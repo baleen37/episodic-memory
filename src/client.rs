@@ -23,10 +23,6 @@ fn spawn_daemon(opts: &DaemonOpts) -> Result<()> {
     if opts.fake_embedder {
         cmd.arg("--fake-embedder");
     }
-    if opts.fake_embed_delay_ms > 0 {
-        cmd.arg("--fake-embed-delay-ms")
-            .arg(opts.fake_embed_delay_ms.to_string());
-    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -1,4 +1,4 @@
-use crate::embed::{E5Embedder, Embedder, SlowFakeEmbedder, embed_pending};
+use crate::embed::{E5Embedder, Embedder, FakeEmbedder, embed_pending};
 use crate::locks;
 use crate::log::log_line;
 use crate::mcp::{Ctx, serve};
@@ -25,7 +25,6 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DaemonOpts {
     pub idle_secs: u64,
     pub fake_embedder: bool,
-    pub fake_embed_delay_ms: u64,
 }
 
 /// The daemon socket path, or an error when it does not fit in `sun_path`.
@@ -187,9 +186,7 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     // daemon spawns any thread, so nothing else reads or writes the environment concurrently.
     unsafe { std::env::remove_var("HF_HOME") };
     let embedder: Option<Arc<dyn Embedder>> = if opts.fake_embedder {
-        Some(Arc::new(SlowFakeEmbedder(Duration::from_millis(
-            opts.fake_embed_delay_ms,
-        ))))
+        Some(Arc::new(FakeEmbedder))
     } else {
         None
     };
@@ -380,7 +377,6 @@ fn handle_conn(stream: UnixStream, st: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embed::FakeEmbedder;
 
     fn state() -> (tempfile::TempDir, State, Receiver<()>) {
         let t = tempfile::tempdir().unwrap();
@@ -496,6 +492,42 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn sync_wait_returns_once_indexed_while_embedding_still_runs() {
+        let (_t, st, wakes) = state();
+        *st.ctx.embedder.write().unwrap() = Some(Arc::new(FakeEmbedder));
+        let st = Arc::new(st);
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = Mutex::new(held);
+        let w_st = st.clone();
+        std::thread::spawn(move || {
+            // Every pass blocks until released, like a slow model with a long backlog.
+            embed_worker(&w_st, &wakes, |_, _| {
+                let _ = held.lock().unwrap().recv();
+                Ok(())
+            });
+        });
+        let s_st = st.clone();
+        std::thread::spawn(move || scheduler(&s_st, |_| Ok(())));
+        st.wake_embedder();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !st.embedding.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "embedding pass never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (done, waited) = std::sync::mpsc::channel();
+        let c_st = st.clone();
+        std::thread::spawn(move || {
+            c_st.sync_and_wait();
+            let _ = done.send(());
+        });
+        waited
+            .recv_timeout(Duration::from_secs(5))
+            .expect("sync --wait waited for the embedding pass");
+        assert!(st.embedding.load(Ordering::SeqCst));
+        drop(release);
     }
 
     #[test]
