@@ -23,6 +23,10 @@ fn spawn_daemon(opts: &DaemonOpts) -> Result<()> {
     if opts.fake_embedder {
         cmd.arg("--fake-embedder");
     }
+    if opts.fake_embed_delay_ms > 0 {
+        cmd.arg("--fake-embed-delay-ms")
+            .arg(opts.fake_embed_delay_ms.to_string());
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -100,7 +104,7 @@ fn try_sync_hook(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
 }
 
 /// `sync --wait`: asks the daemon (spawning it if absent) for a sync and returns once a sync
-/// that started after the request has finished.
+/// that started after the request has finished indexing. Embedding is not waited for.
 pub fn run_sync_wait(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {
         return Ok(());

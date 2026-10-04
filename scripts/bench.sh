@@ -3,8 +3,9 @@
 # Benchmarks the real binary on synthetic transcripts in a temp dir (no network, no real data):
 # first sync, a sync with nothing new, incremental sync after appending to one large Claude Code and one large Codex
 # archive, and to a large Codex archive without `item_completed` events (its user signal comes from `user_message`
-# events; added after the first sync so first_sync stays comparable), and single/array search through the MCP stdio tool. Uses the hidden test flags
-# `--fake-embedder` (no model download) and `sync --wait` (returns when the sync job ends).
+# events; added after the first sync so first_sync stays comparable), and single/array search through the MCP stdio
+# tool. Uses the hidden test flags `--fake-embedder` (no model download) and `sync --wait` (returns when the sync job
+# has indexed; embedding continues in the daemon's worker, measured separately as embed_drain).
 # Baseline numbers: scripts/bench-baseline.txt.
 set -euo pipefail
 
@@ -151,6 +152,13 @@ echo "data_dir       $T"
 echo "source_bytes   $(cat "$CLAUDE"/projects/*/*.jsonl "$CODEX"/sessions/2026/01/02/*.jsonl | wc -c | tr -d ' ')"
 
 report first_sync "$(timed_sync)"
+
+# Embedding runs in a daemon worker after sync returns; wait for the backlog so it does not
+# overlap the measurements below. Reports the time from first_sync's return until drained.
+t0="$(now)"
+until em doctor 2>/dev/null | grep -q '^\[ok\] embeddings: none pending'; do sleep 0.1; done
+t1="$(now)"
+report embed_drain "$(elapsed "$t0" "$t1")"
 
 runs=()
 for r in $(seq 1 "$REPEAT"); do runs+=("$(timed_sync)"); done
