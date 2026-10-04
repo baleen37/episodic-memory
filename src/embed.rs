@@ -94,17 +94,18 @@ impl Embedder for FakeEmbedder {
     }
 }
 
-/// `FakeEmbedder` that sleeps for the given time per passage batch (daemon tests only).
-pub struct SlowFakeEmbedder(pub std::time::Duration);
+/// Test embedder whose every call fails with "broken".
+#[cfg(test)]
+pub struct Broken;
 
-impl Embedder for SlowFakeEmbedder {
-    fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        std::thread::sleep(self.0);
-        FakeEmbedder.embed_passages(texts)
+#[cfg(test)]
+impl Embedder for Broken {
+    fn embed_passages(&self, _: &[String]) -> Result<Vec<Vec<f32>>> {
+        bail!("broken")
     }
 
-    fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
-        FakeEmbedder.embed_query(q)
+    fn embed_query(&self, _: &str) -> Result<Vec<f32>> {
+        bail!("broken")
     }
 }
 
@@ -155,8 +156,8 @@ fn embed_batch(e: &dyn Embedder, texts: &[String]) -> Result<Vec<Vec<f32>>> {
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
 /// Vectors are computed outside any transaction; each batch is written in one short immediate
 /// transaction. A row deleted or embedded by someone else in between is skipped. The vector's
-/// `project`/`ts`/`is_sidechain` are copied from `exchanges` inside that transaction, so a meta
-/// backfill committed while the batch was being embedded is not lost.
+/// `project`/`ts`/`is_sidechain` are copied from `exchanges` inside that transaction, so they
+/// match the row as committed then, not as read before embedding.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
     loop {
@@ -300,39 +301,6 @@ mod tests {
             .query_row("SELECT count(*) FROM vec_exchanges", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vecs, 0);
-    }
-
-    /// Commits a late meta backfill (as a concurrent sync would) after the batch was read.
-    struct BackfillsMeta(std::path::PathBuf);
-
-    impl Embedder for BackfillsMeta {
-        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-            let mut c = crate::db::open(&self.0).unwrap();
-            let tx = c.transaction().unwrap();
-            crate::db::update_exchange_meta(&tx, "/a", Some("s"), "demo", true).unwrap();
-            tx.commit().unwrap();
-            FakeEmbedder.embed_passages(texts)
-        }
-        fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
-            FakeEmbedder.embed_query(q)
-        }
-    }
-
-    #[test]
-    fn meta_backfilled_during_embedding_reaches_the_vector() {
-        let t = tempfile::tempdir().unwrap();
-        let db = t.path().join("e.db");
-        let mut conn = crate::db::open(&db).unwrap();
-        add(&mut conn, 1, "q");
-        assert_eq!(embed_pending(&mut conn, &BackfillsMeta(db)).unwrap(), 1);
-        let (p, side): (String, i64) = conn
-            .query_row(
-                "SELECT project, is_sidechain FROM vec_exchanges WHERE rowid = 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((p.as_str(), side), ("demo", 1));
     }
 
     #[test]

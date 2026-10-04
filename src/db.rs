@@ -51,6 +51,14 @@ impl FileRow {
             skipped: false,
         }
     }
+
+    /// Makes the next index pass start over: parse from line 1, learn file meta and the project
+    /// again.
+    pub fn reset_index(&mut self) {
+        self.reparse = ReparsePoint::START;
+        self.meta_offset = 0;
+        self.harness = None;
+    }
 }
 
 pub struct NewExchange {
@@ -112,27 +120,16 @@ CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
 PRAGMA user_version = 4;
 "#;
 
-/// Version 1 to 2: every file meta field is stored, with the archive bytes it was learned
-/// from. Rows start with `meta_offset` 0, so their meta is learned again from the archive.
-const MIGRATE_1_TO_2: &str = r"
+/// Version 1 (the schema up to v4.0.5) to 4. Every file meta field is stored, with the archive
+/// bytes it was learned from; rows start with `meta_offset` 0, so their meta is learned again
+/// from the archive. The reparse point also stores its byte position and the line that position
+/// belongs to; rows start with NULL (unknown) and find the line by counting once.
+const MIGRATE_1_TO_4: &str = r"
 ALTER TABLE files ADD COLUMN sidechain_known INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN agent_path TEXT;
 ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
-PRAGMA user_version = 2;
-";
-
-/// Version 2 to 3: the reparse point also stores its byte position. Existing rows get 0
-/// (unknown), so their next sync finds the reparse line by counting once.
-const MIGRATE_2_TO_3: &str = r"
 ALTER TABLE files ADD COLUMN reparse_offset INTEGER NOT NULL DEFAULT 0;
-PRAGMA user_version = 3;
-";
-
-/// Version 3 to 4: the reparse line that `reparse_offset` belongs to. Binaries before version 3
-/// update `reparse_line` without `reparse_offset`, so the byte position is used only while both
-/// name the same line. Existing rows get NULL (unknown) and find the line by counting once.
-const MIGRATE_3_TO_4: &str = r"
 ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER;
 PRAGMA user_version = 4;
 ";
@@ -172,19 +169,16 @@ pub fn open(path: &Path) -> Result<Connection> {
     if version < 4 {
         // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
         let tx = c.transaction()?;
-        let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version == 0 {
-            tx.execute_batch(SCHEMA)?;
-        } else {
-            for (from, sql) in [
-                (1, MIGRATE_1_TO_2),
-                (2, MIGRATE_2_TO_3),
-                (3, MIGRATE_3_TO_4),
-            ] {
-                if version <= from {
-                    tx.execute_batch(sql)?;
-                }
-            }
+        // Re-read under the lock: another process may have created or migrated it meanwhile.
+        match tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? {
+            0 => tx.execute_batch(SCHEMA)?,
+            1 => tx.execute_batch(MIGRATE_1_TO_4)?,
+            4 => {}
+            // Versions 2 and 3 existed only on unreleased builds; fail here, not in later SQL.
+            version => anyhow::bail!(
+                "unsupported schema version {version}; delete {} to rebuild",
+                path.display()
+            ),
         }
         tx.commit()?;
     }
@@ -341,28 +335,6 @@ pub fn insert_exchange(tx: &Transaction, e: &NewExchange, terms: &str) -> Result
     Ok(id)
 }
 
-/// Sets the file meta columns of every exchange of an archive, including the metadata columns
-/// `vec_exchanges` filters on (it has no FK support either).
-pub fn update_exchange_meta(
-    tx: &Transaction,
-    archive_path: &str,
-    session_id: Option<&str>,
-    project: &str,
-    is_sidechain: bool,
-) -> Result<()> {
-    tx.prepare_cached(
-        "UPDATE vec_exchanges SET project = ?2, is_sidechain = ?3
-         WHERE rowid IN (SELECT id FROM exchanges WHERE archive_path = ?1 AND embedded = 1)",
-    )?
-    .execute(params![archive_path, project, is_sidechain])?;
-    tx.prepare_cached(
-        "UPDATE exchanges SET session_id = ?2, project = ?3, is_sidechain = ?4
-         WHERE archive_path = ?1",
-    )?
-    .execute(params![archive_path, session_id, project, is_sidechain])?;
-    Ok(())
-}
-
 /// The only path that deletes exchanges. The virtual tables have no FK support,
 /// so their rows go first, then the `exchanges` rows.
 pub fn delete_exchanges_from(
@@ -504,92 +476,122 @@ mod tests {
         assert_eq!(vocab, 0);
     }
 
+    /// Openers that read version 0 before another one created the schema must accept the v4
+    /// they find under the write lock. (The DB is already WAL so only the version check races.)
     #[test]
-    fn version_1_database_gains_meta_columns() {
+    fn concurrent_first_opens_all_succeed() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let p = dir.path().join("episodic.db");
+            Connection::open(&p)
+                .unwrap()
+                .execute_batch("PRAGMA journal_mode=WAL;")
+                .unwrap();
+            let start = std::sync::Barrier::new(8);
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..8)
+                    .map(|_| {
+                        s.spawn(|| {
+                            start.wait();
+                            open(&p).map(drop)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    h.join().unwrap().unwrap();
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn open_rejects_an_unreleased_schema_version() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("episodic.db");
-        open(&p)
+        Connection::open(&p)
             .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN sidechain_known;
-                 ALTER TABLE files DROP COLUMN agent_path;
-                 ALTER TABLE files DROP COLUMN meta_offset;
-                 ALTER TABLE files DROP COLUMN meta_settled;
-                 ALTER TABLE files DROP COLUMN reparse_offset;
-                 ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\")
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10);
-                 PRAGMA user_version = 1;",
-            )
+            .execute_batch("PRAGMA user_version = 2;")
             .unwrap();
+        let err = open(&p).unwrap_err().to_string();
+        assert!(err.contains("schema version 2"), "{err}");
+    }
+
+    /// Every table's columns (sorted by name) and every index, as `PRAGMA` reports them.
+    fn schema(c: &Connection) -> Vec<String> {
+        let mut out: Vec<String> = c
+            .prepare(
+                "SELECT m.type || ' ' || m.name || ': ' || ifnull(p.name, '') || ' ' ||
+                        ifnull(p.type, '') || ' ' || ifnull(p.\"notnull\", '') || ' ' ||
+                        ifnull(p.dflt_value, '') || ' ' || ifnull(p.pk, '')
+                 FROM sqlite_master m LEFT JOIN pragma_table_info(m.name) p
+                 WHERE m.type IN ('table', 'index')",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn version_1_database_migrates_to_the_fresh_schema() {
+        // The schema shipped up to v4.0.5.
+        const V1: &str = r#"
+CREATE TABLE files(
+  source_path TEXT PRIMARY KEY,
+  source_kind TEXT NOT NULL,
+  archive_path TEXT NOT NULL UNIQUE,
+  generation INTEGER NOT NULL DEFAULT 0,
+  "offset" INTEGER NOT NULL DEFAULT 0,
+  reparse_line INTEGER NOT NULL DEFAULT 1,
+  session_id TEXT, cwd TEXT, project TEXT,
+  harness TEXT, is_sidechain INTEGER,
+  user_signal TEXT,
+  skipped INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE exchanges(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_path TEXT NOT NULL,
+  line_start INTEGER NOT NULL, line_end INTEGER NOT NULL,
+  session_id TEXT,
+  project TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  is_sidechain INTEGER NOT NULL DEFAULT 0,
+  ts INTEGER NOT NULL,
+  user_message TEXT NOT NULL,
+  assistant_message TEXT NOT NULL,
+  tool_names TEXT NOT NULL DEFAULT '',
+  embedded INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX exchanges_file ON exchanges(archive_path, line_start);
+CREATE INDEX exchanges_pending ON exchanges(id) WHERE embedded = 0;
+CREATE VIRTUAL TABLE fts_exchanges USING fts5(terms, content='', contentless_delete=1,
+  tokenize='porter unicode61 remove_diacritics 2');
+CREATE VIRTUAL TABLE vec_exchanges USING vec0(
+  embedding float[384],
+  project TEXT, ts INTEGER, is_sidechain INTEGER);
+CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
+INSERT INTO files(source_path, source_kind, archive_path, "offset", reparse_line)
+  VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10, 7);
+PRAGMA user_version = 1;
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = open(&dir.path().join("fresh.db")).unwrap();
+        let p = dir.path().join("episodic.db");
+        register_vec();
+        Connection::open(&p).unwrap().execute_batch(V1).unwrap();
         let c = open(&p).unwrap();
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 4);
+        assert_eq!(schema(&c), schema(&fresh));
         let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
         assert_eq!((got.offset, got.meta_offset), (10, 0));
         assert_eq!(got.meta, FileMeta::default());
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 1,
-                byte: None
-            }
-        );
-    }
-
-    #[test]
-    fn version_2_database_keeps_the_reparse_line_with_an_unknown_byte_position() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        open(&p)
-            .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN reparse_offset;
-                 ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\", reparse_line)
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10, 7);
-                 PRAGMA user_version = 2;",
-            )
-            .unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        assert_eq!(
-            got.reparse,
-            ReparsePoint {
-                line: 7,
-                byte: None
-            }
-        );
-        assert_eq!(got.offset, 10);
-    }
-
-    #[test]
-    fn version_3_database_no_longer_trusts_its_byte_position() {
-        // A version 3 byte position may be stale: older binaries moved `reparse_line` alone.
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("episodic.db");
-        open(&p)
-            .unwrap()
-            .execute_batch(
-                "ALTER TABLE files DROP COLUMN reparse_offset_line;
-                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\",
-                                   reparse_line, reparse_offset)
-                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 900, 7, 300);
-                 PRAGMA user_version = 3;",
-            )
-            .unwrap();
-        let c = open(&p).unwrap();
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, 4);
-        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
         assert_eq!(
             got.reparse,
             ReparsePoint {

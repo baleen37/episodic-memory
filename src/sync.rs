@@ -1,10 +1,10 @@
 use crate::archive::{append_tail, archive_path_for, generation_stem, tails_match};
 use crate::db::{
     FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
-    update_exchange_meta, upsert_file,
+    upsert_file,
 };
 use crate::log::log_line;
-use crate::parse::{ReparsePoint, initial_meta, observe_meta_from, parse_from};
+use crate::parse::{ReparsePoint, initial_meta, parse_from};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
 use crate::project::{ProjectCache, UNKNOWN_PROJECT};
 use crate::terms::to_terms;
@@ -59,24 +59,32 @@ fn index_file(
     let archive = PathBuf::from(&row.archive_path);
 
     // File meta is learned only from the archive bytes appended since it was last observed
-    // (`meta_offset`), until the provider reports it settled. The project follows the `cwd`:
-    // transcripts often open with lines lacking one (`mode`, `last-prompt`, ...).
+    // (`meta_offset`), until the provider reports it settled, in the same pass that parses them.
+    // The project follows the `cwd`: transcripts often open with lines lacking one (`mode`,
+    // `last-prompt`, ...).
     let old_meta = row.meta.clone();
     if row.meta_offset == 0 {
+        // Every line is observed again, so the pass must start at line 1.
         row.meta = initial_meta(kind, &row.archive_path);
         row.meta_settled = false;
-    }
-    if !row.meta_settled && row.meta_offset < row.offset {
-        row.meta_settled =
-            observe_meta_from(kind, &archive, row.meta_offset as u64, &mut row.meta)?;
-    }
-    row.meta_offset = row.offset;
-    // ADR 0001: meta that decides exchange boundaries changed, so every exchange already
-    // indexed may have the wrong boundaries. Reparse the whole archive.
-    if !row.meta.same_boundaries(&old_meta) {
         row.reparse = ReparsePoint::START;
     }
-    let old_project = row.project.clone();
+    // ADR 0001: a file meta change can make every exchange already indexed wrong (boundaries,
+    // session, project or sidechain flag), so the pass restarts from line 1. File meta only
+    // grows, so this ends; lines observed again change nothing.
+    let mut observe_from = (!row.meta_settled).then_some(row.meta_offset);
+    let out = loop {
+        let out = parse_from(kind, &archive, row.reparse, &mut row.meta, observe_from)?;
+        row.meta_settled |= out.meta_settled;
+        if !out.restart {
+            break out;
+        }
+        row.reparse = ReparsePoint::START;
+        if row.meta_settled {
+            observe_from = None;
+        }
+    };
+    row.meta_offset = row.offset;
     if row.harness.is_none() || row.meta.cwd != old_meta.cwd {
         row.harness = Some(kind.harness().to_string());
         row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
@@ -87,22 +95,6 @@ fn index_file(
         .unwrap_or_else(|| UNKNOWN_PROJECT.into());
 
     delete_exchanges_from(tx, &row.archive_path, row.reparse.line)?;
-    // Meta that does not decide boundaries may be learned after exchanges were indexed; the
-    // exchanges kept before the reparse point get it too, as a one-shot sync would give them.
-    if row.reparse.line > 1
-        && (row.meta.session_id != old_meta.session_id
-            || row.meta.is_sidechain != old_meta.is_sidechain
-            || row.project != old_project)
-    {
-        update_exchange_meta(
-            tx,
-            &row.archive_path,
-            row.meta.session_id.as_deref(),
-            &project,
-            row.meta.is_sidechain,
-        )?;
-    }
-    let out = parse_from(kind, &archive, row.reparse, &row.meta)?;
     stats.bad_lines = out.bad_lines;
     if out.do_not_index {
         row.skipped = true;
@@ -227,9 +219,7 @@ fn start_new_generation(
     row.generation = generation;
     row.archive_path = path_str(&archive_path_for(paths, f.kind, &f.rel, generation));
     row.offset = 0;
-    row.reparse = ReparsePoint::START;
-    row.meta_offset = 0;
-    row.harness = None;
+    row.reset_index();
     upsert_file(&tx, row)?;
     tx.commit()?;
     Ok(())
@@ -322,15 +312,13 @@ pub fn sync_file(
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut out = Vec::new();
-    let mut visited = HashSet::new();
+    let Ok(meta) = fs::metadata(root) else {
+        return out;
+    };
+    // Directories are marked when pushed, from the metadata already read for their entry.
+    let mut visited = HashSet::from([(meta.dev(), meta.ino())]);
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(meta) = fs::metadata(&dir) else {
-            continue;
-        };
-        if !visited.insert((meta.dev(), meta.ino())) {
-            continue;
-        }
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
@@ -340,7 +328,9 @@ fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
                 continue;
             };
             if meta.is_dir() {
-                stack.push(path);
+                if visited.insert((meta.dev(), meta.ino())) {
+                    stack.push(path);
+                }
             } else if meta.is_file() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.ends_with(".jsonl")
@@ -372,14 +362,15 @@ pub fn discover_in(roots: &[SourceRoot]) -> Vec<DiscoveredFile> {
 }
 
 /// Spec §5 "기존 아카이브 들여오기". `candidates` supplies the (possibly missing) source root
-/// per kind. Returns the number of files registered; sets `meta.imported` only when no file failed.
+/// per kind. Returns the number of files registered and of exchanges they indexed; sets
+/// `meta.imported` only when no file failed.
 pub fn import_archive_with_roots(
     conn: &mut Connection,
     paths: &Paths,
     candidates: &[SourceRoot],
     projects: &mut ProjectCache,
-) -> Result<usize> {
-    let mut registered = 0;
+) -> Result<(usize, usize)> {
+    let (mut registered, mut inserted) = (0, 0);
     let mut failures = 0;
     for kind in SourceKind::ALL {
         let Some(root) = candidates.iter().find(|r| r.kind == kind) else {
@@ -388,8 +379,11 @@ pub fn import_archive_with_roots(
         let archive_dir = paths.archive_root().join(kind.as_str());
         for (rel, _) in walk_jsonl(&archive_dir) {
             match import_one(conn, paths, kind, &root.root, &rel, projects) {
-                Ok(true) => registered += 1,
-                Ok(false) => {}
+                Ok(Some(n)) => {
+                    registered += 1;
+                    inserted += n;
+                }
+                Ok(None) => {}
                 Err(e) => {
                     failures += 1;
                     log_line(
@@ -404,38 +398,40 @@ pub fn import_archive_with_roots(
         meta_set(conn, "imported", "1")?;
         meta_set(conn, "index_version", INDEX_VERSION)?;
     }
-    Ok(registered)
+    Ok((registered, inserted))
 }
 
 /// Rebuilds every indexed file's exchanges and session info (project included) from its
-/// archive. A file that fails is logged and left as it was.
-fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache) -> Result<()> {
+/// archive. A file that fails is logged and left as it was. Returns the exchanges indexed.
+fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache) -> Result<usize> {
+    let mut inserted = 0;
     let sources: Vec<String> = conn
         .prepare(r#"SELECT source_path FROM files WHERE "offset" > 0 AND skipped = 0"#)?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     for source in sources {
-        let result = (|| -> Result<()> {
+        let result = (|| -> Result<usize> {
             let Some(mut row) = get_file(conn, &source)? else {
-                return Ok(());
+                return Ok(0);
             };
-            row.reparse = ReparsePoint::START;
-            row.meta_offset = 0;
-            row.harness = None;
+            row.reset_index();
             let tx = conn.transaction()?;
-            index_file(&tx, &mut row, projects)?;
+            let stats = index_file(&tx, &mut row, projects)?;
             upsert_file(&tx, &row)?;
             tx.commit()?;
-            Ok(())
+            Ok(stats.inserted)
         })();
-        if let Err(e) = result {
-            log_line(paths, &format!("reindex {source}: {e:#}"));
+        match result {
+            Ok(n) => inserted += n,
+            Err(e) => log_line(paths, &format!("reindex {source}: {e:#}")),
         }
     }
-    meta_set(conn, "index_version", INDEX_VERSION)
+    meta_set(conn, "index_version", INDEX_VERSION)?;
+    Ok(inserted)
 }
 
-/// Registers one archive file; false if it already has a `files` row.
+/// Registers one archive file and returns the exchanges it indexed; None if it already has a
+/// `files` row.
 fn import_one(
     conn: &mut Connection,
     paths: &Paths,
@@ -443,7 +439,7 @@ fn import_one(
     root: &Path,
     rel: &Path,
     projects: &mut ProjectCache,
-) -> Result<bool> {
+) -> Result<Option<usize>> {
     let archive0 = path_str(&archive_path_for(paths, kind, rel, 0));
     let source = root.join(rel);
     let source_key = path_str(&source);
@@ -453,7 +449,7 @@ fn import_one(
         |r| r.get(0),
     )?;
     if known {
-        return Ok(false);
+        return Ok(None);
     }
     let (generation, offset) = if source.exists() {
         adopt_existing_archive(paths, kind, rel, &source)?
@@ -469,12 +465,13 @@ fn import_one(
     );
     let tx = conn.transaction()?;
     upsert_file(&tx, &row)?;
+    let mut inserted = 0;
     if row.offset > 0 {
-        index_file(&tx, &mut row, projects)?;
+        inserted = index_file(&tx, &mut row, projects)?.inserted;
         upsert_file(&tx, &row)?;
     }
     tx.commit()?;
-    Ok(true)
+    Ok(Some(inserted))
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -507,14 +504,14 @@ pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncSt
     };
     let mut conn = crate::db::open(&paths.db())?;
     let mut projects = ProjectCache::default();
+    let mut stats = SyncStats::default();
     if meta_get(&conn, "imported").is_none() {
-        import_archive_with_roots(&mut conn, paths, roots, &mut projects)?;
+        stats.new_exchanges += import_archive_with_roots(&mut conn, paths, roots, &mut projects)?.1;
     }
     if meta_get(&conn, "index_version").as_deref() != Some(INDEX_VERSION) {
-        reindex_all(&mut conn, paths, &mut projects)?;
+        stats.new_exchanges += reindex_all(&mut conn, paths, &mut projects)?;
     }
 
-    let mut stats = SyncStats::default();
     let mut last_error = String::new();
     for f in discover_in(roots) {
         match sync_file(&mut conn, paths, &f, &mut projects) {
@@ -856,12 +853,20 @@ mod mirror {
 
     // ---- Task 8: indexing ----
 
+    /// A Claude Code user line with the given file meta fields (`sessionId`, `cwd`, ...).
+    fn user_with(text: &str, meta: serde_json::Value) -> String {
+        let mut v = serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
+            "message":{"role":"user","content":text}});
+        if let (Some(v), serde_json::Value::Object(meta)) = (v.as_object_mut(), meta) {
+            v.extend(meta);
+        }
+        format!("{v}\n")
+    }
+
     fn user(text: &str) -> String {
-        format!(
-            "{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":text}})
+        user_with(
+            text,
+            serde_json::json!({"sessionId":"s1","cwd":"/nonexistent/demo","isSidechain":false}),
         )
     }
 
@@ -873,7 +878,7 @@ mod mirror {
         )
     }
 
-    fn exchange_lines(q: &str, a: &str) -> String {
+    pub(super) fn exchange_lines(q: &str, a: &str) -> String {
         user(q) + &assistant(a)
     }
 
@@ -944,11 +949,7 @@ mod mirror {
     }
 
     fn fixture(provider: &str, name: &str) -> String {
-        fs::read_to_string(format!(
-            "{}/tests/fixtures/{provider}/{name}.jsonl",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap()
+        fs::read_to_string(crate::parse::tests::fixture(provider, name)).unwrap()
     }
 
     /// Syncs `body` once, and again in appends of `chunk` bytes with a sync after each, then
@@ -1250,51 +1251,48 @@ mod mirror {
         }
     }
 
+    impl Env {
+        /// `vec_exchanges` metadata in archive order, after embedding every pending exchange.
+        fn vec_meta(&mut self) -> Vec<(i64, String, i64, bool)> {
+            crate::embed::embed_pending(&mut self.conn, &crate::embed::FakeEmbedder).unwrap();
+            self.conn
+                .prepare(
+                    "SELECT x.line_start, v.project, v.ts, v.is_sidechain FROM vec_exchanges v
+                     JOIN exchanges x ON x.id = v.rowid ORDER BY x.line_start",
+                )
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        }
+    }
+
     #[test]
     fn file_meta_learned_late_reaches_exchanges_indexed_earlier() {
-        // The first exchanges carry no sessionId, cwd or isSidechain; a later line does.
-        let bare = |q: &str| {
-            format!(
-                "{}\n",
-                serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
-                    "message":{"role":"user","content":q}})
-            ) + &assistant("a")
-        };
-        let late = format!(
-            "{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":true,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":"q3"}})
+        // The first lines carry no sessionId, cwd or isSidechain; a later line does.
+        let bare = |q: &str| user_with(q, serde_json::json!({})) + &assistant("a");
+        let late = user_with(
+            "q3",
+            serde_json::json!({"sessionId":"s1","cwd":"/nonexistent/demo","isSidechain":true}),
         ) + &assistant("a");
-        let first = bare("q1") + &bare("q2");
-        let mut e = env_for(SourceKind::ClaudeCodeProjects, "p/r.jsonl");
+        let first =
+            "{\"type\":\"mode\",\"mode\":\"default\"}\n".to_string() + &bare("q1") + &bare("q2");
+        let (kind, rel) = (SourceKind::ClaudeCodeProjects, "p/r.jsonl");
+        let mut e = env_for(kind, rel);
         e.write(&first);
         e.sync();
-        crate::embed::embed_pending(&mut e.conn, &crate::embed::FakeEmbedder).unwrap();
+        e.vec_meta();
         e.append(&late);
         e.sync();
-        let want = one_shot(
-            SourceKind::ClaudeCodeProjects,
-            "p/r.jsonl",
-            &(first + &late),
-        );
-        assert_eq!(e.indexed(), want);
-        let vec_meta: Vec<(String, i64)> = e
-            .conn
-            .prepare(
-                "SELECT v.project, v.is_sidechain FROM vec_exchanges v
-                 JOIN exchanges x ON x.id = v.rowid",
-            )
-            .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        assert!(!vec_meta.is_empty());
-        assert!(
-            vec_meta.iter().all(|m| *m == ("demo".to_string(), 1)),
-            "{vec_meta:?}"
-        );
+        let mut once = env_for(kind, rel);
+        once.write(&(first + &late));
+        once.sync();
+        assert_eq!(e.indexed(), once.indexed());
+        let want = once.vec_meta();
+        assert_eq!(want.len(), 3);
+        assert!(want.iter().all(|v| v.1 == "demo" && v.3), "{want:?}");
+        assert_eq!(e.vec_meta(), want);
     }
 
     #[test]
@@ -1494,16 +1492,7 @@ mod orchestration {
         fs::write(path, body).unwrap();
     }
 
-    fn exchange_lines(q: &str, a: &str) -> String {
-        format!(
-            "{}\n{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":q}}),
-            serde_json::json!({"type":"assistant","message":{"role":"assistant",
-                "content":[{"type":"text","text":a}]}})
-        )
-    }
+    use super::mirror::exchange_lines;
 
     impl Env {
         fn archive(&self, kind: SourceKind, rel: &str, generation: i64) -> PathBuf {
@@ -1520,6 +1509,7 @@ mod orchestration {
         fn import(&self, conn: &mut Connection) -> usize {
             import_archive_with_roots(conn, &self.paths, &self.roots, &mut ProjectCache::default())
                 .unwrap()
+                .0
         }
     }
 
@@ -1753,7 +1743,9 @@ mod orchestration {
              UPDATE meta SET value = '1' WHERE key = 'index_version';",
         )
         .unwrap();
-        run_sync_with_roots(&e.paths, &e.roots).unwrap();
+        // Reindexed exchanges count as new: the embedding worker is woken for them.
+        let stats = run_sync_with_roots(&e.paths, &e.roots).unwrap();
+        assert_eq!(stats.new_exchanges, 1);
         let project = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
         assert_eq!(project("SELECT project FROM files"), "demo");
         assert_eq!(project("SELECT project FROM exchanges"), "demo");

@@ -1,9 +1,9 @@
-use crate::embed::{E5Embedder, Embedder, SlowFakeEmbedder, embed_pending};
+use crate::embed::{E5Embedder, Embedder, FakeEmbedder, embed_pending};
 use crate::locks;
 use crate::log::log_line;
 use crate::mcp::{Ctx, serve};
 use crate::paths::{Paths, VERSION, try_lock};
-use crate::sync::run_sync;
+use crate::sync::{SyncStats, run_sync};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -25,7 +25,6 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DaemonOpts {
     pub idle_secs: u64,
     pub fake_embedder: bool,
-    pub fake_embed_delay_ms: u64,
 }
 
 /// The daemon socket path, or an error when it does not fit in `sun_path`.
@@ -187,9 +186,7 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     // daemon spawns any thread, so nothing else reads or writes the environment concurrently.
     unsafe { std::env::remove_var("HF_HOME") };
     let embedder: Option<Arc<dyn Embedder>> = if opts.fake_embedder {
-        Some(Arc::new(SlowFakeEmbedder(Duration::from_millis(
-            opts.fake_embed_delay_ms,
-        ))))
+        Some(Arc::new(FakeEmbedder))
     } else {
         None
     };
@@ -202,11 +199,17 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     state.request_sync();
 
     let st = state.clone();
-    std::thread::spawn(move || scheduler(&st, |paths| run_sync(paths).map(drop)));
+    std::thread::spawn(move || scheduler(&st, run_sync));
     let st = state.clone();
     std::thread::spawn(move || {
+        // One connection for the worker's lifetime, opened by the first pass that needs it.
+        let mut conn = None;
         embed_worker(&st, &wakes, |paths, e| {
-            embed_pending(&mut crate::db::open(&paths.db())?, e).map(drop)
+            let c = match &mut conn {
+                Some(c) => c,
+                None => conn.insert(crate::db::open(&paths.db())?),
+            };
+            embed_pending(c, e).map(drop)
         });
     });
     if !opts.fake_embedder {
@@ -237,8 +240,31 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     Ok(())
 }
 
-/// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each.
-fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
+/// How a `guarded` run ended; a failure is already logged.
+enum Run<T> {
+    Done(T),
+    Failed,
+    Panicked,
+}
+
+/// Runs `f`, catching a panic, and logs an error or a panic as `<label>: ...`.
+fn guarded<T>(paths: &Paths, label: &str, f: impl FnOnce() -> Result<T>) -> Run<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(v)) => Run::Done(v),
+        Ok(Err(e)) => {
+            log_line(paths, &format!("{label}: {e:#}"));
+            Run::Failed
+        }
+        Err(_) => {
+            log_line(paths, &format!("{label}: panicked"));
+            Run::Panicked
+        }
+    }
+}
+
+/// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each
+/// run that indexed new exchanges (or failed, having maybe indexed some).
+fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<SyncStats>) {
     loop {
         {
             let mut s = locks::lock(&st.sched);
@@ -250,13 +276,10 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
             s.started += 1;
         }
         let paths = &st.ctx.paths;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync(paths)));
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => log_line(paths, &format!("sync: {e:#}")),
-            Err(_) => log_line(paths, "sync: panicked"),
+        match guarded(paths, "sync", || sync(paths)) {
+            Run::Done(stats) if stats.new_exchanges == 0 => {}
+            _ => st.wake_embedder(),
         }
-        st.wake_embedder();
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
         let mut s = locks::lock(&st.sched);
@@ -272,7 +295,7 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
 fn embed_worker(
     st: &State,
     wakes: &Receiver<()>,
-    embed: impl Fn(&Paths, &dyn Embedder) -> Result<()>,
+    mut embed: impl FnMut(&Paths, &dyn Embedder) -> Result<()>,
 ) {
     while wakes.recv().is_ok() {
         let Some(e) = locks::read(&st.ctx.embedder).clone() else {
@@ -280,17 +303,10 @@ fn embed_worker(
         };
         st.embedding.store(true, Ordering::SeqCst);
         let paths = &st.ctx.paths;
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| embed(paths, e.as_ref())));
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => log_line(paths, &format!("embedding: {err:#}")),
-            Err(_) => {
-                log_line(paths, "embedding: panicked");
-                if let Ok(c) = crate::db::open(&paths.db()) {
-                    crate::embed::record_embed_error(&c, "embedding panicked");
-                }
-            }
+        if let Run::Panicked = guarded(paths, "embedding", || embed(paths, e.as_ref()))
+            && let Ok(c) = crate::db::open(&paths.db())
+        {
+            crate::embed::record_embed_error(&c, "embedding panicked");
         }
         st.touch();
         st.embedding.store(false, Ordering::SeqCst);
@@ -380,7 +396,6 @@ fn handle_conn(stream: UnixStream, st: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embed::FakeEmbedder;
 
     fn state() -> (tempfile::TempDir, State, Receiver<()>) {
         let t = tempfile::tempdir().unwrap();
@@ -499,6 +514,63 @@ mod tests {
     }
 
     #[test]
+    fn sync_wait_returns_once_indexed_while_embedding_still_runs() {
+        let (_t, st, wakes) = state();
+        *st.ctx.embedder.write().unwrap() = Some(Arc::new(FakeEmbedder));
+        let st = Arc::new(st);
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = Mutex::new(held);
+        let w_st = st.clone();
+        std::thread::spawn(move || {
+            // Every pass blocks until released, like a slow model with a long backlog.
+            embed_worker(&w_st, &wakes, |_, _| {
+                let _ = held.lock().unwrap().recv();
+                Ok(())
+            });
+        });
+        let s_st = st.clone();
+        std::thread::spawn(move || scheduler(&s_st, |_| Ok(SyncStats::default())));
+        st.wake_embedder();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !st.embedding.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "embedding pass never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (done, waited) = std::sync::mpsc::channel();
+        let c_st = st.clone();
+        std::thread::spawn(move || {
+            c_st.sync_and_wait();
+            let _ = done.send(());
+        });
+        waited
+            .recv_timeout(Duration::from_secs(5))
+            .expect("sync --wait waited for the embedding pass");
+        assert!(st.embedding.load(Ordering::SeqCst));
+        drop(release);
+    }
+
+    #[test]
+    fn scheduler_wakes_the_embedder_only_after_new_exchanges() {
+        let (_t, st, wakes) = state();
+        let st = Arc::new(st);
+        let new = Arc::new(AtomicUsize::new(0));
+        let (s_st, s_new) = (st.clone(), new.clone());
+        std::thread::spawn(move || {
+            scheduler(&s_st, |_| {
+                Ok(SyncStats {
+                    new_exchanges: s_new.load(Ordering::SeqCst),
+                    ..SyncStats::default()
+                })
+            });
+        });
+        st.sync_and_wait();
+        assert!(wakes.try_recv().is_err(), "woke with nothing to embed");
+        new.store(3, Ordering::SeqCst);
+        st.sync_and_wait();
+        assert!(wakes.try_recv().is_ok());
+    }
+
+    #[test]
     fn scheduler_keeps_syncing_after_locks_were_poisoned() {
         let (_t, st, _wakes) = state();
         let st = Arc::new(st);
@@ -517,7 +589,7 @@ mod tests {
         std::thread::spawn(move || {
             scheduler(&sched_st, |_| {
                 sched_runs.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(SyncStats::default())
             });
         });
         for want in 1..=2 {
