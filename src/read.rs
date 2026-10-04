@@ -1,7 +1,7 @@
+use crate::archive::generation_stem;
 use crate::db::open_readonly;
-use crate::parse::{read_file_lines_from, render_line};
+use crate::parse::{read_file_lines_from, render_line, truncate_bytes};
 use crate::paths::{Paths, SourceKind};
-use crate::sync::is_generation_name;
 use anyhow::{Result, anyhow, bail};
 use std::path::{Component, Path};
 
@@ -16,24 +16,12 @@ fn kind_of(first: &str) -> Result<SourceKind> {
         .ok_or_else(|| anyhow!("unknown archive source: {first}"))
 }
 
-fn cut(s: &str, max: usize) -> &str {
-    let mut end = max.min(s.len());
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 /// `<stem>.gen-N.jsonl` -> `<stem>.jsonl`; other names are unchanged.
 fn generation_base(p: &Path) -> std::path::PathBuf {
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
-    match name.as_deref() {
-        Some(n) if is_generation_name(n) => {
-            let stem = n.strip_suffix(".jsonl").unwrap_or(n);
-            let head = stem.rsplit_once(".gen-").map_or(stem, |(h, _)| h);
-            p.with_file_name(format!("{head}.jsonl"))
-        }
-        _ => p.to_path_buf(),
+    match name.as_deref().and_then(generation_stem) {
+        Some(stem) => p.with_file_name(format!("{stem}.jsonl")),
+        None => p.to_path_buf(),
     }
 }
 
@@ -118,8 +106,8 @@ pub fn read_archive(
         }
         if out.is_empty() {
             // Progress is always at least one line: emit it cut to fit.
-            out.push_str(cut(&block, budget - 16));
-            out.push_str("…[truncated]\n\n");
+            out.push_str(&truncate_bytes(&block, budget - 16));
+            out.push_str("\n\n");
             if lines.next().is_some_and(|l| l.is_ok_and(|(m, _)| m <= end)) {
                 out.push_str(&format!("_(continue with startLine={})_", n + 1));
             }

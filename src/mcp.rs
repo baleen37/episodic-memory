@@ -1,9 +1,9 @@
 use crate::db;
 use crate::embed::Embedder;
 use crate::host::session_of;
-use crate::paths::Paths;
+use crate::paths::{Paths, VERSION};
 use crate::read::read_archive;
-use crate::search::{Hit, SearchParams, search};
+use crate::search::{Hit, MAX_LIMIT, SearchParams, search};
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use serde_json::{Map, Value, json};
@@ -11,9 +11,7 @@ use std::io::{BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 10;
-const MAX_LIMIT: usize = 50;
 const KEYWORD_ONLY: &str = "(vector search unavailable: model loading — keyword results only)";
 const KEYWORD_ONLY_FAILED: &str =
     "(vector search unavailable: model unavailable — keyword results only)";

@@ -1,3 +1,4 @@
+use crate::parse::truncate_chars;
 use anyhow::{Result, bail};
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use rusqlite::{Connection, params};
@@ -97,13 +98,6 @@ struct Pending {
     ts: i64,
     is_sidechain: i64,
     text: String,
-}
-
-fn truncate_chars(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((i, _)) => &s[..i],
-        None => s,
-    }
 }
 
 fn next_batch(conn: &Connection) -> Result<Vec<Pending>> {

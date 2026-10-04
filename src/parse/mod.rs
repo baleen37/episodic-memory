@@ -205,11 +205,12 @@ pub(crate) fn truncate_bytes(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    let mut end = max;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}{TRUNCATED}", &s[..end])
+    format!("{}{TRUNCATED}", &s[..s.floor_char_boundary(max)])
+}
+
+/// The first `max` chars of `s` (all of it when shorter).
+pub(crate) fn truncate_chars(s: &str, max: usize) -> &str {
+    s.char_indices().nth(max).map_or(s, |(i, _)| &s[..i])
 }
 
 pub(crate) fn render_text(role: &str, text: &str) -> String {

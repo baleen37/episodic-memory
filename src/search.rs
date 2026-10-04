@@ -1,4 +1,5 @@
 use crate::embed::Embedder;
+use crate::parse::truncate_chars;
 use crate::terms::build_match_query;
 use anyhow::{Result, bail};
 use chrono::{Days, Duration, Local, NaiveDate, TimeZone};
@@ -6,7 +7,8 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 use std::collections::{HashMap, HashSet};
 
-const MAX_LIMIT: usize = 50;
+/// Most hits one search returns.
+pub const MAX_LIMIT: usize = 50;
 const SNIPPET_CHARS: usize = 200;
 /// Candidates fetched per side (BM25 and vector) for each concept of an array query.
 const MULTI_CONCEPT_CANDIDATES: usize = 300;
@@ -239,7 +241,7 @@ fn concept(
 }
 
 fn load_hit(conn: &Connection, id: i64, score: f64) -> Result<Hit> {
-    let snippet = |s: String| s.chars().take(SNIPPET_CHARS).collect::<String>();
+    let snippet = |s: String| truncate_chars(&s, SNIPPET_CHARS).to_owned();
     Ok(conn.query_row(
         "SELECT project, ts, user_message, assistant_message, archive_path, line_start, line_end
          FROM exchanges WHERE id = ?",

@@ -1,4 +1,4 @@
-use crate::archive::{append_tail, archive_path_for, tails_match};
+use crate::archive::{append_tail, archive_path_for, generation_stem, tails_match};
 use crate::db::{
     FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
     upsert_file,
@@ -296,16 +296,6 @@ pub fn sync_file(
 
 // ---- Task 9: discovery, archive import, sync orchestration ----
 
-pub(crate) fn is_generation_name(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".jsonl") else {
-        return false;
-    };
-    match stem.rsplit_once(".gen-") {
-        Some((_, digits)) => !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()),
-        None => false,
-    }
-}
-
 /// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
 /// Broken links and unreadable entries are skipped, and each directory is entered once (by
 /// device and inode) so a link to an ancestor cannot loop. Returns `(path relative to root, size)`.
@@ -333,7 +323,7 @@ fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
             } else if meta.is_file() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.ends_with(".jsonl")
-                    && !is_generation_name(&name)
+                    && generation_stem(&name).is_none()
                     && let Ok(rel) = path.strip_prefix(root)
                 {
                     out.push((rel.to_path_buf(), meta.len()));
@@ -1247,9 +1237,6 @@ mod orchestration {
             .map(|f| f.rel.to_string_lossy().into_owned())
             .collect();
         assert_eq!(rels, vec!["a/y.jsonl", "b/x.jsonl"]);
-        assert!(is_generation_name("s.gen-12.jsonl"));
-        assert!(!is_generation_name("s.gen-x.jsonl"));
-        assert!(!is_generation_name("s.jsonl"));
     }
 
     #[test]
