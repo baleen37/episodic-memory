@@ -164,7 +164,7 @@ fn render_line(v: &Value) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::parse::ParseOutput;
-    use crate::parse::read_lines;
+    use crate::parse::read_lines_from;
     use crate::parse::tests::{fixture, meta_of};
     use crate::paths::SourceKind;
     use std::io::BufReader;
@@ -278,14 +278,14 @@ mod tests {
                 Ok(data.len())
             }
         }
-        let mut it = read_lines(BufReader::new(Failing(false)));
+        let mut it = read_lines_from(BufReader::new(Failing(false)), 1);
         assert!(it.next().unwrap().is_ok());
         assert!(it.next().unwrap().is_err());
     }
 
     #[test]
     fn invalid_utf8_is_bad_line_not_error() {
-        let items: Vec<_> = read_lines(&b"\xff\xfe\n{}\n"[..]).collect();
+        let items: Vec<_> = read_lines_from(&b"\xff\xfe\n{}\n"[..], 1).collect();
         assert!(matches!(items[0], Ok((1, None))));
         assert!(matches!(items[1], Ok((2, Some(_)))));
     }

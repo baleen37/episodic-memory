@@ -94,6 +94,21 @@ impl Embedder for FakeEmbedder {
     }
 }
 
+/// Test embedder whose every call fails with "broken".
+#[cfg(test)]
+pub struct Broken;
+
+#[cfg(test)]
+impl Embedder for Broken {
+    fn embed_passages(&self, _: &[String]) -> Result<Vec<Vec<f32>>> {
+        bail!("broken")
+    }
+
+    fn embed_query(&self, _: &str) -> Result<Vec<f32>> {
+        bail!("broken")
+    }
+}
+
 struct Pending {
     id: i64,
     text: String,

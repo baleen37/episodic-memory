@@ -240,6 +240,28 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     Ok(())
 }
 
+/// How a `guarded` run ended; a failure is already logged.
+enum Run<T> {
+    Done(T),
+    Failed,
+    Panicked,
+}
+
+/// Runs `f`, catching a panic, and logs an error or a panic as `<label>: ...`.
+fn guarded<T>(paths: &Paths, label: &str, f: impl FnOnce() -> Result<T>) -> Run<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(v)) => Run::Done(v),
+        Ok(Err(e)) => {
+            log_line(paths, &format!("{label}: {e:#}"));
+            Run::Failed
+        }
+        Err(_) => {
+            log_line(paths, &format!("{label}: panicked"));
+            Run::Panicked
+        }
+    }
+}
+
 /// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each
 /// run that indexed new exchanges (or failed, having maybe indexed some).
 fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<SyncStats>) {
@@ -254,21 +276,9 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<SyncStats>) {
             s.started += 1;
         }
         let paths = &st.ctx.paths;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync(paths)));
-        match result {
-            Ok(Ok(stats)) => {
-                if stats.new_exchanges > 0 {
-                    st.wake_embedder();
-                }
-            }
-            Ok(Err(e)) => {
-                log_line(paths, &format!("sync: {e:#}"));
-                st.wake_embedder();
-            }
-            Err(_) => {
-                log_line(paths, "sync: panicked");
-                st.wake_embedder();
-            }
+        match guarded(paths, "sync", || sync(paths)) {
+            Run::Done(stats) if stats.new_exchanges == 0 => {}
+            _ => st.wake_embedder(),
         }
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
@@ -293,17 +303,10 @@ fn embed_worker(
         };
         st.embedding.store(true, Ordering::SeqCst);
         let paths = &st.ctx.paths;
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| embed(paths, e.as_ref())));
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => log_line(paths, &format!("embedding: {err:#}")),
-            Err(_) => {
-                log_line(paths, "embedding: panicked");
-                if let Ok(c) = crate::db::open(&paths.db()) {
-                    crate::embed::record_embed_error(&c, "embedding panicked");
-                }
-            }
+        if let Run::Panicked = guarded(paths, "embedding", || embed(paths, e.as_ref()))
+            && let Ok(c) = crate::db::open(&paths.db())
+        {
+            crate::embed::record_embed_error(&c, "embedding panicked");
         }
         st.touch();
         st.embedding.store(false, Ordering::SeqCst);

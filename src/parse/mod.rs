@@ -108,14 +108,9 @@ impl ReparsePoint {
     };
 }
 
-/// Yields (1-based line number, parsed JSON or None when the line is bad). Blank lines are skipped.
-/// I/O errors are yielded as `Err`; invalid UTF-8 or JSON is a bad line, not an error.
-#[cfg(test)]
-pub(crate) fn read_lines<R: BufRead>(reader: R) -> impl Iterator<Item = Result<Line>> {
-    read_lines_from(reader, 1)
-}
-
-/// Like `read_lines`, but lines before `from_line` are only counted, never decoded.
+/// Yields (1-based line number, parsed JSON or None when the line is bad); lines before
+/// `from_line` are only counted, never decoded. Blank lines are skipped. I/O errors are yielded
+/// as `Err`; invalid UTF-8 or JSON is a bad line, not an error.
 fn read_lines_from<R: BufRead>(reader: R, from_line: i64) -> impl Iterator<Item = Result<Line>> {
     positioned_lines(reader, (1, 0), from_line).map(|l| l.map(|(n, _, v)| (n, v)))
 }

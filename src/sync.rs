@@ -853,12 +853,20 @@ mod mirror {
 
     // ---- Task 8: indexing ----
 
+    /// A Claude Code user line with the given file meta fields (`sessionId`, `cwd`, ...).
+    fn user_with(text: &str, meta: serde_json::Value) -> String {
+        let mut v = serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
+            "message":{"role":"user","content":text}});
+        if let (Some(v), serde_json::Value::Object(meta)) = (v.as_object_mut(), meta) {
+            v.extend(meta);
+        }
+        format!("{v}\n")
+    }
+
     fn user(text: &str) -> String {
-        format!(
-            "{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":text}})
+        user_with(
+            text,
+            serde_json::json!({"sessionId":"s1","cwd":"/nonexistent/demo","isSidechain":false}),
         )
     }
 
@@ -870,7 +878,7 @@ mod mirror {
         )
     }
 
-    fn exchange_lines(q: &str, a: &str) -> String {
+    pub(super) fn exchange_lines(q: &str, a: &str) -> String {
         user(q) + &assistant(a)
     }
 
@@ -941,11 +949,7 @@ mod mirror {
     }
 
     fn fixture(provider: &str, name: &str) -> String {
-        fs::read_to_string(format!(
-            "{}/tests/fixtures/{provider}/{name}.jsonl",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap()
+        fs::read_to_string(crate::parse::tests::fixture(provider, name)).unwrap()
     }
 
     /// Syncs `body` once, and again in appends of `chunk` bytes with a sync after each, then
@@ -1267,18 +1271,10 @@ mod mirror {
     #[test]
     fn file_meta_learned_late_reaches_exchanges_indexed_earlier() {
         // The first lines carry no sessionId, cwd or isSidechain; a later line does.
-        let bare = |q: &str| {
-            format!(
-                "{}\n",
-                serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
-                    "message":{"role":"user","content":q}})
-            ) + &assistant("a")
-        };
-        let late = format!(
-            "{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":true,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":"q3"}})
+        let bare = |q: &str| user_with(q, serde_json::json!({})) + &assistant("a");
+        let late = user_with(
+            "q3",
+            serde_json::json!({"sessionId":"s1","cwd":"/nonexistent/demo","isSidechain":true}),
         ) + &assistant("a");
         let first =
             "{\"type\":\"mode\",\"mode\":\"default\"}\n".to_string() + &bare("q1") + &bare("q2");
@@ -1496,16 +1492,7 @@ mod orchestration {
         fs::write(path, body).unwrap();
     }
 
-    fn exchange_lines(q: &str, a: &str) -> String {
-        format!(
-            "{}\n{}\n",
-            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
-                "isSidechain":false,"timestamp":"2026-01-02T03:04:05Z",
-                "message":{"role":"user","content":q}}),
-            serde_json::json!({"type":"assistant","message":{"role":"assistant",
-                "content":[{"type":"text","text":a}]}})
-        )
-    }
+    use super::mirror::exchange_lines;
 
     impl Env {
         fn archive(&self, kind: SourceKind, rel: &str, generation: i64) -> PathBuf {

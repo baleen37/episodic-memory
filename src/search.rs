@@ -183,15 +183,7 @@ fn vec_hits(
 
 /// `ids` as a JSON array, bound as one parameter and expanded with `json_each`.
 fn json_ids<'a>(ids: impl IntoIterator<Item = &'a i64>) -> String {
-    let mut s = String::from("[");
-    for (i, id) in ids.into_iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        let _ = write!(s, "{id}");
-    }
-    s.push(']');
-    s
+    serde_json::to_string(&ids.into_iter().collect::<Vec<_>>()).expect("integers serialize")
 }
 
 /// Candidate ids from `session` (to drop) and sidechain ids among `all`, in one query.

@@ -411,15 +411,6 @@ mod tests {
 
     #[test]
     fn embedding_failure_warns_until_a_batch_succeeds() {
-        struct Broken;
-        impl crate::embed::Embedder for Broken {
-            fn embed_passages(&self, _: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-                anyhow::bail!("model exploded")
-            }
-            fn embed_query(&self, _: &str) -> anyhow::Result<Vec<f32>> {
-                anyhow::bail!("model exploded")
-            }
-        }
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
         let embeddings = |paths: &Paths| {
@@ -446,11 +437,11 @@ mod tests {
             };
             crate::db::insert_exchange(&tx, &e, "q a").unwrap();
             tx.commit().unwrap();
-            assert!(crate::embed::embed_pending(&mut c, &Broken).is_err());
+            assert!(crate::embed::embed_pending(&mut c, &crate::embed::Broken).is_err());
         }
         let check = embeddings(&paths);
         assert_eq!(check.level, Level::Warn);
-        assert!(check.detail.contains("model exploded"), "{}", check.detail);
+        assert!(check.detail.contains("broken"), "{}", check.detail);
         {
             let mut c = crate::db::open(&paths.db()).unwrap();
             crate::embed::embed_pending(&mut c, &crate::embed::FakeEmbedder).unwrap();

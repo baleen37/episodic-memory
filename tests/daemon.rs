@@ -76,14 +76,20 @@ impl Env {
         assert!(t.elapsed() < Duration::from_secs(2), "sync hook blocked");
     }
 
-    fn meta(&self, key: &str) -> Option<String> {
+    /// A read-only connection to the daemon's DB, or None before it exists.
+    fn db(&self) -> Option<Connection> {
         let db = self.data.join("episodic.db");
         if !db.exists() {
             return None;
         }
         let c = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
         c.busy_timeout(Duration::from_secs(5)).ok()?;
-        c.query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
+        Some(c)
+    }
+
+    fn meta(&self, key: &str) -> Option<String> {
+        self.db()?
+            .query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
             .ok()
     }
 
@@ -439,11 +445,7 @@ fn search_during_sync_sees_committed_state() {
     assert!(done, "sync never finished");
     assert!(rounds >= 2);
     assert!(!seen.is_empty());
-    let c = Connection::open_with_flags(
-        env.data.join("episodic.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let c = env.db().unwrap();
     for (path, s, e) in &seen {
         let n: i64 = c
             .query_row(
@@ -622,12 +624,7 @@ fn symlink_to_ancestor_does_not_loop_discovery() {
         wait_until(Duration::from_secs(15), || env.sync_count() >= 1),
         "sync never finished"
     );
-    let c = Connection::open_with_flags(
-        env.data.join("episodic.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
-    c.busy_timeout(Duration::from_secs(5)).unwrap();
+    let c = env.db().unwrap();
     let mut stmt = c
         .prepare(
             "SELECT source_path FROM files WHERE source_kind = 'claude-code-projects' \
