@@ -341,6 +341,28 @@ pub fn insert_exchange(tx: &Transaction, e: &NewExchange, terms: &str) -> Result
     Ok(id)
 }
 
+/// Sets the file meta columns of every exchange of an archive, including the metadata columns
+/// `vec_exchanges` filters on (it has no FK support either).
+pub fn update_exchange_meta(
+    tx: &Transaction,
+    archive_path: &str,
+    session_id: Option<&str>,
+    project: &str,
+    is_sidechain: bool,
+) -> Result<()> {
+    tx.prepare_cached(
+        "UPDATE vec_exchanges SET project = ?2, is_sidechain = ?3
+         WHERE rowid IN (SELECT id FROM exchanges WHERE archive_path = ?1 AND embedded = 1)",
+    )?
+    .execute(params![archive_path, project, is_sidechain])?;
+    tx.prepare_cached(
+        "UPDATE exchanges SET session_id = ?2, project = ?3, is_sidechain = ?4
+         WHERE archive_path = ?1",
+    )?
+    .execute(params![archive_path, session_id, project, is_sidechain])?;
+    Ok(())
+}
+
 /// The only path that deletes exchanges. The virtual tables have no FK support,
 /// so their rows go first, then the `exchanges` rows.
 pub fn delete_exchanges_from(

@@ -1,7 +1,7 @@
 use crate::archive::{append_tail, archive_path_for, generation_stem, tails_match};
 use crate::db::{
     FileRow, NewExchange, delete_exchanges_from, get_file, insert_exchange, meta_get, meta_set,
-    upsert_file,
+    update_exchange_meta, upsert_file,
 };
 use crate::log::log_line;
 use crate::parse::{ReparsePoint, initial_meta, observe_meta_from, parse_from};
@@ -76,12 +76,32 @@ fn index_file(
     if !row.meta.same_boundaries(&old_meta) {
         row.reparse = ReparsePoint::START;
     }
+    let old_project = row.project.clone();
     if row.harness.is_none() || row.meta.cwd != old_meta.cwd {
         row.harness = Some(kind.harness().to_string());
         row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
     }
+    let project = row
+        .project
+        .clone()
+        .unwrap_or_else(|| UNKNOWN_PROJECT.into());
 
     delete_exchanges_from(tx, &row.archive_path, row.reparse.line)?;
+    // Meta that does not decide boundaries may be learned after exchanges were indexed; the
+    // exchanges kept before the reparse point get it too, as a one-shot sync would give them.
+    if row.reparse.line > 1
+        && (row.meta.session_id != old_meta.session_id
+            || row.meta.is_sidechain != old_meta.is_sidechain
+            || row.project != old_project)
+    {
+        update_exchange_meta(
+            tx,
+            &row.archive_path,
+            row.meta.session_id.as_deref(),
+            &project,
+            row.meta.is_sidechain,
+        )?;
+    }
     let out = parse_from(kind, &archive, row.reparse, &row.meta)?;
     stats.bad_lines = out.bad_lines;
     if out.do_not_index {
@@ -90,10 +110,6 @@ fn index_file(
         return Ok(stats);
     }
 
-    let project = row
-        .project
-        .clone()
-        .unwrap_or_else(|| UNKNOWN_PROJECT.into());
     if let Some(last) = out.exchanges.last() {
         row.reparse = ReparsePoint {
             line: last.line_start,
@@ -1232,6 +1248,53 @@ mod mirror {
             e.sync();
             assert_eq!(e.indexed(), one_shot(kind, rel, &body), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn file_meta_learned_late_reaches_exchanges_indexed_earlier() {
+        // The first exchanges carry no sessionId, cwd or isSidechain; a later line does.
+        let bare = |q: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"user","timestamp":"2026-01-02T03:04:05Z",
+                    "message":{"role":"user","content":q}})
+            ) + &assistant("a")
+        };
+        let late = format!(
+            "{}\n",
+            serde_json::json!({"type":"user","sessionId":"s1","cwd":"/nonexistent/demo",
+                "isSidechain":true,"timestamp":"2026-01-02T03:04:05Z",
+                "message":{"role":"user","content":"q3"}})
+        ) + &assistant("a");
+        let first = bare("q1") + &bare("q2");
+        let mut e = env_for(SourceKind::ClaudeCodeProjects, "p/r.jsonl");
+        e.write(&first);
+        e.sync();
+        crate::embed::embed_pending(&mut e.conn, &crate::embed::FakeEmbedder).unwrap();
+        e.append(&late);
+        e.sync();
+        let want = one_shot(
+            SourceKind::ClaudeCodeProjects,
+            "p/r.jsonl",
+            &(first + &late),
+        );
+        assert_eq!(e.indexed(), want);
+        let vec_meta: Vec<(String, i64)> = e
+            .conn
+            .prepare(
+                "SELECT v.project, v.is_sidechain FROM vec_exchanges v
+                 JOIN exchanges x ON x.id = v.rowid",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(!vec_meta.is_empty());
+        assert!(
+            vec_meta.iter().all(|m| *m == ("demo".to_string(), 1)),
+            "{vec_meta:?}"
+        );
     }
 
     #[test]
