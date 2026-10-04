@@ -5,7 +5,7 @@ use crate::db::{
 };
 use crate::embed::{Embedder, embed_pending};
 use crate::log::log_line;
-use crate::parse::{FileMeta, parse_from, read_meta};
+use crate::parse::{initial_meta, observe_meta_from, parse_from};
 use crate::paths::{Paths, SourceKind, SourceRoot, candidate_roots_from_env, try_lock};
 use crate::project::ProjectCache;
 use crate::terms::to_terms;
@@ -34,7 +34,7 @@ pub enum FileOutcome {
 
 /// Bumped when parsing or project resolution changes what an indexed file should contain;
 /// a database indexed under an older version is reindexed once (`reindex_all`).
-const INDEX_VERSION: &str = "2";
+const INDEX_VERSION: &str = "3";
 
 /// Exchanges larger than this (either message, UTF-8 bytes) are not indexed (obra#139).
 const MAX_MESSAGE_BYTES: usize = 262_144;
@@ -59,36 +59,26 @@ fn index_file(
     }
     let archive = PathBuf::from(&row.archive_path);
 
-    // Session info is read on the first parse of a non-empty archive and persisted. Claude
-    // transcripts often open with lines lacking `cwd` (`mode`, `last-prompt`, ...), so it is
-    // re-read (and the project recomputed) until a `cwd` is known. A file with a user signal
-    // re-reads the head on every call: the signal can change as lines arrive, and `files` does
-    // not store `agent_path`. Other files reuse the persisted values. The archive path keeps the
-    // source's relative path, so "subagents" detection works on it directly.
-    let read_session = row.offset > 0 && (row.harness.is_none() || row.cwd.is_none());
-    let meta = if read_session || row.user_signal.is_some() {
-        read_meta(kind, &archive, &row.archive_path)?
-    } else {
-        FileMeta {
-            session_id: row.session_id.clone(),
-            cwd: row.cwd.clone(),
-            is_sidechain: row.is_sidechain.unwrap_or(false),
-            sidechain_known: row.is_sidechain.is_some(),
-            agent_path: None,
-            user_signal: row.user_signal.clone(),
-        }
-    };
-    if read_session {
-        row.session_id.clone_from(&meta.session_id);
-        row.cwd.clone_from(&meta.cwd);
-        row.is_sidechain = Some(meta.is_sidechain);
-        row.user_signal.clone_from(&meta.user_signal);
+    // File meta is learned only from the archive bytes appended since it was last observed
+    // (`meta_offset`), until the provider reports it settled. The project follows the `cwd`:
+    // transcripts often open with lines lacking one (`mode`, `last-prompt`, ...).
+    let old_cwd = row.meta.cwd.clone();
+    if row.meta_offset == 0 {
+        row.meta = initial_meta(kind, &row.archive_path);
+        row.meta_settled = false;
+    }
+    if !row.meta_settled && row.meta_offset < row.offset {
+        row.meta_settled =
+            observe_meta_from(kind, &archive, row.meta_offset as u64, &mut row.meta)?;
+    }
+    row.meta_offset = row.offset;
+    if row.harness.is_none() || row.meta.cwd != old_cwd {
         row.harness = Some(kind.harness().to_string());
-        row.project = Some(projects.resolve(meta.cwd.as_deref()));
+        row.project = Some(projects.resolve(row.meta.cwd.as_deref()));
     }
 
     delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
-    let out = parse_from(kind, &archive, row.reparse_line, &meta)?;
+    let out = parse_from(kind, &archive, row.reparse_line, &row.meta)?;
     stats.bad_lines = out.bad_lines;
     if out.do_not_index {
         row.skipped = true;
@@ -116,10 +106,10 @@ fn index_file(
             archive_path: row.archive_path.clone(),
             line_start: e.line_start,
             line_end: e.line_end,
-            session_id: row.session_id.clone(),
+            session_id: row.meta.session_id.clone(),
             project: project.clone(),
             harness: kind.harness().to_string(),
-            is_sidechain: row.is_sidechain.unwrap_or(false),
+            is_sidechain: row.meta.is_sidechain,
             ts: e.ts,
             user_message: e.user_message,
             assistant_message: e.assistant_message,
@@ -212,6 +202,8 @@ fn start_new_generation(
     row.archive_path = path_str(&archive_path_for(paths, f.kind, &f.rel, generation));
     row.offset = 0;
     row.reparse_line = 1;
+    row.meta_offset = 0;
+    row.harness = None;
     upsert_file(&tx, row)?;
     tx.commit()?;
     Ok(())
@@ -269,7 +261,8 @@ pub fn sync_file(
     let tx = conn.transaction()?;
     row.offset = new_offset as i64;
     // Nothing new to parse unless the append moved the offset or the first parse is pending.
-    let stats = if row.offset != old_offset || row.harness.is_none() {
+    // An archive with no complete line yet does not exist, so there is nothing to parse.
+    let stats = if row.offset != old_offset || (row.harness.is_none() && row.offset > 0) {
         index_file(&tx, &mut row, projects)?
     } else {
         IndexStats::default()
@@ -401,6 +394,7 @@ fn reindex_all(conn: &mut Connection, paths: &Paths, projects: &mut ProjectCache
                 return Ok(());
             };
             row.reparse_line = 1;
+            row.meta_offset = 0;
             row.harness = None;
             let tx = conn.transaction()?;
             index_file(&tx, &mut row, projects)?;
@@ -550,17 +544,21 @@ mod mirror {
     }
 
     fn env() -> Env {
+        env_for(SourceKind::ClaudeCodeProjects, "proj/s1.jsonl")
+    }
+
+    fn env_for(kind: SourceKind, rel: &str) -> Env {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().join("data"));
         fs::create_dir_all(&paths.data).unwrap();
         let conn = crate::db::open(&paths.db()).unwrap();
         let root = t.path().join("src-root");
-        let src = root.join("proj/s1.jsonl");
+        let src = root.join(rel);
         fs::create_dir_all(src.parent().unwrap()).unwrap();
         let f = DiscoveredFile {
-            kind: SourceKind::ClaudeCodeProjects,
+            kind,
             source_path: src.clone(),
-            rel: PathBuf::from("proj/s1.jsonl"),
+            rel: PathBuf::from(rel),
             size: 0,
         };
         Env {
@@ -888,17 +886,196 @@ mod mirror {
         }
     }
 
+    // ---- Incremental file meta ----
+
+    type Indexed = (
+        i64,
+        i64,
+        Option<String>,
+        String,
+        String,
+        bool,
+        i64,
+        String,
+        String,
+        String,
+    );
+
+    impl Env {
+        /// Every exchange column a search or `read` can observe, in archive order.
+        fn indexed(&self) -> Vec<Indexed> {
+            self.conn
+                .prepare(
+                    "SELECT line_start, line_end, session_id, project, harness, is_sidechain, ts,
+                            user_message, assistant_message, tool_names
+                     FROM exchanges ORDER BY line_start",
+                )
+                .unwrap()
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                    ))
+                })
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        }
+    }
+
+    fn fixture(provider: &str, name: &str) -> String {
+        fs::read_to_string(format!(
+            "{}/tests/fixtures/{provider}/{name}.jsonl",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    }
+
+    /// Syncs `body` once, and again in appends of `chunk` bytes with a sync after each, then
+    /// requires both to index the same exchanges and file meta.
+    fn assert_incremental_matches_one_shot(kind: SourceKind, rel: &str, body: &str, chunk: usize) {
+        let mut once = env_for(kind, rel);
+        once.write(body);
+        once.sync();
+        let mut steps = env_for(kind, rel);
+        steps.write("");
+        for piece in body.as_bytes().chunks(chunk) {
+            steps.append(std::str::from_utf8(piece).unwrap());
+            steps.sync();
+        }
+        assert!(!once.indexed().is_empty(), "{rel}: fixture indexes nothing");
+        assert_eq!(
+            steps.indexed(),
+            once.indexed(),
+            "{rel} in {chunk}-byte appends"
+        );
+        let (a, b) = (steps.row(), once.row());
+        assert_eq!(a.meta, b.meta, "{rel} in {chunk}-byte appends");
+        assert_eq!(a.project, b.project);
+    }
+
+    #[test]
+    fn incremental_sync_matches_one_shot_for_every_fixture() {
+        let cases = [
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "main",
+                "p/main.jsonl",
+            ),
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "noise",
+                "p/noise.jsonl",
+            ),
+            (
+                SourceKind::ClaudeCodeProjects,
+                "claude",
+                "subagent",
+                "p/s/subagents/agent-1.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "modern",
+                "2026/01/02/modern.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "legacy",
+                "2026/01/02/legacy.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "subagent",
+                "2026/01/02/sub.jsonl",
+            ),
+            (
+                SourceKind::CodexSessions,
+                "codex",
+                "fork",
+                "2026/01/02/fork.jsonl",
+            ),
+        ];
+        for (kind, provider, name, rel) in cases {
+            let body = fixture(provider, name);
+            let line_len = body.lines().map(str::len).max().unwrap() + 1;
+            for chunk in [37, line_len, body.len()] {
+                assert_incremental_matches_one_shot(kind, rel, &body, chunk);
+            }
+        }
+    }
+
+    fn codex_line(v: &serde_json::Value) -> String {
+        format!("{v}\n")
+    }
+
+    fn codex_turn(q: &str, a: &str) -> String {
+        codex_line(
+            &serde_json::json!({"timestamp":"2026-01-02T03:04:05Z","type":"event_msg",
+            "payload":{"type":"user_message","message":q}}),
+        ) + &codex_line(&serde_json::json!({"timestamp":"2026-01-02T03:04:05Z",
+                "type":"response_item","payload":{"type":"message","role":"assistant",
+                "content":[{"type":"output_text","text":a}]}}))
+    }
+
+    #[test]
+    fn appended_codex_lines_are_observed_without_rereading_the_head() {
+        let mut e = env_for(SourceKind::CodexSessions, "2026/01/02/r.jsonl");
+        // The head holds a line that only differs from an `item_completed` user message in one
+        // byte, followed by more than the 4096 tail bytes compared against the source.
+        let decoy = codex_line(&serde_json::json!({"type":"event_msg","payload":{
+            "type":"xtem_completed","item":{"type":"UserMessage",
+            "content":[{"type":"text","text":"decoy"}]}}}));
+        let head = codex_line(&serde_json::json!({"type":"session_meta",
+            "payload":{"id":"x","cwd":"/nonexistent/demo"}}))
+            + &decoy;
+        let mut body = head.clone();
+        for i in 0..60 {
+            body += &codex_turn(&format!("q{i}"), "padding answer padding answer");
+        }
+        e.write(&body);
+        e.sync();
+        assert_eq!(e.row().meta.user_signal.as_deref(), Some("user_message"));
+        // Turn the decoy into an `item_completed` event in the archive only. A sync that reread
+        // the head would switch the user signal and stop indexing `user_message` turns.
+        let archive = e.gen_path(0);
+        let text = fs::read_to_string(&archive).unwrap();
+        fs::write(
+            &archive,
+            text.replacen("xtem_completed", "item_completed", 1),
+        )
+        .unwrap();
+        e.append(&codex_turn("fresh question", "fresh answer"));
+        e.sync();
+        assert_eq!(e.row().meta.user_signal.as_deref(), Some("user_message"));
+        let users: Vec<String> = e.exchanges().into_iter().map(|x| x.2).collect();
+        assert_eq!(users.len(), 61);
+        assert_eq!(users.last().unwrap(), "fresh question");
+    }
+
     #[test]
     fn indexes_fresh_file_and_fills_session_info() {
         let mut e = env();
         e.write(&(turn("alpha question", "alpha answer") + &turn("beta q", "beta a")));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 2 });
         let row = e.row();
-        assert_eq!(row.session_id.as_deref(), Some("s1"));
-        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.meta.session_id.as_deref(), Some("s1"));
+        assert_eq!(row.meta.cwd.as_deref(), Some("/nonexistent/demo"));
         assert_eq!(row.project.as_deref(), Some("demo"));
         assert_eq!(row.harness.as_deref(), Some("claude"));
-        assert_eq!(row.is_sidechain, Some(false));
+        assert!(row.meta.sidechain_known && !row.meta.is_sidechain);
         assert_eq!(row.reparse_line, 3);
         assert_eq!(e.exchanges().len(), 2);
     }
@@ -920,12 +1097,12 @@ mod mirror {
         e.write("{\"type\":\"mode\",\"mode\":\"default\",\"sessionId\":\"s1\"}\n");
         e.sync();
         let row = e.row();
-        assert!(row.cwd.is_none());
+        assert!(row.meta.cwd.is_none());
         assert_eq!(row.project.as_deref(), Some("unknown"));
         e.append(&turn("q1", "a1"));
         assert_eq!(e.sync(), FileOutcome::Synced { new_exchanges: 1 });
         let row = e.row();
-        assert_eq!(row.cwd.as_deref(), Some("/nonexistent/demo"));
+        assert_eq!(row.meta.cwd.as_deref(), Some("/nonexistent/demo"));
         assert_eq!(row.project.as_deref(), Some("demo"));
         let project: String = e
             .conn

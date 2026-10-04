@@ -10,7 +10,7 @@ setup() {
 @test "bench prints every timing and finds the synthetic data" {
   run "$ROOT/scripts/bench.sh" --bin "$BIN" --sessions 3 --big-mb 1 --repeat 2
   [ "$status" -eq 0 ]
-  for key in first_sync noop_sync incremental_sync_claude incremental_sync_codex search_single search_array; do
+  for key in first_sync noop_sync incremental_sync_claude incremental_sync_codex incremental_sync_codex_um search_single search_array; do
     echo "$output" | grep -Eq "^$key +[0-9]+\.[0-9]{3}s" || { echo "missing $key"; false; }
   done
 }
