@@ -110,25 +110,19 @@ impl Embedder for SlowFakeEmbedder {
 
 struct Pending {
     id: i64,
-    project: String,
-    ts: i64,
-    is_sidechain: i64,
     text: String,
 }
 
 fn next_batch(conn: &Connection) -> Result<Vec<Pending>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project, ts, is_sidechain, user_message, assistant_message, tool_names
+        "SELECT id, user_message, assistant_message, tool_names
          FROM exchanges WHERE embedded = 0 ORDER BY id LIMIT ?",
     )?;
     let rows = stmt.query_map([BATCH as i64], |r| {
-        let (u, a, t): (String, String, String) = (r.get(4)?, r.get(5)?, r.get(6)?);
+        let (u, a, t): (String, String, String) = (r.get(1)?, r.get(2)?, r.get(3)?);
         let doc = format!("User: {u}\n\nAssistant: {a}\n\nTools: {t}");
         Ok(Pending {
             id: r.get(0)?,
-            project: r.get(1)?,
-            ts: r.get(2)?,
-            is_sidechain: r.get(3)?,
             text: truncate_chars(&doc, DOC_MAX_CHARS).to_string(),
         })
     })?;
@@ -160,7 +154,9 @@ fn embed_batch(e: &dyn Embedder, texts: &[String]) -> Result<Vec<Vec<f32>>> {
 
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
 /// Vectors are computed outside any transaction; each batch is written in one short immediate
-/// transaction. A row deleted or embedded by someone else in between is skipped.
+/// transaction. A row deleted or embedded by someone else in between is skipped. The vector's
+/// `project`/`ts`/`is_sidechain` are copied from `exchanges` inside that transaction, so a meta
+/// backfill committed while the batch was being embedded is not lost.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
     loop {
@@ -185,11 +181,11 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
             )?;
             let mut insert = tx.prepare_cached(
                 "INSERT INTO vec_exchanges(rowid, embedding, project, ts, is_sidechain)
-                 VALUES (?, ?, ?, ?, ?)",
+                 SELECT id, ?2, project, ts, is_sidechain FROM exchanges WHERE id = ?1",
             )?;
             for (p, v) in batch.iter().zip(&vectors) {
                 if mark.execute([p.id])? == 1 {
-                    insert.execute(params![p.id, to_blob(v), p.project, p.ts, p.is_sidechain])?;
+                    insert.execute(params![p.id, to_blob(v)])?;
                     total += 1;
                 }
             }
@@ -304,6 +300,39 @@ mod tests {
             .query_row("SELECT count(*) FROM vec_exchanges", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vecs, 0);
+    }
+
+    /// Commits a late meta backfill (as a concurrent sync would) after the batch was read.
+    struct BackfillsMeta(std::path::PathBuf);
+
+    impl Embedder for BackfillsMeta {
+        fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            let mut c = crate::db::open(&self.0).unwrap();
+            let tx = c.transaction().unwrap();
+            crate::db::update_exchange_meta(&tx, "/a", Some("s"), "demo", true).unwrap();
+            tx.commit().unwrap();
+            FakeEmbedder.embed_passages(texts)
+        }
+        fn embed_query(&self, q: &str) -> Result<Vec<f32>> {
+            FakeEmbedder.embed_query(q)
+        }
+    }
+
+    #[test]
+    fn meta_backfilled_during_embedding_reaches_the_vector() {
+        let t = tempfile::tempdir().unwrap();
+        let db = t.path().join("e.db");
+        let mut conn = crate::db::open(&db).unwrap();
+        add(&mut conn, 1, "q");
+        assert_eq!(embed_pending(&mut conn, &BackfillsMeta(db)).unwrap(), 1);
+        let (p, side): (String, i64) = conn
+            .query_row(
+                "SELECT project, is_sidechain FROM vec_exchanges WHERE rowid = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((p.as_str(), side), ("demo", 1));
     }
 
     #[test]
