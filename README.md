@@ -44,8 +44,14 @@ and exits 0; the MCP server fails to start.
 | `project` | exact project name (git repository directory name) |
 
 Ranking fuses keyword and semantic ranks, with a small bonus for the top three keyword hits so
-an exact keyword match outranks a purely semantic one. With an array query, each concept
-considers its top 300 candidates per side before the per-conversation AND.
+an exact keyword match outranks a purely semantic one. Semantic candidates below a fixed
+similarity floor are dropped unless they also match keywords, so a query matching nothing
+returns `No results.` With an array query, each concept considers its top 300 candidates per
+side before the per-conversation AND.
+
+Scores are absolute (0-1): 1.00 means rank 1 on both the keyword and the semantic side; a
+semantic-only rank-1 hit scores about 0.37. When no result matches any keyword, the output
+starts with `(no keyword match — semantic matches only)`.
 
 Each result ends with `<archive_path>:<start>-<end>`. While the model is still loading, only
 keyword ranking is used and the output says so.

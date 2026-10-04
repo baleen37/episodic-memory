@@ -16,6 +16,7 @@ const MAX_LIMIT: usize = 50;
 const KEYWORD_ONLY: &str = "(vector search unavailable: model loading — keyword results only)";
 const KEYWORD_ONLY_FAILED: &str =
     "(vector search unavailable: model unavailable — keyword results only)";
+const SEMANTIC_ONLY: &str = "(no keyword match — semantic matches only)";
 
 pub struct Ctx {
     pub paths: Paths,
@@ -201,6 +202,9 @@ fn search_tool(args: &Map<String, Value>, ctx: &Ctx) -> Result<String, String> {
         } else {
             KEYWORD_ONLY
         });
+        text.push('\n');
+    } else if !out.hits.is_empty() && !out.keyword_match {
+        text.push_str(SEMANTIC_ONLY);
         text.push('\n');
     }
     if out.hits.is_empty() {
@@ -440,10 +444,47 @@ mod tests {
         let r = call(2, "search", json!({"query":["list","files"], "limit": 99}));
         let r = &exchange(&ctx, &[r])[0];
         assert!(text(r).starts_with("1. ["), "{}", text(r));
-        // Vector KNN always returns neighbors, so an empty result needs keyword-only mode.
+        // No keyword match and no vector neighbour above the floor: nothing at all.
+        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        assert_eq!(text(r), "No results.");
         *ctx.embedder.write().unwrap() = None;
         let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
         assert_eq!(text(r), format!("{KEYWORD_ONLY}\nNo results."));
+    }
+
+    /// Every passage and query embeds to the same vector (cosine 1).
+    struct Same;
+    impl Embedder for Same {
+        fn embed_passages(&self, t: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+            Ok(t.iter().map(|_| self.embed_query("").unwrap()).collect())
+        }
+        fn embed_query(&self, _: &str) -> anyhow::Result<Vec<f32>> {
+            let mut v = vec![0.0; crate::embed::DIMS];
+            v[0] = 1.0;
+            Ok(v)
+        }
+    }
+
+    #[test]
+    fn semantic_only_notice_when_no_hit_matches_keywords() {
+        let (_t, ctx) = indexed_ctx();
+        let mut conn = db::open(&ctx.paths.db()).unwrap();
+        conn.execute_batch("DELETE FROM vec_exchanges; UPDATE exchanges SET embedded = 0;")
+            .unwrap();
+        crate::embed::embed_pending(&mut conn, &Same).unwrap();
+        *ctx.embedder.write().unwrap() = Some(Arc::new(Same));
+
+        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"zzqqxx"}))])[0];
+        let body = text(r);
+        assert!(
+            body.starts_with(&format!("{SEMANTIC_ONLY}\n1. [")),
+            "{body}"
+        );
+
+        let r = &exchange(&ctx, &[call(1, "search", json!({"query":"list files"}))])[0];
+        let body = text(r);
+        assert!(body.starts_with("1. ["), "{body}");
+        assert!(!body.contains(SEMANTIC_ONLY), "{body}");
     }
 
     #[test]

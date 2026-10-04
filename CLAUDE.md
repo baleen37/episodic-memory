@@ -36,7 +36,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `src/terms.rs` | FTS terms and query building (Hangul bigrams, quoting) |
 | `src/sync.rs` | Sync orchestration per file, then embedding pass |
 | `src/embed.rs` | fastembed multilingual-e5-small (384-dim), passage/query prefixes |
-| `src/search.rs` | BM25 + KNN, weighted RRF (K=60, 0.4/0.6), array AND query |
+| `src/search.rs` | BM25 + KNN (cosine floor `MIN_VECTOR_SIMILARITY`), weighted RRF (K=60, 0.4/0.6), absolute 0-1 scores, array AND query |
 | `src/read.rs` | Archive line reader (markdown render, 4KB per item, 60KB cap, continue marker) |
 | `src/mcp.rs` | MCP JSON-RPC tools `search` and `read` |
 | `src/daemon.rs` | Singleton daemon: unix socket, model, sync jobs, idle exit |
