@@ -46,15 +46,22 @@ install_binary() {
   # Re-check: another process may have installed while we waited for the lock.
   [ -x "$BIN" ] && return 0
 
+  local tmp status=0
+  tmp="$(mktemp -d "$BIN_DIR/.install.XXXXXX")" || return 1
+  fetch_binary "$tmp" || status=1
+  rm -rf "$tmp"
+  return "$status"
+}
+
+# Downloads, verifies and extracts the release binary in scratch dir $1, then moves it to $BIN.
+fetch_binary() {
+  local tmp="$1"
   local name="episodic-memory-v$VER-$TARGET"
   local url="https://github.com/$REPO/releases/download/v$VER/$name"
-  local tmp
-  tmp="$(mktemp -d "$BIN_DIR/.install.XXXXXX")" || return 1
 
   if ! curl -fsSL --connect-timeout 10 --max-time 300 -o "$tmp/$name.tar.gz" "$url.tar.gz" ||
     ! curl -fsSL --connect-timeout 10 --max-time 300 -o "$tmp/$name.tar.gz.sha256" "$url.sha256"; then
     echo "episodic-memory: download failed: $url.tar.gz" >&2
-    rm -rf "$tmp"
     return 1
   fi
 
@@ -69,21 +76,15 @@ install_binary() {
   expected="$(awk '{print $1; exit}' "$tmp/$name.tar.gz.sha256")"
   if ! (cd "$tmp" && printf '%s  %s\n' "$expected" "$name.tar.gz" | $sum_cmd -c - >/dev/null 2>&1); then
     echo "episodic-memory: sha256 mismatch for $name.tar.gz" >&2
-    rm -rf "$tmp"
     return 1
   fi
 
   if ! tar -xzf "$tmp/$name.tar.gz" -C "$tmp" episodic-memory; then
     echo "episodic-memory: failed to extract $name.tar.gz" >&2
-    rm -rf "$tmp"
     return 1
   fi
   chmod 0755 "$tmp/episodic-memory"
-  mv "$tmp/episodic-memory" "$BIN" || {
-    rm -rf "$tmp"
-    return 1
-  }
-  rm -rf "$tmp"
+  mv "$tmp/episodic-memory" "$BIN"
 }
 
 mkdir -p "$BIN_DIR" || fail "cannot create $BIN_DIR"

@@ -1,14 +1,13 @@
 use crate::embed::{E5Embedder, Embedder, FakeEmbedder};
 use crate::log::log_line;
 use crate::mcp::{serve, Ctx};
-use crate::paths::Paths;
+use crate::paths::{try_lock, Paths, VERSION};
 use crate::sync::run_sync;
 use anyhow::{bail, Result};
-use fs2::FileExt;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -24,17 +23,40 @@ pub struct DaemonOpts {
     pub fake_embedder: bool,
 }
 
-impl Default for DaemonOpts {
-    fn default() -> Self {
-        DaemonOpts {
-            idle_secs: DEFAULT_IDLE_SECS,
-            fake_embedder: false,
-        }
+/// The daemon socket path, or an error when it does not fit in `sun_path`.
+pub fn socket_path(paths: &Paths) -> Result<PathBuf> {
+    let socket = paths.daemon_socket();
+    if socket.as_os_str().len() > MAX_SOCKET_PATH {
+        bail!("socket path too long: {}", socket.display());
+    }
+    Ok(socket)
+}
+
+/// The first line a client sends on a daemon connection: `{"client":"<name>"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "client", rename_all = "lowercase")]
+pub enum Hello {
+    Mcp,
+    Sync,
+    Status,
+}
+
+impl Hello {
+    pub fn line(self) -> String {
+        format!(
+            "{}\n",
+            serde_json::to_string(&self).expect("unit enum serializes")
+        )
     }
 }
 
-pub fn socket_too_long(socket: &Path) -> bool {
-    socket.as_os_str().len() > MAX_SOCKET_PATH
+/// The one-line reply to a `Hello::Status` connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Status {
+    pub version: String,
+    pub clients: u64,
+    pub sync_running: bool,
+    pub model: String,
 }
 
 #[derive(Default)]
@@ -75,8 +97,7 @@ impl State {
         *self.last_active.lock().unwrap() = Instant::now();
     }
 
-    /// The one-line reply to a `{"client":"status"}` connection.
-    fn status_json(&self) -> Value {
+    fn status(&self) -> Status {
         let model = if self.ctx.embedder.read().unwrap().is_some() {
             "ready"
         } else if self.ctx.load_failed.load(Ordering::SeqCst) {
@@ -85,12 +106,12 @@ impl State {
             "loading"
         };
         let s = self.sched.lock().unwrap();
-        serde_json::json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "clients": self.clients.load(Ordering::SeqCst),
-            "sync_running": s.running || s.pending,
-            "model": model,
-        })
+        Status {
+            version: VERSION.into(),
+            clients: self.clients.load(Ordering::SeqCst) as u64,
+            sync_running: s.running || s.pending,
+            model: model.into(),
+        }
     }
 
     fn busy(&self) -> bool {
@@ -105,22 +126,13 @@ impl State {
 /// Runs until idle. Returns `Ok` without doing anything when another daemon of this version
 /// holds the daemon lock.
 pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
-    std::fs::create_dir_all(&paths.data)?;
-    let mut lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(paths.daemon_lock())?;
-    if lock.try_lock_exclusive().is_err() {
+    let Some(mut lock) = try_lock(&paths.daemon_lock())? else {
         return Ok(());
-    }
+    };
     lock.set_len(0)?;
     writeln!(lock, "{}", std::process::id())?;
 
-    let socket = paths.daemon_socket();
-    if socket_too_long(&socket) {
-        bail!("socket path too long: {}", socket.display());
-    }
+    let socket = socket_path(&paths)?;
     // Only the lock holder may replace the socket file.
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket)?;
@@ -248,11 +260,8 @@ fn handle_conn(stream: UnixStream, st: &State) {
     {
         return;
     }
-    let client = serde_json::from_str::<Value>(hello.trim())
-        .ok()
-        .and_then(|v| v.get("client")?.as_str().map(str::to_string));
-    match client.as_deref() {
-        Some("mcp") => {
+    match serde_json::from_str::<Hello>(hello.trim()).ok() {
+        Some(Hello::Mcp) => {
             st.clients.fetch_add(1, Ordering::SeqCst);
             if let Err(e) = serve(&mut reader, &writer, &st.ctx) {
                 log_line(&st.ctx.paths, &format!("mcp connection: {e:#}"));
@@ -260,10 +269,11 @@ fn handle_conn(stream: UnixStream, st: &State) {
             st.clients.fetch_sub(1, Ordering::SeqCst);
             st.touch();
         }
-        Some("sync") => st.request_sync(),
+        Some(Hello::Sync) => st.request_sync(),
         // Neither a client nor activity: doctor must not keep the daemon alive.
-        Some("status") => {
-            let _ = writeln!(&writer, "{}", st.status_json());
+        Some(Hello::Status) => {
+            let status = serde_json::to_string(&st.status()).expect("status serializes");
+            let _ = writeln!(&writer, "{status}");
         }
         _ => {}
     }
@@ -284,6 +294,14 @@ mod tests {
     }
 
     #[test]
+    fn hello_lines_roundtrip() {
+        for h in [Hello::Mcp, Hello::Sync, Hello::Status] {
+            assert_eq!(serde_json::from_str::<Hello>(h.line().trim()).unwrap(), h);
+        }
+        assert_eq!(Hello::Mcp.line(), "{\"client\":\"mcp\"}\n");
+    }
+
+    #[test]
     fn loading_counts_as_busy_until_load_finishes() {
         let (_t, st) = state();
         assert!(!st.busy());
@@ -300,22 +318,22 @@ mod tests {
         st.loading.store(true, Ordering::SeqCst);
         load_model(&st, || panic!("synthetic load panic"));
         assert!(!st.loading.load(Ordering::SeqCst));
-        assert_eq!(st.status_json()["model"], "failed");
+        assert_eq!(st.status().model, "failed");
     }
 
     #[test]
     fn status_reports_model_state() {
         let (_t, st) = state();
         st.loading.store(true, Ordering::SeqCst);
-        assert_eq!(st.status_json()["model"], "loading");
+        assert_eq!(st.status().model, "loading");
         finish_load(&st, Err(anyhow::anyhow!("offline")));
-        assert_eq!(st.status_json()["model"], "failed");
+        assert_eq!(st.status().model, "failed");
         finish_load(&st, Ok(Arc::new(FakeEmbedder)));
-        let v = st.status_json();
-        assert_eq!(v["model"], "ready");
-        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(v["clients"], 0);
-        assert_eq!(v["sync_running"], true, "load success requested a sync");
+        let s = st.status();
+        assert_eq!(s.model, "ready");
+        assert_eq!(s.version, VERSION);
+        assert_eq!(s.clients, 0);
+        assert!(s.sync_running, "load success requested a sync");
     }
 
     #[test]

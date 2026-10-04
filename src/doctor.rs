@@ -1,7 +1,7 @@
+use crate::daemon::{Hello, Status};
 use crate::db::{meta_get, open_readonly};
-use crate::paths::{candidate_roots_from_env, Paths, SourceRoot};
+use crate::paths::{candidate_roots_from_env, Paths, SourceRoot, VERSION};
 use rusqlite::Connection;
-use serde_json::Value;
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -48,38 +48,24 @@ fn check(name: &'static str, level: Level, detail: impl Into<String>) -> Check {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Status {
-    pub version: String,
-    pub clients: u64,
-    pub sync_running: bool,
-    pub model: String,
-}
-
 /// Asks a running daemon for its status. Never spawns one.
 fn query_status(paths: &Paths) -> Option<Status> {
     let mut s = UnixStream::connect(paths.daemon_socket()).ok()?;
     s.set_read_timeout(Some(STATUS_TIMEOUT)).ok()?;
     s.set_write_timeout(Some(STATUS_TIMEOUT)).ok()?;
-    s.write_all(b"{\"client\":\"status\"}\n").ok()?;
+    s.write_all(Hello::Status.line().as_bytes()).ok()?;
     let mut line = String::new();
     BufReader::new(s).read_line(&mut line).ok()?;
     parse_status(&line)
 }
 
 fn parse_status(line: &str) -> Option<Status> {
-    let v: Value = serde_json::from_str(line.trim()).ok()?;
-    Some(Status {
-        version: v.get("version")?.as_str()?.to_string(),
-        clients: v.get("clients")?.as_u64()?,
-        sync_running: v.get("sync_running")?.as_bool()?,
-        model: v.get("model")?.as_str()?.to_string(),
-    })
+    serde_json::from_str(line.trim()).ok()
 }
 
 fn binary_check(os: &str, arch: &str, exe: Option<PathBuf>) -> Check {
     let exe = exe.map_or("unknown".to_string(), |p| p.display().to_string());
-    let detail = format!("v{} at {exe} ({arch}-{os})", env!("CARGO_PKG_VERSION"));
+    let detail = format!("v{} at {exe} ({arch}-{os})", VERSION);
     if SUPPORTED.contains(&(os, arch)) {
         check("binary", Level::Ok, detail)
     } else {
@@ -98,14 +84,10 @@ fn daemon_check(status: Option<&Status>) -> Check {
             Level::Warn,
             "not running (starts with the next session)",
         ),
-        Some(s) if s.version != env!("CARGO_PKG_VERSION") => check(
+        Some(s) if s.version != VERSION => check(
             "daemon",
             Level::Warn,
-            format!(
-                "version {} differs from binary {}",
-                s.version,
-                env!("CARGO_PKG_VERSION")
-            ),
+            format!("version {} differs from binary {}", s.version, VERSION),
         ),
         Some(s) => check(
             "daemon",
@@ -270,7 +252,7 @@ mod tests {
 
     fn status(model: &str) -> Status {
         Status {
-            version: env!("CARGO_PKG_VERSION").into(),
+            version: VERSION.into(),
             clients: 2,
             sync_running: false,
             model: model.into(),

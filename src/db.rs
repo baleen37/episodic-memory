@@ -1,3 +1,4 @@
+use crate::paths::SourceKind;
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -7,7 +8,7 @@ use std::sync::Once;
 
 pub struct FileRow {
     pub source_path: String,
-    pub source_kind: String,
+    pub source_kind: SourceKind,
     pub archive_path: String,
     pub generation: i64,
     pub offset: i64,
@@ -19,6 +20,33 @@ pub struct FileRow {
     pub is_sidechain: Option<bool>,
     pub user_signal: Option<String>,
     pub skipped: bool,
+}
+
+impl FileRow {
+    /// A freshly registered file: nothing parsed yet, session fields unknown.
+    pub fn new(
+        source_path: String,
+        source_kind: SourceKind,
+        archive_path: String,
+        generation: i64,
+        offset: i64,
+    ) -> Self {
+        FileRow {
+            source_path,
+            source_kind,
+            archive_path,
+            generation,
+            offset,
+            reparse_line: 1,
+            session_id: None,
+            cwd: None,
+            project: None,
+            harness: None,
+            is_sidechain: None,
+            user_signal: None,
+            skipped: false,
+        }
+    }
 }
 
 pub struct NewExchange {
@@ -134,34 +162,40 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
 }
 
 pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
-    Ok(c.query_row(
+    Ok(c.prepare_cached(
         r#"SELECT source_path, source_kind, archive_path, generation, "offset", reparse_line,
                   session_id, cwd, project, harness, is_sidechain, user_signal, skipped
            FROM files WHERE source_path = ?"#,
-        [source_path],
-        |r| {
-            Ok(FileRow {
-                source_path: r.get(0)?,
-                source_kind: r.get(1)?,
-                archive_path: r.get(2)?,
-                generation: r.get(3)?,
-                offset: r.get(4)?,
-                reparse_line: r.get(5)?,
-                session_id: r.get(6)?,
-                cwd: r.get(7)?,
-                project: r.get(8)?,
-                harness: r.get(9)?,
-                is_sidechain: r.get(10)?,
-                user_signal: r.get(11)?,
-                skipped: r.get(12)?,
-            })
-        },
-    )
+    )?
+    .query_row([source_path], |r| {
+        let kind: String = r.get(1)?;
+        Ok(FileRow {
+            source_path: r.get(0)?,
+            source_kind: SourceKind::parse(&kind).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    format!("unknown source_kind {kind:?}").into(),
+                )
+            })?,
+            archive_path: r.get(2)?,
+            generation: r.get(3)?,
+            offset: r.get(4)?,
+            reparse_line: r.get(5)?,
+            session_id: r.get(6)?,
+            cwd: r.get(7)?,
+            project: r.get(8)?,
+            harness: r.get(9)?,
+            is_sidechain: r.get(10)?,
+            user_signal: r.get(11)?,
+            skipped: r.get(12)?,
+        })
+    })
     .optional()?)
 }
 
 pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
-    tx.execute(
+    tx.prepare_cached(
         r#"INSERT INTO files(source_path, source_kind, archive_path, generation, "offset",
                              reparse_line, session_id, cwd, project, harness, is_sidechain,
                              user_signal, skipped)
@@ -173,49 +207,47 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
              cwd = excluded.cwd, project = excluded.project, harness = excluded.harness,
              is_sidechain = excluded.is_sidechain, user_signal = excluded.user_signal,
              skipped = excluded.skipped"#,
-        params![
-            f.source_path,
-            f.source_kind,
-            f.archive_path,
-            f.generation,
-            f.offset,
-            f.reparse_line,
-            f.session_id,
-            f.cwd,
-            f.project,
-            f.harness,
-            f.is_sidechain,
-            f.user_signal,
-            f.skipped
-        ],
-    )?;
+    )?
+    .execute(params![
+        f.source_path,
+        f.source_kind.as_str(),
+        f.archive_path,
+        f.generation,
+        f.offset,
+        f.reparse_line,
+        f.session_id,
+        f.cwd,
+        f.project,
+        f.harness,
+        f.is_sidechain,
+        f.user_signal,
+        f.skipped
+    ])?;
     Ok(())
 }
 
 pub fn insert_exchange(tx: &Transaction, e: &NewExchange, terms: &str) -> Result<i64> {
-    tx.execute(
+    tx.prepare_cached(
         "INSERT INTO exchanges(archive_path, line_start, line_end, session_id, project, harness,
                                is_sidechain, ts, user_message, assistant_message, tool_names)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params![
-            e.archive_path,
-            e.line_start,
-            e.line_end,
-            e.session_id,
-            e.project,
-            e.harness,
-            e.is_sidechain,
-            e.ts,
-            e.user_message,
-            e.assistant_message,
-            e.tool_names
-        ],
-    )?;
+    )?
+    .execute(params![
+        e.archive_path,
+        e.line_start,
+        e.line_end,
+        e.session_id,
+        e.project,
+        e.harness,
+        e.is_sidechain,
+        e.ts,
+        e.user_message,
+        e.assistant_message,
+        e.tool_names
+    ])?;
     let id = tx.last_insert_rowid();
-    tx.execute(
-        "INSERT INTO fts_exchanges(rowid, terms) VALUES (?, ?)",
-        params![id, terms],
-    )?;
+    tx.prepare_cached("INSERT INTO fts_exchanges(rowid, terms) VALUES (?, ?)")?
+        .execute(params![id, terms])?;
     Ok(id)
 }
 
@@ -230,10 +262,13 @@ pub fn delete_exchanges_from(
         .prepare("SELECT id FROM exchanges WHERE archive_path = ? AND line_start >= ?")?
         .query_map(params![archive_path, from_line], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
+    let mut fts = tx.prepare_cached("DELETE FROM fts_exchanges WHERE rowid = ?")?;
+    let mut vec = tx.prepare_cached("DELETE FROM vec_exchanges WHERE rowid = ?")?;
+    let mut ex = tx.prepare_cached("DELETE FROM exchanges WHERE id = ?")?;
     for id in &ids {
-        tx.execute("DELETE FROM fts_exchanges WHERE rowid = ?", [id])?;
-        tx.execute("DELETE FROM vec_exchanges WHERE rowid = ?", [id])?;
-        tx.execute("DELETE FROM exchanges WHERE id = ?", [id])?;
+        fts.execute([id])?;
+        vec.execute([id])?;
+        ex.execute([id])?;
     }
     Ok(ids.len())
 }
@@ -259,7 +294,7 @@ mod tests {
     fn vec_bytes(first: f32) -> Vec<u8> {
         let mut v = vec![0.0f32; 384];
         v[0] = first;
-        v.iter().flat_map(|f| f.to_le_bytes()).collect()
+        crate::embed::to_blob(&v)
     }
 
     fn ex(path: &str, line_start: i64, text: &str) -> NewExchange {
@@ -393,19 +428,18 @@ mod tests {
         let (_d, mut c) = temp_db();
         assert!(get_file(&c, "/src/a.jsonl").unwrap().is_none());
         let mut f = FileRow {
-            source_path: "/src/a.jsonl".into(),
-            source_kind: "codex-sessions".into(),
-            archive_path: "codex-sessions/a.jsonl".into(),
-            generation: 0,
-            offset: 10,
-            reparse_line: 1,
             session_id: Some("s".into()),
-            cwd: None,
             project: Some("p".into()),
             harness: Some("codex".into()),
             is_sidechain: Some(false),
             user_signal: Some("user_message".into()),
-            skipped: false,
+            ..FileRow::new(
+                "/src/a.jsonl".into(),
+                SourceKind::CodexSessions,
+                "codex-sessions/a.jsonl".into(),
+                0,
+                10,
+            )
         };
         let tx = c.transaction().unwrap();
         upsert_file(&tx, &f).unwrap();
