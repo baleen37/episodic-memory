@@ -33,10 +33,7 @@ impl E5Embedder {
     }
 
     fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        let mut m = self
-            .model
-            .lock()
-            .map_err(|_| anyhow::anyhow!("embedding model lock poisoned"))?;
+        let mut m = crate::locks::lock(&self.model);
         Ok(m.embed(texts, Some(BATCH))?)
     }
 }

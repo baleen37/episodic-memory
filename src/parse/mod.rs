@@ -16,6 +16,9 @@ pub struct FileMeta {
     pub session_id: Option<String>,
     pub cwd: Option<String>,
     pub is_sidechain: bool,
+    /// A line has decided `is_sidechain` (Claude: first `isSidechain`; Codex: first
+    /// `session_meta`); later lines no longer change it.
+    pub sidechain_known: bool,
     pub agent_path: Option<String>,
     pub user_signal: Option<String>,
 }
@@ -119,15 +122,37 @@ impl ParsedExchange {
     }
 }
 
-/// Shared exchange loop. `start` returns the text of a line that opens an exchange;
-/// `add` folds every other line into the open exchange. Bad lines extend the open exchange.
+/// One provider's transcript format. Every operation looks at a single archive line, so file
+/// meta can be learned from appended lines alone. `provider` maps a source kind to its adapter.
+pub(crate) trait Provider: Sync {
+    /// File meta before any line is observed; `archive_path` keeps the source's relative path.
+    fn initial_meta(&self, archive_path: &str) -> FileMeta;
+    /// Updates `meta` from one line. Returns true once no later line can change it.
+    fn observe_meta(&self, meta: &mut FileMeta, line: &Value) -> bool;
+    /// The exchange start message text when `line` opens an exchange.
+    fn start_message(&self, line: &Value, meta: &FileMeta) -> Option<String>;
+    /// Folds a line that is not an exchange start message into the open exchange.
+    fn fold_line(&self, exchange: &mut ParsedExchange, line: &Value);
+    /// Markdown items for `read`; empty when the line has nothing to show.
+    fn render_line(&self, line: &Value) -> Vec<String>;
+}
+
+/// The only place a source kind is mapped to its provider adapter.
+pub(crate) fn provider(kind: SourceKind) -> &'static dyn Provider {
+    match kind {
+        SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => &claude::ClaudeCode,
+        SourceKind::CodexSessions => &codex::Codex,
+    }
+}
+
+/// Exchange loop shared by all providers. Bad lines extend the open exchange.
 /// Turns without an answer or tool call are dropped; a still-open last turn is picked up again
 /// by the next sync, which reparses from the last returned exchange.
-pub(crate) fn parse_exchanges(
+fn parse_exchanges(
+    p: &dyn Provider,
     archive: &Path,
     from_line: i64,
-    start: impl Fn(&Value) -> Option<String>,
-    add: impl Fn(&mut ParsedExchange, &Value),
+    meta: &FileMeta,
 ) -> Result<ParseOutput> {
     let mut out = ParseOutput::default();
     let mut cur: Option<ParsedExchange> = None;
@@ -140,7 +165,7 @@ pub(crate) fn parse_exchanges(
             }
             continue;
         };
-        if let Some(text) = start(&v) {
+        if let Some(text) = p.start_message(&v, meta) {
             out.exchanges
                 .extend(cur.take().and_then(ParsedExchange::finish));
             out.do_not_index |= text.contains(DO_NOT_INDEX);
@@ -149,7 +174,7 @@ pub(crate) fn parse_exchanges(
         }
         let Some(c) = cur.as_mut() else { continue };
         c.line_end = n;
-        add(c, &v);
+        p.fold_line(c, &v);
     }
     out.exchanges.extend(cur.and_then(ParsedExchange::finish));
     Ok(out)
@@ -203,22 +228,21 @@ pub(crate) fn value_text(v: &Value) -> String {
 /// Markdown items for one archive line (`**User:**`, `**Assistant:**`, `**Tool <name>:**`,
 /// `**Result:**`); empty when the line has nothing to show.
 pub fn render_line(kind: SourceKind, value: &Value) -> Vec<String> {
-    match kind {
-        SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => {
-            claude::render_line(value)
-        }
-        SourceKind::CodexSessions => codex::render_line(value),
-    }
+    provider(kind).render_line(value)
 }
 
-/// Reads file-level metadata from the head of the archive file.
+/// Reads file meta from the head of the archive file, stopping once it is settled.
 pub fn read_meta(kind: SourceKind, archive: &Path, rel_path: &str) -> Result<FileMeta> {
-    match kind {
-        SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => {
-            claude::read_meta(archive, rel_path)
+    let p = provider(kind);
+    let mut meta = p.initial_meta(rel_path);
+    for line in read_file_lines(archive)? {
+        if let (_, Some(v)) = line?
+            && p.observe_meta(&mut meta, &v)
+        {
+            break;
         }
-        SourceKind::CodexSessions => codex::read_meta(archive),
     }
+    Ok(meta)
 }
 
 /// Parses exchanges starting at the 1-based physical line `from_line`.
@@ -228,10 +252,5 @@ pub fn parse_from(
     from_line: i64,
     meta: &FileMeta,
 ) -> Result<ParseOutput> {
-    match kind {
-        SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => {
-            claude::parse_from(archive, from_line, meta)
-        }
-        SourceKind::CodexSessions => codex::parse_from(archive, from_line, meta),
-    }
+    parse_exchanges(provider(kind), archive, from_line, meta)
 }

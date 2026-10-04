@@ -9,6 +9,7 @@ mod db;
 mod doctor;
 mod embed;
 mod host;
+mod locks;
 mod log;
 mod mcp;
 mod parse;
