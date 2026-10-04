@@ -1,4 +1,5 @@
 use crate::embed::{E5Embedder, Embedder, FakeEmbedder};
+use crate::locks;
 use crate::log::log_line;
 use crate::mcp::{Ctx, serve};
 use crate::paths::{Paths, VERSION, try_lock};
@@ -93,23 +94,23 @@ impl State {
     }
 
     fn request_sync(&self) {
-        self.sched.lock().unwrap().pending = true;
+        locks::lock(&self.sched).pending = true;
         self.wake.notify_one();
     }
 
     fn touch(&self) {
-        *self.last_active.lock().unwrap() = Instant::now();
+        *locks::lock(&self.last_active) = Instant::now();
     }
 
     fn status(&self) -> Status {
-        let model = if self.ctx.embedder.read().unwrap().is_some() {
+        let model = if locks::read(&self.ctx.embedder).is_some() {
             "ready"
         } else if self.ctx.load_failed.load(Ordering::SeqCst) {
             "failed"
         } else {
             "loading"
         };
-        let s = self.sched.lock().unwrap();
+        let s = locks::lock(&self.sched);
         Status {
             version: VERSION.into(),
             clients: self.clients.load(Ordering::SeqCst) as u64,
@@ -119,7 +120,7 @@ impl State {
     }
 
     fn busy(&self) -> bool {
-        let s = self.sched.lock().unwrap();
+        let s = locks::lock(&self.sched);
         s.running
             || s.pending
             || self.loading.load(Ordering::SeqCst)
@@ -158,7 +159,9 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
     state.request_sync();
 
     let st = state.clone();
-    std::thread::spawn(move || scheduler(&st));
+    std::thread::spawn(move || {
+        scheduler(&st, |paths, embedder| run_sync(paths, embedder).map(drop));
+    });
     if !opts.fake_embedder {
         state.loading.store(true, Ordering::SeqCst);
         let st = state.clone();
@@ -187,29 +190,30 @@ pub fn run(paths: Paths, opts: DaemonOpts) -> Result<()> {
     Ok(())
 }
 
-fn scheduler(st: &State) {
+/// Runs `sync` once per batch of sync requests, forever.
+fn scheduler(st: &State, sync: impl Fn(&Paths, Option<&dyn Embedder>) -> Result<()>) {
     loop {
         {
-            let mut s = st.sched.lock().unwrap();
+            let mut s = locks::lock(&st.sched);
             while !s.pending {
-                s = st.wake.wait(s).unwrap();
+                s = locks::wait(&st.wake, s);
             }
             s.pending = false;
             s.running = true;
         }
-        let embedder = st.ctx.embedder.read().unwrap().clone();
+        let embedder = locks::read(&st.ctx.embedder).clone();
         let paths = &st.ctx.paths;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_sync(paths, embedder.as_deref())
+            sync(paths, embedder.as_deref())
         }));
         match result {
-            Ok(Ok(_)) => {}
+            Ok(Ok(())) => {}
             Ok(Err(e)) => log_line(paths, &format!("sync: {e:#}")),
             Err(_) => log_line(paths, "sync: panicked"),
         }
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
-        st.sched.lock().unwrap().running = false;
+        locks::lock(&st.sched).running = false;
     }
 }
 
@@ -226,7 +230,7 @@ fn load_model(st: &State, load: impl FnOnce() -> Result<Arc<dyn Embedder>>) {
 fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
     match loaded {
         Ok(e) => {
-            *st.ctx.embedder.write().unwrap() = Some(e);
+            *locks::write(&st.ctx.embedder) = Some(e);
             st.request_sync();
         }
         Err(e) => {
@@ -245,7 +249,7 @@ fn idle_watch(st: &State, idle: Duration, socket: &Path, _lock: std::fs::File) {
         if st.busy() {
             continue;
         }
-        if st.last_active.lock().unwrap().elapsed() >= idle {
+        if locks::lock(&st.last_active).elapsed() >= idle {
             let _ = std::fs::remove_file(socket);
             std::process::exit(0);
         }
@@ -353,5 +357,38 @@ mod tests {
         assert!(!st.loading.load(Ordering::SeqCst));
         assert!(st.ctx.embedder.read().unwrap().is_some());
         assert!(st.sched.lock().unwrap().pending);
+    }
+
+    #[test]
+    fn scheduler_keeps_syncing_after_locks_were_poisoned() {
+        let (_t, st) = state();
+        let st = Arc::new(st);
+        let poison = st.clone();
+        let _ = std::thread::spawn(move || {
+            let _s = poison.sched.lock().unwrap();
+            let _a = poison.last_active.lock().unwrap();
+            let _e = poison.ctx.embedder.write().unwrap();
+            panic!("synthetic panic while holding daemon locks");
+        })
+        .join();
+        assert!(st.sched.is_poisoned() && st.ctx.embedder.is_poisoned());
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        let (sched_st, sched_runs) = (st.clone(), runs.clone());
+        std::thread::spawn(move || {
+            scheduler(&sched_st, |_, _| {
+                sched_runs.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            });
+        });
+        for want in 1..=2 {
+            st.request_sync();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while runs.load(Ordering::SeqCst) < want || st.status().sync_running {
+                assert!(Instant::now() < deadline, "sync {want} never ran");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert!(!st.busy());
     }
 }
