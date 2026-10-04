@@ -65,20 +65,29 @@ const REVISIONS: &[Revision] = &[
 
 pub const HEAD: i64 = REVISIONS[REVISIONS.len() - 1].id;
 
-/// Fences binaries older than revision 3 off every write to `files` and every new exchange.
-/// The triggers call `em_revision()`, which only `register_revision_fn` defines, so an older
-/// binary's statement fails to prepare ("no such function") and its file's transaction rolls
-/// back before it can register a file or start a generation under a layout it does not know.
-/// Reads still work. A revision that older binaries must not write past raises the 3.
-/// `db::SCHEMA` gets these too; `IF NOT EXISTS` lets revisions 2 and 3 both run it.
+/// Fences binaries older than the data dir off writing it. Every `files` insert or update, new
+/// exchange and `meta` write first compares `em_revision()`, this binary's `HEAD`, with
+/// `meta.revision`. Binaries from before revisions do not define the function at all, so their
+/// statements fail to prepare ("no such function"); a newer data dir aborts a binary with an
+/// older `HEAD`. Either way the file's transaction rolls back before it registers a file or
+/// starts a generation under a layout it does not know, and reads still work. Revision 2 installs
+/// it before converting paths, and `db::open` adds it to a fresh DB.
 pub const FENCE: &str = "
-CREATE TRIGGER IF NOT EXISTS fence_files_insert BEFORE INSERT ON files WHEN em_revision() < 3
-BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
-CREATE TRIGGER IF NOT EXISTS fence_files_update BEFORE UPDATE ON files WHEN em_revision() < 3
-BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
+CREATE TRIGGER IF NOT EXISTS fence_files_insert BEFORE INSERT ON files
+  WHEN em_revision() < CAST((SELECT value FROM meta WHERE key = 'revision') AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is older than this data dir; restart this session'); END;
+CREATE TRIGGER IF NOT EXISTS fence_files_update BEFORE UPDATE ON files
+  WHEN em_revision() < CAST((SELECT value FROM meta WHERE key = 'revision') AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is older than this data dir; restart this session'); END;
 CREATE TRIGGER IF NOT EXISTS fence_exchanges_insert BEFORE INSERT ON exchanges
-  WHEN em_revision() < 3
-BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
+  WHEN em_revision() < CAST((SELECT value FROM meta WHERE key = 'revision') AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is older than this data dir; restart this session'); END;
+CREATE TRIGGER IF NOT EXISTS fence_meta_insert BEFORE INSERT ON meta
+  WHEN em_revision() < CAST((SELECT value FROM meta WHERE key = 'revision') AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is older than this data dir; restart this session'); END;
+CREATE TRIGGER IF NOT EXISTS fence_meta_update BEFORE UPDATE ON meta
+  WHEN em_revision() < CAST((SELECT value FROM meta WHERE key = 'revision') AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is older than this data dir; restart this session'); END;
 ";
 
 /// Defines `em_revision()` (this binary's `HEAD`) on `c`, which `FENCE` requires to write.
@@ -127,9 +136,9 @@ pub fn current(paths: &Paths, c: &Connection) -> Result<(i64, bool)> {
     }
     let r = match c.query_row("PRAGMA user_version", [], |r| r.get(0))? {
         1 => 0,
-        // Revision 1 is what made user_version 4, whatever the file says.
+        // Revision 1 is what made user_version 4, and v4.1.0 knew no revision past 2.
         4 => match revision_file(paths) {
-            Ok(Some(r)) => r.max(1),
+            Ok(Some(r)) => r.clamp(1, 2),
             _ => 1,
         },
         v => bail!("unsupported schema version {v}"),
@@ -147,12 +156,8 @@ pub fn run(paths: &Paths, conn: &mut Connection) -> Result<Vec<i64>> {
         );
     }
     // Recorded only together with a revision's own changes: a stamp committed alone ahead of a
-    // failing revision 1 would outlive an older binary migrating the schema in between.
-    if !recorded && from == HEAD {
-        let tx = conn.transaction()?;
-        stamp(&tx, from)?;
-        tx.commit()?;
-    }
+    // failing revision 1 would outlive an older binary migrating the schema in between. Without
+    // meta.revision, `from` is below HEAD, so a revision always runs.
     let mut applied = Vec::new();
     for r in REVISIONS.iter().filter(|r| r.id > from) {
         let tx = conn.transaction()?;
@@ -162,11 +167,14 @@ pub fn run(paths: &Paths, conn: &mut Connection) -> Result<Vec<i64>> {
         tx.commit()?;
         applied.push(r.id);
     }
-    // meta.revision supersedes the v4.1.0 file; a v4.1.0 daemon still running may write it again.
-    match fs::remove_file(paths.revision_file()) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-        _ => Ok(applied),
+    // meta.revision supersedes the v4.1.0 file, which the fence keeps v4.1.0 from rewriting.
+    if !recorded {
+        match fs::remove_file(paths.revision_file()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
     }
+    Ok(applied)
 }
 
 #[cfg(test)]
@@ -243,20 +251,24 @@ PRAGMA user_version = 1;
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
         let c = if version == 1 {
-            drop(crate::db::open(&t.path().join("vec.db")).unwrap()); // loads sqlite-vec
-            let c = Connection::open(paths.db()).unwrap();
+            let c = older_binary(&paths);
             c.execute_batch(V1).unwrap();
             c
         } else {
             let c = crate::db::open(&paths.db()).unwrap();
-            c.execute_batch(
-                "DELETE FROM meta WHERE key = 'revision';
-                 DROP TRIGGER fence_files_insert;
-                 DROP TRIGGER fence_files_update;
-                 DROP TRIGGER fence_exchanges_insert;
-                 PRAGMA user_version = 4;",
-            )
-            .unwrap();
+            c.execute("DELETE FROM meta WHERE key = 'revision'", [])
+                .unwrap();
+            let triggers: Vec<String> = c
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            for t in triggers {
+                c.execute_batch(&format!("DROP TRIGGER {t}")).unwrap();
+            }
+            c.execute_batch("PRAGMA user_version = 4").unwrap();
             c
         };
         c.execute(
@@ -434,6 +446,8 @@ PRAGMA user_version = 1;
             "INSERT INTO files(source_path, source_kind, archive_path)
                VALUES ('/src/c.jsonl', 'codex-sessions', '/d/c.jsonl')",
             "UPDATE files SET \"offset\" = 20",
+            "INSERT INTO meta(key, value) VALUES ('last_sync', 'x')",
+            "UPDATE meta SET value = 'x' WHERE key = 'revision'",
             "INSERT INTO exchanges(archive_path, line_start, line_end, project, harness, ts,
                                    user_message, assistant_message)
                VALUES ('a.jsonl', 1, 2, 'p', 'codex', 0, 'u', 'a')",
@@ -481,10 +495,57 @@ PRAGMA user_version = 1;
     }
 
     #[test]
-    fn a_revision_file_below_1_beside_version_4_reads_as_1() {
+    fn a_revision_file_is_clamped_to_what_v4_1_0_could_write() {
         let (_t, paths) = legacy(4);
         fs::write(paths.revision_file(), "0\n").unwrap();
         assert_eq!(revision(&paths), 1);
+        fs::write(paths.revision_file(), "3\n").unwrap();
+        assert_eq!(revision(&paths), 2);
+    }
+
+    #[test]
+    fn a_binary_behind_the_data_dir_cannot_write() {
+        let (_t, paths) = legacy(4);
+        migrate(&paths).unwrap();
+        let c = crate::db::open(&paths.db()).unwrap();
+        crate::db::meta_set(&c, "revision", &(HEAD + 1).to_string()).unwrap();
+        let err = c
+            .execute("UPDATE files SET \"offset\" = 20", [])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("older than this data dir"), "{err}");
+    }
+
+    #[test]
+    fn a_file_registered_twice_keeps_its_absolute_path() {
+        let (_t, paths) = legacy(4);
+        let key = "conversation-archive/codex-sessions/a.jsonl";
+        let abs = format!("{}/{key}", paths.data.display());
+        let c = crate::db::open(&paths.db()).unwrap();
+        c.execute("UPDATE files SET archive_path = ?1", [key])
+            .unwrap();
+        c.execute(
+            "INSERT INTO files(source_path, source_kind, archive_path)
+               VALUES ('/link/a.jsonl', 'codex-sessions', ?1)",
+            [&abs],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO exchanges(archive_path, line_start, line_end, project, harness, ts,
+                                   user_message, assistant_message)
+               VALUES (?1, 1, 2, 'p', 'codex', 0, 'u', 'a')",
+            [&abs],
+        )
+        .unwrap();
+        drop(c);
+        assert_eq!(migrate(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
+        let c = crate::db::open(&paths.db()).unwrap();
+        let get = |sql: &str| -> String { c.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            get("SELECT archive_path FROM files WHERE source_path = '/link/a.jsonl'"),
+            abs
+        );
+        assert_eq!(get("SELECT archive_path FROM exchanges"), abs);
     }
 
     #[test]

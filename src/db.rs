@@ -195,7 +195,6 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
         Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?
     };
     c.busy_timeout(std::time::Duration::from_secs(5))?;
-    crate::migrations::register_revision_fn(&c)?;
     Ok(c)
 }
 

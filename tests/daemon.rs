@@ -594,6 +594,14 @@ fn doctor_warns_on_last_error() {
     {
         let c = Connection::open(env.data.join("episodic.db")).unwrap();
         c.busy_timeout(Duration::from_secs(5)).unwrap();
+        // The fence lets only connections defining em_revision() write.
+        c.create_scalar_function(
+            "em_revision",
+            0,
+            rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |_| Ok(i64::MAX),
+        )
+        .unwrap();
         c.execute(
             "INSERT INTO meta(key, value) VALUES ('last_error', 'synthetic failure')
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
