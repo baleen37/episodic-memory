@@ -6,11 +6,10 @@ use crate::db::{
 use crate::embed::{embed_pending, Embedder};
 use crate::log::log_line;
 use crate::parse::{parse_from, read_meta, FileMeta};
-use crate::paths::{candidate_roots_from_env, source_roots, Paths, SourceKind, SourceRoot};
+use crate::paths::{candidate_roots_from_env, try_lock, Paths, SourceKind, SourceRoot};
 use crate::project::resolve_project;
 use crate::terms::to_terms;
 use anyhow::Result;
-use fs2::FileExt;
 use rusqlite::{Connection, Transaction};
 use std::fs;
 use std::io;
@@ -41,12 +40,9 @@ struct IndexStats {
     bad_lines: usize,
 }
 
-/// Spec §5 steps 6–9. Returns the number of exchanges inserted.
-pub fn index_file(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Result<usize> {
-    Ok(index_file_stats(tx, row, kind)?.inserted)
-}
-
-fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Result<IndexStats> {
+/// Spec §5 steps 6–9.
+fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
+    let kind = row.source_kind;
     let mut stats = IndexStats::default();
     if row.skipped {
         return Ok(stats);
@@ -60,27 +56,25 @@ fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Re
     // Claude otherwise reuses the persisted values. The archive path keeps the source's
     // relative path, so "subagents" detection works on it directly.
     let read_session = row.offset > 0 && (row.harness.is_none() || row.cwd.is_none());
-    let fresh = if read_session || kind == SourceKind::CodexSessions {
-        Some(read_meta(kind, &archive, &row.archive_path)?)
+    let meta = if read_session || kind == SourceKind::CodexSessions {
+        read_meta(kind, &archive, &row.archive_path)?
     } else {
-        None
+        FileMeta {
+            session_id: row.session_id.clone(),
+            cwd: row.cwd.clone(),
+            is_sidechain: row.is_sidechain.unwrap_or(false),
+            agent_path: None,
+            user_signal: row.user_signal.clone(),
+        }
     };
     if read_session {
-        let m = fresh.as_ref().expect("read above");
-        row.session_id = m.session_id.clone();
-        row.cwd = m.cwd.clone();
-        row.is_sidechain = Some(m.is_sidechain);
-        row.user_signal = m.user_signal.clone();
+        row.session_id = meta.session_id.clone();
+        row.cwd = meta.cwd.clone();
+        row.is_sidechain = Some(meta.is_sidechain);
+        row.user_signal = meta.user_signal.clone();
         row.harness = Some(kind.harness().to_string());
-        row.project = Some(resolve_project(m.cwd.as_deref()));
+        row.project = Some(resolve_project(meta.cwd.as_deref()));
     }
-    let meta = fresh.unwrap_or_else(|| FileMeta {
-        session_id: row.session_id.clone(),
-        cwd: row.cwd.clone(),
-        is_sidechain: row.is_sidechain.unwrap_or(false),
-        agent_path: None,
-        user_signal: row.user_signal.clone(),
-    });
 
     delete_exchanges_from(tx, &row.archive_path, row.reparse_line)?;
     let out = parse_from(kind, &archive, row.reparse_line, &meta)?;
@@ -92,13 +86,21 @@ fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Re
     }
 
     let project = row.project.clone().unwrap_or_else(|| "unknown".into());
-    for e in &out.exchanges {
+    if let Some(last) = out.exchanges.last() {
+        row.reparse_line = last.line_start;
+    }
+    for e in out.exchanges {
         if e.user_message.len() > MAX_MESSAGE_BYTES || e.assistant_message.len() > MAX_MESSAGE_BYTES
         {
             stats.oversize += 1;
             continue;
         }
-        let terms = to_terms(&format!("{}\n{}", e.user_message, e.assistant_message));
+        // Same as terms of "user\nassistant": a newline always ends a term.
+        let terms = format!(
+            "{}\n{}",
+            to_terms(&e.user_message),
+            to_terms(&e.assistant_message)
+        );
         let new = NewExchange {
             archive_path: row.archive_path.clone(),
             line_start: e.line_start,
@@ -108,15 +110,12 @@ fn index_file_stats(tx: &Transaction, row: &mut FileRow, kind: SourceKind) -> Re
             harness: kind.harness().to_string(),
             is_sidechain: row.is_sidechain.unwrap_or(false),
             ts: e.ts,
-            user_message: e.user_message.clone(),
-            assistant_message: e.assistant_message.clone(),
+            user_message: e.user_message,
+            assistant_message: e.assistant_message,
             tool_names: e.tool_names.join(","),
         };
         insert_exchange(tx, &new, &terms)?;
         stats.inserted += 1;
-    }
-    if let Some(last) = out.exchanges.last() {
-        row.reparse_line = last.line_start;
     }
     Ok(stats)
 }
@@ -209,21 +208,13 @@ fn start_new_generation(
 
 fn register_new(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Result<FileRow> {
     let (generation, offset) = adopt_existing_archive(paths, f.kind, &f.rel, &f.source_path)?;
-    let row = FileRow {
-        source_path: path_str(&f.source_path),
-        source_kind: f.kind.as_str().into(),
-        archive_path: path_str(&archive_path_for(paths, f.kind, &f.rel, generation)),
+    let row = FileRow::new(
+        path_str(&f.source_path),
+        f.kind,
+        path_str(&archive_path_for(paths, f.kind, &f.rel, generation)),
         generation,
-        offset: offset as i64,
-        reparse_line: 1,
-        session_id: None,
-        cwd: None,
-        project: None,
-        harness: None,
-        is_sidechain: None,
-        user_signal: None,
-        skipped: false,
-    };
+        offset as i64,
+    );
     // Committed before any append so a crash cannot strand an unregistered archive file.
     let tx = conn.transaction()?;
     upsert_file(&tx, &row)?;
@@ -263,7 +254,7 @@ pub fn sync_file(conn: &mut Connection, paths: &Paths, f: &DiscoveredFile) -> Re
     row.offset = new_offset as i64;
     // Nothing new to parse unless the append moved the offset or the first parse is pending.
     let stats = if row.offset != old_offset || row.harness.is_none() {
-        index_file_stats(&tx, &mut row, f.kind)?
+        index_file(&tx, &mut row)?
     } else {
         IndexStats::default()
     };
@@ -344,12 +335,6 @@ pub fn discover_in(roots: &[SourceRoot]) -> Vec<DiscoveredFile> {
     out
 }
 
-/// Source files under the real host roots.
-#[allow(dead_code)] // no caller; run_sync uses discover_in
-pub fn discover() -> Vec<DiscoveredFile> {
-    discover_in(&source_roots())
-}
-
 /// Spec §5 "기존 아카이브 들여오기". `candidates` supplies the (possibly missing) source root
 /// per kind. Returns the number of files registered; sets `meta.imported` only when no file failed.
 pub fn import_archive_with_roots(
@@ -384,11 +369,6 @@ pub fn import_archive_with_roots(
     Ok(registered)
 }
 
-#[allow(dead_code)] // no caller; run_sync uses import_archive_with_roots
-pub fn import_archive(conn: &mut Connection, paths: &Paths) -> Result<usize> {
-    import_archive_with_roots(conn, paths, &candidate_roots_from_env())
-}
-
 /// Registers one archive file; false if it already has a `files` row.
 fn import_one(
     conn: &mut Connection,
@@ -413,25 +393,17 @@ fn import_one(
     } else {
         (0, fs::metadata(&archive0)?.len())
     };
-    let mut row = FileRow {
-        source_path: source_key,
-        source_kind: kind.as_str().into(),
-        archive_path: path_str(&archive_path_for(paths, kind, rel, generation)),
+    let mut row = FileRow::new(
+        source_key,
+        kind,
+        path_str(&archive_path_for(paths, kind, rel, generation)),
         generation,
-        offset: offset as i64,
-        reparse_line: 1,
-        session_id: None,
-        cwd: None,
-        project: None,
-        harness: None,
-        is_sidechain: None,
-        user_signal: None,
-        skipped: false,
-    };
+        offset as i64,
+    );
     let tx = conn.transaction()?;
     upsert_file(&tx, &row)?;
     if row.offset > 0 {
-        index_file(&tx, &mut row, kind)?;
+        index_file(&tx, &mut row)?;
         upsert_file(&tx, &row)?;
     }
     tx.commit()?;
@@ -466,16 +438,9 @@ pub fn run_sync_with_roots(
     embedder: Option<&dyn Embedder>,
     roots: &[SourceRoot],
 ) -> Result<SyncStats> {
-    fs::create_dir_all(&paths.data)?;
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(paths.sync_lock())?;
-    if lock.try_lock_exclusive().is_err() {
+    let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
-    }
-    // `lock` stays alive until the end of the run.
+    };
     let mut conn = crate::db::open(&paths.db())?;
     if meta_get(&conn, "imported").is_none() {
         import_archive_with_roots(&mut conn, paths, roots)?;
@@ -604,7 +569,7 @@ mod mirror {
         assert_eq!(row.offset as usize, lines(0..3).len());
         assert_eq!(row.generation, 0);
         assert_eq!(row.archive_path, e.gen_path(0).to_str().unwrap());
-        assert_eq!(row.source_kind, "claude-code-projects");
+        assert_eq!(row.source_kind, SourceKind::ClaudeCodeProjects);
     }
 
     #[test]
@@ -997,21 +962,7 @@ mod mirror {
         }
         let err = archive_len(&gen0).unwrap_err();
         assert!(err.to_string().contains("not a regular file"), "{err}");
-        let row = FileRow {
-            source_path: path_str(&e.src),
-            source_kind: e.f.kind.as_str().into(),
-            archive_path: path_str(&gen0),
-            generation: 0,
-            offset: 0,
-            reparse_line: 1,
-            session_id: None,
-            cwd: None,
-            project: None,
-            harness: None,
-            is_sidechain: None,
-            user_signal: None,
-            skipped: false,
-        };
+        let row = FileRow::new(path_str(&e.src), e.f.kind, path_str(&gen0), 0, 0);
         assert!(reconcile_archive(&row).is_err());
         assert!(!archive_path_for(&e.paths, e.f.kind, &e.f.rel, 1).exists());
     }
@@ -1021,6 +972,7 @@ mod mirror {
 mod orchestration {
     use super::*;
     use crate::embed::FakeEmbedder;
+    use fs2::FileExt;
 
     struct Env {
         _t: tempfile::TempDir,

@@ -1,7 +1,24 @@
+use fs2::FileExt;
 use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Opens (creating if needed) `path` and takes a non-blocking exclusive lock on it.
+/// `None` when another process holds it; the lock lives as long as the returned file.
+pub fn try_lock(path: &Path) -> io::Result<Option<File>> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let f = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    Ok(f.try_lock_exclusive().is_ok().then_some(f))
+}
 
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -83,6 +100,10 @@ impl SourceKind {
         }
     }
 
+    pub fn parse(s: &str) -> Option<SourceKind> {
+        Self::ALL.into_iter().find(|k| k.as_str() == s)
+    }
+
     pub fn harness(&self) -> &'static str {
         match self {
             SourceKind::ClaudeCodeProjects | SourceKind::ClaudeCodeTranscripts => "claude",
@@ -95,16 +116,6 @@ impl SourceKind {
 pub struct SourceRoot {
     pub kind: SourceKind,
     pub root: PathBuf,
-}
-
-/// Existing source roots, resolved from the environment.
-#[allow(dead_code)] // no caller since run_sync switched to candidate roots
-pub fn source_roots() -> Vec<SourceRoot> {
-    retain_existing(candidate_roots(
-        std::env::var_os("CLAUDE_CONFIG_DIR"),
-        std::env::var_os("CODEX_HOME"),
-        &home_dir(),
-    ))
 }
 
 /// All three roots resolved from the environment, whether or not they exist.
@@ -137,10 +148,6 @@ fn candidate_roots(
             root: codex.join("sessions"),
         },
     ]
-}
-
-fn retain_existing(roots: Vec<SourceRoot>) -> Vec<SourceRoot> {
-    roots.into_iter().filter(|r| r.root.is_dir()).collect()
 }
 
 #[cfg(test)]
@@ -181,7 +188,7 @@ mod tests {
     #[test]
     fn socket_and_lock_naming() {
         let p = Paths::new(PathBuf::from("/tmp/x"));
-        let ver = env!("CARGO_PKG_VERSION");
+        let ver = VERSION;
         assert!(p
             .daemon_socket()
             .to_string_lossy()
@@ -209,6 +216,10 @@ mod tests {
         assert_eq!(SourceKind::ClaudeCodeTranscripts.harness(), "claude");
         assert_eq!(SourceKind::CodexSessions.harness(), "codex");
         assert_eq!(SourceKind::ALL.len(), 3);
+        for k in SourceKind::ALL {
+            assert_eq!(SourceKind::parse(k.as_str()), Some(k));
+        }
+        assert_eq!(SourceKind::parse("nope"), None);
     }
 
     #[test]
@@ -232,19 +243,5 @@ mod tests {
         assert_eq!(r[1].root, PathBuf::from("/c/transcripts"));
         assert_eq!(r[2].root, PathBuf::from("/x/sessions"));
         assert_eq!(r[0].kind, SourceKind::ClaudeCodeProjects);
-    }
-
-    #[test]
-    fn existing_filter_keeps_only_existing() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join("projects")).unwrap();
-        let all = candidate_roots(
-            os(tmp.path().to_str().unwrap()),
-            os("/nonexistent-codex"),
-            Path::new("/nonexistent-home"),
-        );
-        let kept = retain_existing(all);
-        assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].kind, SourceKind::ClaudeCodeProjects);
     }
 }

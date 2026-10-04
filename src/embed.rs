@@ -128,6 +128,11 @@ fn next_batch(conn: &Connection) -> Result<Vec<Pending>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// A vector as the little-endian f32 blob `vec_exchanges` stores.
+pub fn to_blob(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
 /// Embeds every `embedded = 0` exchange, `BATCH` at a time. Returns how many were embedded.
 pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
     let mut total = 0;
@@ -142,14 +147,16 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
             bail!("embedder returned unexpected vector count or dimension");
         }
         let tx = conn.transaction()?;
-        for (p, v) in batch.iter().zip(&vectors) {
-            let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
-            tx.execute(
+        {
+            let mut insert = tx.prepare_cached(
                 "INSERT INTO vec_exchanges(rowid, embedding, project, ts, is_sidechain)
                  VALUES (?, ?, ?, ?, ?)",
-                params![p.id, bytes, p.project, p.ts, p.is_sidechain],
             )?;
-            tx.execute("UPDATE exchanges SET embedded = 1 WHERE id = ?", [p.id])?;
+            let mut mark = tx.prepare_cached("UPDATE exchanges SET embedded = 1 WHERE id = ?")?;
+            for (p, v) in batch.iter().zip(&vectors) {
+                insert.execute(params![p.id, to_blob(v), p.project, p.ts, p.is_sidechain])?;
+                mark.execute([p.id])?;
+            }
         }
         tx.commit()?;
         total += batch.len();

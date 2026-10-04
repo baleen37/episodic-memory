@@ -1,6 +1,6 @@
 use super::{
-    read_file_lines, truncate_bytes, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX,
-    TEXT_MAX, TOOL_MAX,
+    parse_exchanges, read_file_lines, render_result, render_text, render_tool, value_text,
+    FileMeta, ParseOutput, ParsedExchange,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -112,62 +112,26 @@ fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
     match p["type"].as_str() {
         Some("message") if p["role"] == "assistant" => {
             if let Some(t) = block_texts(&p["content"], &["output_text"], "\n\n") {
-                if !c.assistant_message.is_empty() {
-                    c.assistant_message.push_str("\n\n");
-                }
-                c.assistant_message.push_str(&t);
+                c.push_answer(&t);
             }
         }
         Some("function_call" | "custom_tool_call") => {
             if let Some(name) = p["name"].as_str() {
-                push_tool(c, name);
+                c.push_tool(name);
             }
         }
-        Some("local_shell_call") => push_tool(c, LOCAL_SHELL),
+        Some("local_shell_call") => c.push_tool(LOCAL_SHELL),
         _ => {}
     }
 }
 
-fn push_tool(c: &mut ParsedExchange, name: &str) {
-    if !c.tool_names.iter().any(|t| t == name) {
-        c.tool_names.push(name.to_string());
-    }
-}
-
 pub fn parse_from(archive: &Path, from_line: i64, meta: &FileMeta) -> Result<ParseOutput> {
-    let mut out = ParseOutput::default();
-    let mut cur: Option<ParsedExchange> = None;
-    for line in read_file_lines(archive)? {
-        let (n, v) = line?;
-        if n < from_line {
-            continue;
-        }
-        let Some(v) = v else {
-            out.bad_lines += 1;
-            if let Some(c) = cur.as_mut() {
-                c.line_end = n;
-            }
-            continue;
-        };
-        if let Some(text) = start_text(&v, meta) {
-            out.exchanges.extend(cur.take());
-            out.do_not_index |= text.contains(DO_NOT_INDEX);
-            cur = Some(ParsedExchange {
-                line_start: n,
-                line_end: n,
-                ts: ts_ms(&v),
-                user_message: text,
-                assistant_message: String::new(),
-                tool_names: Vec::new(),
-            });
-            continue;
-        }
-        let Some(c) = cur.as_mut() else { continue };
-        c.line_end = n;
-        add_answer_and_tools(c, &v);
-    }
-    out.exchanges.extend(cur);
-    Ok(out)
+    parse_exchanges(
+        archive,
+        from_line,
+        |v| start_text(v, meta),
+        add_answer_and_tools,
+    )
 }
 
 /// Renders `response_item` lines only; `event_msg` duplicates them.
@@ -178,30 +142,19 @@ pub fn render_line(v: &Value) -> Vec<String> {
     let p = &v["payload"];
     let text = |role: &str, kind: &str| {
         block_texts(&p["content"], &[kind], "\n\n")
-            .map(|t| vec![format!("**{role}:** {}", truncate_bytes(&t, TEXT_MAX))])
+            .map(|t| vec![render_text(role, &t)])
             .unwrap_or_default()
     };
-    let tool = |name: &str, input: String| {
-        vec![format!(
-            "**Tool {name}:** {}",
-            truncate_bytes(&input, TOOL_MAX)
-        )]
-    };
-    let as_text = |x: &Value| match x {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
-    };
+    let tool = |name: &str, input: &Value| vec![render_tool(name, &value_text(input))];
     match p["type"].as_str() {
         Some("message") if p["role"] == "user" => text("User", "input_text"),
         Some("message") if p["role"] == "assistant" => text("Assistant", "output_text"),
-        Some("function_call") => tool(p["name"].as_str().unwrap_or("?"), as_text(&p["arguments"])),
-        Some("custom_tool_call") => tool(p["name"].as_str().unwrap_or("?"), as_text(&p["input"])),
-        Some("local_shell_call") => tool(LOCAL_SHELL, as_text(&p["action"])),
-        Some("function_call_output" | "custom_tool_call_output") => vec![format!(
-            "**Result:** {}",
-            truncate_bytes(&as_text(&p["output"]), TOOL_MAX)
-        )],
+        Some("function_call") => tool(p["name"].as_str().unwrap_or("?"), &p["arguments"]),
+        Some("custom_tool_call") => tool(p["name"].as_str().unwrap_or("?"), &p["input"]),
+        Some("local_shell_call") => tool(LOCAL_SHELL, &p["action"]),
+        Some("function_call_output" | "custom_tool_call_output") => {
+            vec![render_result(&value_text(&p["output"]))]
+        }
         _ => Vec::new(),
     }
 }

@@ -1,4 +1,4 @@
-use crate::daemon::{socket_too_long, DaemonOpts, DEFAULT_IDLE_SECS};
+use crate::daemon::{socket_path, DaemonOpts, Hello, DEFAULT_IDLE_SECS};
 use crate::log::log_line;
 use crate::paths::Paths;
 use anyhow::{bail, Result};
@@ -31,19 +31,10 @@ fn spawn_daemon(opts: &DaemonOpts) -> Result<()> {
     Ok(())
 }
 
-fn check_socket(paths: &Paths) -> Result<()> {
-    let socket = paths.daemon_socket();
-    if socket_too_long(&socket) {
-        bail!("socket path too long: {}", socket.display());
-    }
-    Ok(())
-}
-
 /// Connects to the daemon, spawning it on the first failure and retrying with backoff
 /// (50ms doubling to 500ms) until `total` elapses.
 pub fn connect_or_spawn(paths: &Paths, opts: &DaemonOpts, total: Duration) -> Result<UnixStream> {
-    check_socket(paths)?;
-    let socket = paths.daemon_socket();
+    let socket = socket_path(paths)?;
     if let Ok(s) = UnixStream::connect(&socket) {
         return Ok(s);
     }
@@ -65,7 +56,7 @@ pub fn connect_or_spawn(paths: &Paths, opts: &DaemonOpts, total: Duration) -> Re
 /// Bridges stdio to a daemon MCP connection until either side closes.
 pub fn run_mcp(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     let stream = connect_or_spawn(paths, opts, MCP_CONNECT_TIMEOUT)?;
-    (&stream).write_all(b"{\"client\":\"mcp\"}\n")?;
+    (&stream).write_all(Hello::Mcp.line().as_bytes())?;
 
     let mut to_daemon = stream.try_clone()?;
     std::thread::spawn(move || {
@@ -98,9 +89,8 @@ pub fn run_sync_hook(paths: &Paths, opts: &DaemonOpts) {
 }
 
 fn try_sync_hook(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
-    check_socket(paths)?;
-    match UnixStream::connect(paths.daemon_socket()) {
-        Ok(mut s) => s.write_all(b"{\"client\":\"sync\"}\n")?,
+    match UnixStream::connect(socket_path(paths)?) {
+        Ok(mut s) => s.write_all(Hello::Sync.line().as_bytes())?,
         Err(_) => spawn_daemon(opts)?,
     }
     Ok(())

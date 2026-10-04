@@ -1,6 +1,6 @@
 use super::{
-    read_file_lines, truncate_bytes, ts_ms, FileMeta, ParseOutput, ParsedExchange, DO_NOT_INDEX,
-    TEXT_MAX, TOOL_MAX,
+    parse_exchanges, read_file_lines, render_result, render_text, render_tool, value_text,
+    FileMeta, ParseOutput, ParsedExchange,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -83,88 +83,52 @@ pub fn read_meta(archive: &Path, rel_path: &str) -> Result<FileMeta> {
 }
 
 pub fn parse_from(archive: &Path, from_line: i64, _meta: &FileMeta) -> Result<ParseOutput> {
-    let mut out = ParseOutput::default();
-    let mut cur: Option<ParsedExchange> = None;
-    for line in read_file_lines(archive)? {
-        let (n, v) = line?;
-        if n < from_line {
-            continue;
-        }
-        let Some(v) = v else {
-            out.bad_lines += 1;
-            if let Some(c) = cur.as_mut() {
-                c.line_end = n;
-            }
-            continue;
-        };
-        if let Some(text) = start_text(&v) {
-            if !Exclusions::excludes(&v, &text) {
-                out.exchanges.extend(cur.take());
-                out.do_not_index |= text.contains(DO_NOT_INDEX);
-                let ts = ts_ms(&v);
-                cur = Some(ParsedExchange {
-                    line_start: n,
-                    line_end: n,
-                    ts,
-                    user_message: text,
-                    assistant_message: String::new(),
-                    tool_names: Vec::new(),
-                });
-                continue;
-            }
-        }
-        let Some(c) = cur.as_mut() else { continue };
-        c.line_end = n;
-        if v["type"].as_str() != Some("assistant") {
-            continue;
-        }
-        let Some(blocks) = v["message"]["content"].as_array() else {
-            continue;
-        };
-        let push_text = |c: &mut ParsedExchange, t: &str| {
-            if !c.assistant_message.is_empty() {
-                c.assistant_message.push_str("\n\n");
-            }
-            c.assistant_message.push_str(t);
-        };
-        for b in blocks {
-            match b["type"].as_str() {
-                Some("text") => {
-                    if let Some(t) = b["text"].as_str() {
-                        push_text(c, t);
-                    }
+    parse_exchanges(
+        archive,
+        from_line,
+        |v| start_text(v).filter(|t| !Exclusions::excludes(v, t)),
+        add_answer_and_tools,
+    )
+}
+
+fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
+    if v["type"].as_str() != Some("assistant") {
+        return;
+    }
+    let Some(blocks) = v["message"]["content"].as_array() else {
+        return;
+    };
+    for b in blocks {
+        match b["type"].as_str() {
+            Some("text") => {
+                if let Some(t) = b["text"].as_str() {
+                    c.push_answer(t);
                 }
-                Some("tool_use") => {
-                    if let Some(name) = b["name"].as_str() {
-                        if !c.tool_names.iter().any(|t| t == name) {
-                            c.tool_names.push(name.to_string());
-                        }
-                        // A subagent's final report arrives as this tool's input, not as text.
-                        if name == "SubagentHandback" {
-                            if let Some(t) = b["input"]["message"].as_str() {
-                                push_text(c, t);
-                            }
+            }
+            Some("tool_use") => {
+                if let Some(name) = b["name"].as_str() {
+                    c.push_tool(name);
+                    // A subagent's final report arrives as this tool's input, not as text.
+                    if name == "SubagentHandback" {
+                        if let Some(t) = b["input"]["message"].as_str() {
+                            c.push_answer(t);
                         }
                     }
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
-    out.exchanges.extend(cur);
-    Ok(out)
 }
 
 fn result_text(content: &Value) -> String {
     match content {
-        Value::String(s) => s.clone(),
         Value::Array(blocks) => blocks
             .iter()
             .filter_map(|b| b["text"].as_str())
             .collect::<Vec<_>>()
             .join("\n"),
-        Value::Null => String::new(),
-        other => other.to_string(),
+        other => value_text(other),
     }
 }
 
@@ -174,22 +138,20 @@ pub fn render_line(v: &Value) -> Vec<String> {
         Some("assistant") => "Assistant",
         _ => return Vec::new(),
     };
-    let text = |t: &str| format!("**{role}:** {}", truncate_bytes(t, TEXT_MAX));
     match &v["message"]["content"] {
-        Value::String(s) if !s.is_empty() => vec![text(s)],
+        Value::String(s) if !s.is_empty() => vec![render_text(role, s)],
         Value::Array(blocks) => blocks
             .iter()
             .filter_map(|b| match b["type"].as_str()? {
-                "text" => b["text"].as_str().filter(|t| !t.is_empty()).map(text),
-                "tool_use" => Some(format!(
-                    "**Tool {}:** {}",
+                "text" => b["text"]
+                    .as_str()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| render_text(role, t)),
+                "tool_use" => Some(render_tool(
                     b["name"].as_str().unwrap_or("?"),
-                    truncate_bytes(&b["input"].to_string(), TOOL_MAX)
+                    &b["input"].to_string(),
                 )),
-                "tool_result" => Some(format!(
-                    "**Result:** {}",
-                    truncate_bytes(&result_text(&b["content"]), TOOL_MAX)
-                )),
+                "tool_result" => Some(render_result(&result_text(&b["content"]))),
                 _ => None,
             })
             .collect(),
