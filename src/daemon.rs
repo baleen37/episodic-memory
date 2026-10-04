@@ -42,6 +42,8 @@ pub enum Hello {
         host_pid: Option<u32>,
     },
     Sync,
+    /// Like `Sync`, but the daemon replies one line once that sync has finished.
+    SyncWait,
     Status,
 }
 
@@ -67,12 +69,17 @@ pub struct Status {
 struct Sched {
     running: bool,
     pending: bool,
+    /// Sync runs started and finished since daemon start.
+    started: u64,
+    finished: u64,
 }
 
 struct State {
     ctx: Ctx,
     sched: Mutex<Sched>,
     wake: Condvar,
+    /// Notified each time a sync run finishes.
+    done: Condvar,
     /// MCP connections from accept until EOF.
     clients: AtomicUsize,
     /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
@@ -86,6 +93,7 @@ impl State {
             ctx,
             sched: Mutex::new(Sched::default()),
             wake: Condvar::new(),
+            done: Condvar::new(),
             clients: AtomicUsize::new(0),
             loading: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
@@ -95,6 +103,18 @@ impl State {
     fn request_sync(&self) {
         self.sched.lock().unwrap().pending = true;
         self.wake.notify_one();
+    }
+
+    /// Requests a sync and blocks until a run that started after the request has finished.
+    fn sync_and_wait(&self) {
+        let mut s = self.sched.lock().unwrap();
+        // A running sync may have read its sources before this request; wait for the next one.
+        let target = s.started + 1;
+        s.pending = true;
+        self.wake.notify_one();
+        while s.finished < target {
+            s = self.done.wait(s).unwrap();
+        }
     }
 
     fn touch(&self) {
@@ -194,6 +214,7 @@ fn scheduler(st: &State) {
             }
             s.pending = false;
             s.running = true;
+            s.started += 1;
         }
         let embedder = st.ctx.embedder.read().unwrap().clone();
         let paths = &st.ctx.paths;
@@ -207,7 +228,10 @@ fn scheduler(st: &State) {
         }
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
-        st.sched.lock().unwrap().running = false;
+        let mut s = st.sched.lock().unwrap();
+        s.running = false;
+        s.finished += 1;
+        st.done.notify_all();
     }
 }
 
@@ -274,6 +298,10 @@ fn handle_conn(stream: UnixStream, st: &State) {
             st.touch();
         }
         Some(Hello::Sync) => st.request_sync(),
+        Some(Hello::SyncWait) => {
+            st.sync_and_wait();
+            let _ = writeln!(&writer, "done");
+        }
         // Neither a client nor activity: doctor must not keep the daemon alive.
         Some(Hello::Status) => {
             let status = serde_json::to_string(&st.status()).expect("status serializes");
@@ -299,7 +327,12 @@ mod tests {
 
     #[test]
     fn hello_lines_roundtrip_and_accept_bare_mcp() {
-        for h in [Hello::Mcp { host_pid: Some(7) }, Hello::Sync, Hello::Status] {
+        for h in [
+            Hello::Mcp { host_pid: Some(7) },
+            Hello::Sync,
+            Hello::SyncWait,
+            Hello::Status,
+        ] {
             assert_eq!(serde_json::from_str::<Hello>(h.line().trim()).unwrap(), h);
         }
         assert_eq!(
