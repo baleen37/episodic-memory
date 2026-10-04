@@ -1,0 +1,14 @@
+# Baseline for scripts/bench.sh (issue #104). Later performance tickets compare against these.
+# Machine: Apple M4 Pro, 48 GB RAM, macOS 15.4.1, APFS SSD
+# Date: 2026-10-04
+# Tree: perf/efficiency at 44ccfc2 (4.0.5 + sync --wait + clippy pedantic), release profile
+# Command: scripts/bench.sh --bin <release binary>   (defaults: --sessions 300 --big-mb 100 --repeat 5)
+# The daemon is started before timing; first_sync includes the fake-embedder embedding pass.
+
+source_bytes   241128120
+first_sync               33.564s  (median of 1; min 33.564 max 33.564)
+noop_sync                0.016s  (median of 5; min 0.015 max 0.020)
+incremental_sync_claude  0.067s  (median of 5; min 0.062 max 0.075)
+incremental_sync_codex   0.070s  (median of 5; min 0.054 max 0.104)
+search_single            0.118s  (median of 5; min 0.112 max 0.134)
+search_array             0.268s  (median of 5; min 0.267 max 0.281)

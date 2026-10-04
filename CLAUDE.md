@@ -21,6 +21,7 @@ cargo build --release            # release binary at target/release/episodic-mem
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no network)
+scripts/bench.sh                 # benchmark on synthetic data in a temp dir (needs the release binary)
 ```
 
 ## Key Files
@@ -46,6 +47,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `src/log.rs` | Logging to `<data>/logs/` |
 | `bin/episodic-memory` | Bash wrapper: finds or downloads the versioned binary, then execs it |
 | `scripts/sync-versions.sh` | Writes the release version into Cargo.toml, Cargo.lock, both plugin.json |
+| `scripts/bench.sh` | Benchmark on synthetic transcripts (first/no-op/incremental sync, search); baseline in `scripts/bench-baseline.txt` |
 | `hooks/hooks.json` | SessionStart (`startup\|resume\|clear\|compact`) runs `episodic-memory sync` |
 | `.github/workflows/release.yml` | semantic-release, then per-target build and asset upload, then marketplace notify |
 
