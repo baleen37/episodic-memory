@@ -75,8 +75,9 @@ pub struct NewExchange {
     pub tool_names: String,
 }
 
-/// The latest schema, for a fresh DB. Existing DBs reach it through `migrations`; a schema
-/// change goes in both. `user_version` stays at 4: `<data>/REVISION` tracks versions now.
+/// The latest schema, for a fresh DB, which `open` completes with `migrations::FENCE` and stamps
+/// with `migrations::HEAD`. Existing DBs reach it through `migrations`; a schema change goes in
+/// both.
 const SCHEMA: &str = r#"
 CREATE TABLE files(
   source_path TEXT PRIMARY KEY,
@@ -139,6 +140,7 @@ fn register_vec() {
 pub fn open(path: &Path) -> Result<Connection> {
     register_vec();
     let mut c = Connection::open(path)?;
+    crate::migrations::register_revision_fn(&c)?;
     c.execute_batch(
         "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
     )?;
@@ -160,6 +162,8 @@ pub fn open(path: &Path) -> Result<Connection> {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version == 0 {
             tx.execute_batch(SCHEMA)?;
+            tx.execute_batch(crate::migrations::FENCE)?;
+            crate::migrations::stamp(&tx, crate::migrations::HEAD)?;
         }
         tx.commit()?;
     }
@@ -451,6 +455,8 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(v, 4);
+        let head = crate::migrations::HEAD.to_string();
+        assert_eq!(meta_get(&c, "revision"), Some(head));
         let vocab: i64 = c
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();

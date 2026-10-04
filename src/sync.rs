@@ -295,7 +295,9 @@ pub fn sync_file(
             paths,
             &format!(
                 "index {}: {} unparsable line(s), {} oversize exchange(s) skipped",
-                row.archive_path, stats.bad_lines, stats.oversize
+                paths.archive_file(&row.archive_path).display(),
+                stats.bad_lines,
+                stats.oversize
             ),
         );
     }
@@ -482,6 +484,8 @@ fn import_one(
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SyncStats {
     pub skipped: bool,
+    /// Data dir revisions applied before indexing.
+    pub migrated: usize,
     pub files_synced: usize,
     pub new_exchanges: usize,
     pub errors: usize,
@@ -507,12 +511,13 @@ pub fn run_sync_with_roots(paths: &Paths, roots: &[SourceRoot]) -> Result<SyncSt
     let Some(lock) = try_lock(&paths.sync_lock())? else {
         return Ok(SyncStats::skipped());
     };
-    for id in crate::migrations::run(paths)? {
-        log_line(paths, &format!("migrated to revision {id}"));
-    }
     let mut conn = crate::db::open(&paths.db())?;
-    let mut projects = ProjectCache::default();
     let mut stats = SyncStats::default();
+    for id in crate::migrations::run(paths, &mut conn)? {
+        log_line(paths, &format!("migrated to revision {id}"));
+        stats.migrated += 1;
+    }
+    let mut projects = ProjectCache::default();
     if meta_get(&conn, "imported").is_none() {
         stats.new_exchanges += import_archive_with_roots(&mut conn, paths, roots, &mut projects)?.1;
     }

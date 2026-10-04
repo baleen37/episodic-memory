@@ -569,7 +569,7 @@ fn doctor_after_sync_reports_running_daemon() {
     assert!(daemon.contains("0 client(s)"), "status counted as a client");
     assert!(d.line("model").starts_with("[ok]"));
     let db = d.line("db");
-    assert!(db.starts_with("[ok]") && db.contains("revision 2"), "{db}");
+    assert!(db.starts_with("[ok]") && db.contains("revision 3"), "{db}");
     let n: i64 = db
         .split(", ")
         .find_map(|p| p.strip_suffix(" exchanges")?.parse().ok())
@@ -594,6 +594,14 @@ fn doctor_warns_on_last_error() {
     {
         let c = Connection::open(env.data.join("episodic.db")).unwrap();
         c.busy_timeout(Duration::from_secs(5)).unwrap();
+        // The fence lets only connections defining em_revision() write.
+        c.create_scalar_function(
+            "em_revision",
+            0,
+            rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |_| Ok(i64::MAX),
+        )
+        .unwrap();
         c.execute(
             "INSERT INTO meta(key, value) VALUES ('last_error', 'synthetic failure')
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",

@@ -164,7 +164,6 @@ fn pending_check(pending: i64, last_embed_error: Option<&str>) -> Check {
 }
 
 struct Counts {
-    version: i64,
     files: i64,
     exchanges: i64,
     pending: i64,
@@ -174,7 +173,6 @@ struct Counts {
 fn counts(c: &Connection) -> rusqlite::Result<Counts> {
     let n = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0));
     Ok(Counts {
-        version: n("PRAGMA user_version")?,
         files: n("SELECT COUNT(*) FROM files")?,
         exchanges: n("SELECT COUNT(*) FROM exchanges")?,
         pending: n("SELECT COUNT(*) FROM exchanges WHERE embedded = 0")?,
@@ -183,12 +181,12 @@ fn counts(c: &Connection) -> rusqlite::Result<Counts> {
 }
 
 /// The DB line, with the data dir revision: behind `HEAD` means a sync has migrations to run.
-fn db_check(detail: &str, revision: anyhow::Result<Option<i64>>) -> Check {
+fn db_check(detail: &str, revision: anyhow::Result<i64>) -> Check {
     let head = migrations::HEAD;
     match revision {
         Err(e) => check("db", Level::Fail, format!("{detail}: {e:#}")),
-        Ok(Some(r)) if r == head => check("db", Level::Ok, format!("{detail}, revision {r}")),
-        Ok(Some(r)) if r > head => check(
+        Ok(r) if r == head => check("db", Level::Ok, format!("{detail}, revision {r}")),
+        Ok(r) if r > head => check(
             "db",
             Level::Fail,
             format!("{detail}, revision {r} is newer than this binary (revision {head})"),
@@ -196,10 +194,7 @@ fn db_check(detail: &str, revision: anyhow::Result<Option<i64>>) -> Check {
         Ok(r) => check(
             "db",
             Level::Warn,
-            format!(
-                "{detail}, revision {} of {head}: the next sync migrates",
-                r.unwrap_or(0)
-            ),
+            format!("{detail}, revision {r} of {head}: the next sync migrates"),
         ),
     }
 }
@@ -242,10 +237,7 @@ fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
                     n.exchanges,
                     n.skipped
                 ),
-                migrations::stored(paths).and_then(|r| match r {
-                    Some(r) => Ok(Some(r)),
-                    None => migrations::from_user_version(n.version),
-                }),
+                migrations::current(paths, &c).map(|(r, _)| r),
             ),
             pending_check(
                 n.pending,
@@ -373,7 +365,6 @@ mod tests {
         let dir = t.path().join(dir_name);
         std::fs::create_dir_all(&dir).unwrap();
         let paths = Paths::new(dir.clone());
-        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             c.execute(
@@ -421,7 +412,6 @@ mod tests {
     fn db_counts_and_last_error() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
-        crate::migrations::run(&paths).unwrap();
         {
             let c = crate::db::open(&paths.db()).unwrap();
             crate::db::meta_set(&c, "last_sync", "2026-01-01T00:00:00Z").unwrap();
@@ -440,12 +430,16 @@ mod tests {
     fn pending_and_newer_revisions() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
-        // A data dir from before REVISION: DB user_version 4 is revision 1.
-        drop(crate::db::open(&paths.db()).unwrap());
+        let c = crate::db::open(&paths.db()).unwrap();
+        // A DB from before meta.revision: user_version 4 is revision 1.
+        c.execute_batch("DELETE FROM meta WHERE key = 'revision'; PRAGMA user_version = 4;")
+            .unwrap();
+        // Closed so the immutable read below sees the writes.
+        drop(c);
         let db = &db_checks(&paths, false)[0];
         assert_eq!(db.level, Level::Warn, "{}", db.detail);
         assert!(db.detail.contains("revision 1 of"), "{}", db.detail);
-        std::fs::write(paths.revision_file(), "999\n").unwrap();
+        crate::db::meta_set(&crate::db::open(&paths.db()).unwrap(), "revision", "999").unwrap();
         assert_eq!(db_checks(&paths, false)[0].level, Level::Fail);
     }
 

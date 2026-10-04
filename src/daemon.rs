@@ -277,7 +277,8 @@ fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<SyncStats>) {
         }
         let paths = &st.ctx.paths;
         match guarded(paths, "sync", || sync(paths)) {
-            Run::Done(stats) if stats.new_exchanges == 0 => {}
+            // A migration holds the write lock long enough to fail an embedding batch.
+            Run::Done(stats) if stats.new_exchanges == 0 && stats.migrated == 0 => {}
             _ => st.wake_embedder(),
         }
         // touch first so the idle watcher never sees not-busy with a stale last_active.
@@ -568,6 +569,26 @@ mod tests {
         new.store(3, Ordering::SeqCst);
         st.sync_and_wait();
         assert!(wakes.try_recv().is_ok());
+    }
+
+    #[test]
+    fn scheduler_wakes_the_embedder_after_a_migration() {
+        let (_t, st, wakes) = state();
+        let st = Arc::new(st);
+        let s_st = st.clone();
+        std::thread::spawn(move || {
+            scheduler(&s_st, |_| {
+                Ok(SyncStats {
+                    migrated: 1,
+                    ..SyncStats::default()
+                })
+            });
+        });
+        st.sync_and_wait();
+        assert!(
+            wakes.try_recv().is_ok(),
+            "an embedding batch may have failed meanwhile"
+        );
     }
 
     #[test]
