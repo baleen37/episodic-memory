@@ -1,7 +1,7 @@
-use crate::daemon::{socket_path, DaemonOpts, Hello, DEFAULT_IDLE_SECS};
+use crate::daemon::{DEFAULT_IDLE_SECS, DaemonOpts, Hello, socket_path};
 use crate::log::log_line;
 use crate::paths::Paths;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;

@@ -2,7 +2,7 @@ use crate::db::open_readonly;
 use crate::parse::{read_file_lines, render_line};
 use crate::paths::{Paths, SourceKind};
 use crate::sync::is_generation_name;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use std::path::{Component, Path};
 
 const OUTPUT_MAX: usize = 61440;

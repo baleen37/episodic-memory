@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -166,7 +166,7 @@ pub fn embed_pending(conn: &mut Connection, e: &dyn Embedder) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{insert_exchange, NewExchange};
+    use crate::db::{NewExchange, insert_exchange};
 
     fn dot(a: &[f32], b: &[f32]) -> f32 {
         a.iter().zip(b).map(|(x, y)| x * y).sum()
