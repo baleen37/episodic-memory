@@ -1,10 +1,7 @@
 use super::{
-    FileMeta, ParseOutput, ParsedExchange, parse_exchanges, read_file_lines, render_result,
-    render_text, render_tool, value_text,
+    FileMeta, ParsedExchange, Provider, render_result, render_text, render_tool, value_text,
 };
-use anyhow::Result;
 use serde_json::Value;
-use std::path::Path;
 
 /// `response_item` user messages that are injected context, not human input
 /// (only consulted for the "response_item" fallback signal).
@@ -37,15 +34,31 @@ fn is_item_completed_user(v: &Value) -> bool {
         && v["payload"]["item"]["type"] == "UserMessage"
 }
 
-pub fn read_meta(archive: &Path) -> Result<FileMeta> {
-    let mut meta = FileMeta::default();
-    let mut seen_meta = false;
-    let (mut has_user_message, mut has_item_completed) = (false, false);
-    for line in read_file_lines(archive)? {
-        let (_, v) = line?;
-        let Some(v) = v else { continue };
-        if !seen_meta && v["type"] == "session_meta" {
-            seen_meta = true;
+/// Provider adapter for Codex session transcripts.
+pub(crate) struct Codex;
+
+/// User signals, weakest first: an archive uses the strongest one any of its lines shows.
+const SIGNALS: [&str; 3] = ["response_item", "user_message", "item_completed"];
+
+fn raise_signal(meta: &mut FileMeta, signal: &str) {
+    let rank = |s: Option<&str>| SIGNALS.iter().position(|x| Some(*x) == s);
+    if rank(Some(signal)) > rank(meta.user_signal.as_deref()) {
+        meta.user_signal = Some(signal.to_string());
+    }
+}
+
+impl Provider for Codex {
+    fn initial_meta(&self, _archive_path: &str) -> FileMeta {
+        FileMeta {
+            user_signal: Some(SIGNALS[0].to_string()),
+            ..FileMeta::default()
+        }
+    }
+
+    fn observe_meta(&self, meta: &mut FileMeta, v: &Value) -> bool {
+        // A fork copies its parent's lines after its own header, so the first header wins.
+        if !meta.sidechain_known && v["type"] == "session_meta" {
+            meta.sidechain_known = true;
             let p = &v["payload"];
             meta.session_id = p["id"].as_str().map(String::from);
             meta.cwd = p["cwd"].as_str().map(String::from);
@@ -55,24 +68,25 @@ pub fn read_meta(archive: &Path) -> Result<FileMeta> {
                 meta.agent_path = sub["thread_spawn"]["agent_path"].as_str().map(String::from);
             }
         }
-        if is_item_completed_user(&v) {
-            has_item_completed = true;
-            if seen_meta {
-                break;
-            }
+        if is_item_completed_user(v) {
+            raise_signal(meta, "item_completed");
         } else if v["type"] == "event_msg" && v["payload"]["type"] == "user_message" {
-            has_user_message = true;
+            raise_signal(meta, "user_message");
         }
+        meta.sidechain_known && meta.user_signal.as_deref() == Some("item_completed")
     }
-    let signal = if has_item_completed {
-        "item_completed"
-    } else if has_user_message {
-        "user_message"
-    } else {
-        "response_item"
-    };
-    meta.user_signal = Some(signal.to_string());
-    Ok(meta)
+
+    fn start_message(&self, v: &Value, meta: &FileMeta) -> Option<String> {
+        start_text(v, meta)
+    }
+
+    fn fold_line(&self, exchange: &mut ParsedExchange, v: &Value) {
+        add_answer_and_tools(exchange, v);
+    }
+
+    fn render_line(&self, v: &Value) -> Vec<String> {
+        render_line(v)
+    }
 }
 
 /// Text of an exchange-starting line, or None when the line does not start one.
@@ -135,17 +149,8 @@ fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
     }
 }
 
-pub fn parse_from(archive: &Path, from_line: i64, meta: &FileMeta) -> Result<ParseOutput> {
-    parse_exchanges(
-        archive,
-        from_line,
-        |v| start_text(v, meta),
-        add_answer_and_tools,
-    )
-}
-
 /// Renders `response_item` lines only; `event_msg` duplicates them.
-pub fn render_line(v: &Value) -> Vec<String> {
+fn render_line(v: &Value) -> Vec<String> {
     if v["type"] != "response_item" {
         return Vec::new();
     }
