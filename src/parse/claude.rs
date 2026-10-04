@@ -186,7 +186,16 @@ mod tests {
     fn parse(path: &str, from: i64) -> ParseOutput {
         let p = Path::new(path);
         let meta = crate::parse::read_meta(K, p, "proj/s.jsonl").unwrap();
-        crate::parse::parse_from(K, p, from, &meta).unwrap()
+        crate::parse::parse_from(
+            K,
+            p,
+            crate::parse::ReparsePoint {
+                line: from,
+                byte: 0,
+            },
+            &meta,
+        )
+        .unwrap()
     }
 
     #[test]

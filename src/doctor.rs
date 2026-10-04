@@ -393,7 +393,7 @@ mod tests {
         }
         let checks = db_checks(&paths, false);
         assert_eq!(checks[0].level, Level::Ok);
-        assert!(checks[0].detail.contains("user_version 2"));
+        assert!(checks[0].detail.contains("user_version 3"));
         assert_eq!(checks[1].level, Level::Ok);
         assert_eq!(checks[2].level, Level::Warn);
         assert!(checks[2].detail.contains("bad file"));
