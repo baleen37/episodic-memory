@@ -169,17 +169,16 @@ pub fn open(path: &Path) -> Result<Connection> {
     if version < 4 {
         // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
         let tx = c.transaction()?;
-        let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version == 0 {
-            tx.execute_batch(SCHEMA)?;
-        } else if version == 1 {
-            tx.execute_batch(MIGRATE_1_TO_4)?;
-        } else {
+        // Re-read under the lock: another process may have created or migrated it meanwhile.
+        match tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? {
+            0 => tx.execute_batch(SCHEMA)?,
+            1 => tx.execute_batch(MIGRATE_1_TO_4)?,
+            4 => {}
             // Versions 2 and 3 existed only on unreleased builds; fail here, not in later SQL.
-            anyhow::bail!(
+            version => anyhow::bail!(
                 "unsupported schema version {version}; delete {} to rebuild",
                 path.display()
-            );
+            ),
         }
         tx.commit()?;
     }
@@ -475,6 +474,34 @@ mod tests {
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vocab, 0);
+    }
+
+    /// Openers that read version 0 before another one created the schema must accept the v4
+    /// they find under the write lock. (The DB is already WAL so only the version check races.)
+    #[test]
+    fn concurrent_first_opens_all_succeed() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let p = dir.path().join("episodic.db");
+            Connection::open(&p)
+                .unwrap()
+                .execute_batch("PRAGMA journal_mode=WAL;")
+                .unwrap();
+            let start = std::sync::Barrier::new(8);
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..8)
+                    .map(|_| {
+                        s.spawn(|| {
+                            start.wait();
+                            open(&p).map(drop)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    h.join().unwrap().unwrap();
+                }
+            });
+        }
     }
 
     #[test]
