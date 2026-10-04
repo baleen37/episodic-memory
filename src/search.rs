@@ -5,6 +5,7 @@ use chrono::{Days, Duration, Local, NaiveDate, TimeZone};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 
 const MAX_LIMIT: usize = 50;
 const SNIPPET_CHARS: usize = 200;
@@ -115,15 +116,15 @@ impl Filters {
         let mut sql = String::new();
         let mut params = Vec::new();
         if let Some(p) = &self.project {
-            sql.push_str(&format!(" AND {col_prefix}project = ?"));
+            let _ = write!(sql, " AND {col_prefix}project = ?");
             params.push(SqlValue::Text(p.clone()));
         }
         if let Some(t) = self.ts_from {
-            sql.push_str(&format!(" AND {col_prefix}ts >= ?"));
+            let _ = write!(sql, " AND {col_prefix}ts >= ?");
             params.push(SqlValue::Integer(t));
         }
         if let Some(t) = self.ts_to {
-            sql.push_str(&format!(" AND {col_prefix}ts < ?"));
+            let _ = write!(sql, " AND {col_prefix}ts < ?");
             params.push(SqlValue::Integer(t));
         }
         (sql, params)
@@ -291,7 +292,7 @@ fn search_in<Tz: TimeZone>(
     // The vector side runs whenever an embedder is present, unless a query is pure noise.
     if p.queries
         .iter()
-        .any(|q| !q.chars().any(|c| c.is_alphanumeric()))
+        .any(|q| !q.chars().any(char::is_alphanumeric))
     {
         return Ok(SearchOutput::default());
     }
@@ -410,7 +411,7 @@ mod tests {
 
     fn params(q: &[&str]) -> SearchParams {
         SearchParams {
-            queries: q.iter().map(|s| s.to_string()).collect(),
+            queries: q.iter().map(ToString::to_string).collect(),
             limit: 10,
             ..SearchParams::default()
         }
@@ -631,7 +632,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn project_and_date_filters_apply_to_both() {
+        use chrono::Utc;
         let mut a = ex("/a/1", 1, "zebra crossing");
         a.project = "alpha";
         let mut b = ex("/a/2", 1, "zebra crossing");
@@ -641,7 +644,6 @@ mod tests {
         c.project = "alpha";
         c.ts = T0 + 2 * DAY;
         let (_t, conn) = db_with(&[a, b, c], true);
-        use chrono::Utc;
         let d = |s: &str| Some(NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap());
         let search =
             |c: &Connection, e: Option<&dyn Embedder>, p: &SearchParams| search_in(c, e, p, &Utc);
@@ -649,7 +651,7 @@ mod tests {
             let mut p = params(&["zebra"]);
             p.project = Some("alpha".into());
             let mut got = ids_of(&search(&conn, e, &p).unwrap());
-            got.sort();
+            got.sort_unstable();
             assert_eq!(got, vec![1, 3]);
 
             // "before" includes the whole day; "after" starts at 00:00 (UTC here).

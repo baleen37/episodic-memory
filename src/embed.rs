@@ -58,10 +58,10 @@ impl Embedder for E5Embedder {
 pub struct FakeEmbedder;
 
 fn fnv1a(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
 }
@@ -78,7 +78,9 @@ impl FakeEmbedder {
         }
         let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
-            v.iter_mut().for_each(|x| *x /= norm);
+            for x in &mut v {
+                *x /= norm;
+            }
         }
         v
     }
@@ -253,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // requires model download (~470MB)
+    #[ignore = "requires model download (~470MB)"]
     fn e5_embedder_loads_and_embeds_384() {
         let cache =
             std::env::var("FASTEMBED_CACHE_DIR").unwrap_or_else(|_| "/tmp/fastembed-cache".into());

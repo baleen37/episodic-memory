@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::path::Path;
 
 /// `response_item` user messages that are injected context, not human input
-/// (only consulted for the "response_item" fallback signal).
+/// (only consulted for the `response_item` fallback signal).
 const INJECTED_PREFIXES: [&str; 6] = [
     "# AGENTS.md instructions",
     "<environment_context>",
@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(e[0].tool_names, vec!["exec"]);
         assert_eq!(e[1].tool_names, vec!["apply_patch", "exec"]);
         assert_eq!(e[1].assistant_message, "Looking.\n\nHere it is.");
-        assert_eq!(e[0].ts, 1767323045000);
+        assert_eq!(e[0].ts, 1_767_323_045_000);
         assert_eq!(out.bad_lines, 0);
         assert!(!out.do_not_index);
     }

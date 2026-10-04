@@ -3,6 +3,7 @@ use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use sqlite_vec::sqlite3_vec_init;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Once;
 
@@ -144,9 +145,11 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
         for &b in std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()) {
             match b {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                    uri.push(b as char)
+                    uri.push(b as char);
                 }
-                _ => uri.push_str(&format!("%{b:02X}")),
+                _ => {
+                    let _ = write!(uri, "%{b:02X}");
+                }
             }
         }
         uri.push_str("?immutable=1");

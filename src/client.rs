@@ -80,7 +80,7 @@ pub fn run_mcp(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     }
 }
 
-/// SessionStart hook: asks the daemon for a sync, or starts it (it syncs on startup).
+/// `SessionStart` hook: asks the daemon for a sync, or starts it (it syncs on startup).
 /// Never fails and never writes to stdout.
 pub fn run_sync_hook(paths: &Paths, opts: &DaemonOpts) {
     if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {

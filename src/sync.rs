@@ -74,10 +74,10 @@ fn index_file(tx: &Transaction, row: &mut FileRow) -> Result<IndexStats> {
         }
     };
     if read_session {
-        row.session_id = meta.session_id.clone();
-        row.cwd = meta.cwd.clone();
+        row.session_id.clone_from(&meta.session_id);
+        row.cwd.clone_from(&meta.cwd);
         row.is_sidechain = Some(meta.is_sidechain);
-        row.user_signal = meta.user_signal.clone();
+        row.user_signal.clone_from(&meta.user_signal);
         row.harness = Some(kind.harness().to_string());
         row.project = Some(resolve_project(meta.cwd.as_deref()));
     }
@@ -299,6 +299,8 @@ pub(crate) fn is_generation_name(name: &str) -> bool {
 /// Recursively collects `*.jsonl` (not `*.gen-<N>.jsonl`) under `root`, following symlinks.
 /// Broken links and unreadable entries are skipped, and each directory is entered once (by
 /// device and inode) so a link to an ancestor cannot loop. Returns `(path relative to root, size)`.
+// Hosts write lowercase `.jsonl`; matching stays exact.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn walk_jsonl(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut out = Vec::new();
     let mut visited = HashSet::new();
@@ -1093,6 +1095,7 @@ mod orchestration {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn import_registers_existing_archive() {
         let e = env();
         let k = SourceKind::ClaudeCodeProjects;

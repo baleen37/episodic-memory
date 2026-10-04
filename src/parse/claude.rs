@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(e[1].tool_names, vec!["Bash", "Read"]);
         assert_eq!(e[1].assistant_message, "Let me look.\n\nSecond part.");
         assert_eq!(e[2].assistant_message, "A3 welcome.");
-        assert_eq!(e[0].ts, 1767323045000);
+        assert_eq!(e[0].ts, 1_767_323_045_000);
     }
 
     #[test]

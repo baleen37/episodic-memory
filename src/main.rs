@@ -78,7 +78,7 @@ fn main() {
             }
         }
         Command::Daemon(h) => {
-            if let Err(e) = daemon::run(paths.clone(), h.opts()) {
+            if let Err(e) = daemon::run(&paths, h.opts()) {
                 log::log_line(&paths, &format!("daemon: {e:#}"));
                 std::process::exit(1);
             }
