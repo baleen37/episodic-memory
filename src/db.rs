@@ -174,6 +174,12 @@ pub fn open(path: &Path) -> Result<Connection> {
             tx.execute_batch(SCHEMA)?;
         } else if version == 1 {
             tx.execute_batch(MIGRATE_1_TO_4)?;
+        } else {
+            // Versions 2 and 3 existed only on unreleased builds; fail here, not in later SQL.
+            anyhow::bail!(
+                "unsupported schema version {version}; delete {} to rebuild",
+                path.display()
+            );
         }
         tx.commit()?;
     }
@@ -469,6 +475,18 @@ mod tests {
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vocab, 0);
+    }
+
+    #[test]
+    fn open_rejects_an_unreleased_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("episodic.db");
+        Connection::open(&p)
+            .unwrap()
+            .execute_batch("PRAGMA user_version = 2;")
+            .unwrap();
+        let err = open(&p).unwrap_err().to_string();
+        assert!(err.contains("schema version 2"), "{err}");
     }
 
     /// Every table's columns (sorted by name) and every index, as `PRAGMA` reports them.
