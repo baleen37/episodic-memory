@@ -75,8 +75,9 @@ pub struct NewExchange {
     pub tool_names: String,
 }
 
-/// The latest schema, for a fresh DB, which `open` stamps with `migrations::HEAD`. Existing DBs
-/// reach it through `migrations`; a schema change goes in both.
+/// The latest schema, for a fresh DB, which `open` completes with `migrations::FENCE` and stamps
+/// with `migrations::HEAD`. Existing DBs reach it through `migrations`; a schema change goes in
+/// both.
 const SCHEMA: &str = r#"
 CREATE TABLE files(
   source_path TEXT PRIMARY KEY,
@@ -119,13 +120,6 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   project TEXT, ts INTEGER, is_sidechain INTEGER);
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
-CREATE TRIGGER files_archive_path_insert BEFORE INSERT ON files
-  WHEN substr(NEW.archive_path, 1, 1) = '/'
-    AND NOT EXISTS (SELECT 1 FROM files WHERE archive_path = NEW.archive_path)
-BEGIN SELECT RAISE(ABORT, 'absolute archive_path from an outdated episodic-memory; restart this session'); END;
-CREATE TRIGGER files_archive_path_update BEFORE UPDATE OF archive_path ON files
-  WHEN substr(NEW.archive_path, 1, 1) = '/' AND NEW.archive_path IS NOT OLD.archive_path
-BEGIN SELECT RAISE(ABORT, 'absolute archive_path from an outdated episodic-memory; restart this session'); END;
 PRAGMA user_version = 4;
 "#;
 
@@ -146,6 +140,7 @@ fn register_vec() {
 pub fn open(path: &Path) -> Result<Connection> {
     register_vec();
     let mut c = Connection::open(path)?;
+    crate::migrations::register_revision_fn(&c)?;
     c.execute_batch(
         "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
     )?;
@@ -167,6 +162,7 @@ pub fn open(path: &Path) -> Result<Connection> {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version == 0 {
             tx.execute_batch(SCHEMA)?;
+            tx.execute_batch(crate::migrations::FENCE)?;
             crate::migrations::stamp(&tx, crate::migrations::HEAD)?;
         }
         tx.commit()?;
@@ -199,6 +195,7 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
         Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?
     };
     c.busy_timeout(std::time::Duration::from_secs(5))?;
+    crate::migrations::register_revision_fn(&c)?;
     Ok(c)
 }
 

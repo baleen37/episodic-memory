@@ -65,6 +65,32 @@ const REVISIONS: &[Revision] = &[
 
 pub const HEAD: i64 = REVISIONS[REVISIONS.len() - 1].id;
 
+/// Fences binaries older than revision 3 off every write to `files` and every new exchange.
+/// The triggers call `em_revision()`, which only `register_revision_fn` defines, so an older
+/// binary's statement fails to prepare ("no such function") and its file's transaction rolls
+/// back before it can register a file or start a generation under a layout it does not know.
+/// Reads still work. A revision that older binaries must not write past raises the 3.
+/// `db::SCHEMA` gets these too; `IF NOT EXISTS` lets revisions 2 and 3 both run it.
+pub const FENCE: &str = "
+CREATE TRIGGER IF NOT EXISTS fence_files_insert BEFORE INSERT ON files WHEN em_revision() < 3
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
+CREATE TRIGGER IF NOT EXISTS fence_files_update BEFORE UPDATE ON files WHEN em_revision() < 3
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
+CREATE TRIGGER IF NOT EXISTS fence_exchanges_insert BEFORE INSERT ON exchanges
+  WHEN em_revision() < 3
+BEGIN SELECT RAISE(ABORT, 'episodic-memory is outdated for this data dir'); END;
+";
+
+/// Defines `em_revision()` (this binary's `HEAD`) on `c`, which `FENCE` requires to write.
+pub fn register_revision_fn(c: &Connection) -> rusqlite::Result<()> {
+    c.create_scalar_function(
+        "em_revision",
+        0,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |_| Ok(HEAD),
+    )
+}
+
 /// Records `revision` as applied, in `tx`.
 pub fn stamp(tx: &Transaction, revision: i64) -> Result<()> {
     meta_set(tx, "revision", &revision.to_string())
@@ -101,8 +127,9 @@ pub fn current(paths: &Paths, c: &Connection) -> Result<(i64, bool)> {
     }
     let r = match c.query_row("PRAGMA user_version", [], |r| r.get(0))? {
         1 => 0,
+        // Revision 1 is what made user_version 4, whatever the file says.
         4 => match revision_file(paths) {
-            Ok(Some(r)) => r,
+            Ok(Some(r)) => r.max(1),
             _ => 1,
         },
         v => bail!("unsupported schema version {v}"),
@@ -119,14 +146,12 @@ pub fn run(paths: &Paths, conn: &mut Connection) -> Result<Vec<i64>> {
             "data dir is at revision {from}, newer than this binary ({VERSION}, revision {HEAD})"
         );
     }
-    if !recorded {
+    // Recorded only together with a revision's own changes: a stamp committed alone ahead of a
+    // failing revision 1 would outlive an older binary migrating the schema in between.
+    if !recorded && from == HEAD {
         let tx = conn.transaction()?;
         stamp(&tx, from)?;
         tx.commit()?;
-        match fs::remove_file(paths.revision_file()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
     }
     let mut applied = Vec::new();
     for r in REVISIONS.iter().filter(|r| r.id > from) {
@@ -137,7 +162,11 @@ pub fn run(paths: &Paths, conn: &mut Connection) -> Result<Vec<i64>> {
         tx.commit()?;
         applied.push(r.id);
     }
-    Ok(applied)
+    // meta.revision supersedes the v4.1.0 file; a v4.1.0 daemon still running may write it again.
+    match fs::remove_file(paths.revision_file()) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(applied),
+    }
 }
 
 #[cfg(test)]
@@ -222,8 +251,9 @@ PRAGMA user_version = 1;
             let c = crate::db::open(&paths.db()).unwrap();
             c.execute_batch(
                 "DELETE FROM meta WHERE key = 'revision';
-                 DROP TRIGGER files_archive_path_insert;
-                 DROP TRIGGER files_archive_path_update;
+                 DROP TRIGGER fence_files_insert;
+                 DROP TRIGGER fence_files_update;
+                 DROP TRIGGER fence_exchanges_insert;
                  PRAGMA user_version = 4;",
             )
             .unwrap();
@@ -385,49 +415,76 @@ PRAGMA user_version = 1;
         assert_eq!(migrate(&paths).unwrap(), (1..=HEAD).collect::<Vec<_>>());
     }
 
+    /// A connection as an older binary opens it: sqlite-vec loaded, no `em_revision()`.
+    fn older_binary(paths: &Paths) -> Connection {
+        drop(crate::db::open(&paths.data.join("vec.db")).unwrap()); // loads sqlite-vec
+        Connection::open(paths.db()).unwrap()
+    }
+
     #[test]
-    fn older_binaries_cannot_add_absolute_archive_paths() {
+    fn older_binaries_can_read_but_not_write() {
         let (_t, paths) = legacy(4);
-        // A row written under another EPISODIC_MEMORY_DIR stays absolute and keeps syncing.
+        migrate(&paths).unwrap();
+        let old = older_binary(&paths);
+        let n: i64 = old
+            .query_row("SELECT count(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        for sql in [
+            "INSERT INTO files(source_path, source_kind, archive_path)
+               VALUES ('/src/c.jsonl', 'codex-sessions', '/d/c.jsonl')",
+            "UPDATE files SET \"offset\" = 20",
+            "INSERT INTO exchanges(archive_path, line_start, line_end, project, harness, ts,
+                                   user_message, assistant_message)
+               VALUES ('a.jsonl', 1, 2, 'p', 'codex', 0, 'u', 'a')",
+        ] {
+            let err = old.execute(sql, []).unwrap_err().to_string();
+            assert!(err.contains("em_revision"), "{err}");
+        }
+        // This binary writes as before.
         crate::db::open(&paths.db())
             .unwrap()
-            .execute(
-                "INSERT INTO files(source_path, source_kind, archive_path)
-                   VALUES ('/src/b.jsonl', 'codex-sessions', '/elsewhere/b.jsonl')",
-                [],
+            .execute("UPDATE files SET \"offset\" = 20", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn an_older_binary_migrating_after_a_failed_revision_1_does_not_strand_the_db() {
+        let (_t, paths) = legacy(1);
+        crate::db::open(&paths.db())
+            .unwrap()
+            .execute_batch("ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER")
+            .unwrap();
+        assert!(migrate(&paths).is_err());
+        // Meanwhile a 4.0.7 opens the version 1 DB and migrates it to version 4 itself.
+        older_binary(&paths)
+            .execute_batch(
+                "ALTER TABLE files ADD COLUMN sidechain_known INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN agent_path TEXT;
+                 ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN reparse_offset INTEGER NOT NULL DEFAULT 0;
+                 PRAGMA user_version = 4;",
             )
             .unwrap();
-        migrate(&paths).unwrap();
-        let mut c = crate::db::open(&paths.db()).unwrap();
-        let mut b = crate::db::get_file(&c, "/src/b.jsonl").unwrap().unwrap();
-        b.offset = 99;
-        let tx = c.transaction().unwrap();
-        crate::db::upsert_file(&tx, &b).unwrap();
-        tx.commit().unwrap();
-        // An older binary starting a generation or registering a file writes an absolute path.
-        let mut a = crate::db::get_file(&c, "/src/a.jsonl").unwrap().unwrap();
-        a.archive_path = format!(
-            "{}/conversation-archive/a.gen-1.jsonl",
-            paths.data.display()
-        );
-        let tx = c.transaction().unwrap();
-        let err = crate::db::upsert_file(&tx, &a).unwrap_err().to_string();
-        assert!(err.contains("outdated episodic-memory"), "{err}");
-        drop(tx);
-        let err = c
-            .execute(
-                "INSERT INTO files(source_path, source_kind, archive_path)
-                   VALUES ('/src/c.jsonl', 'codex-sessions', '/d/c.jsonl')",
-                [],
-            )
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("outdated episodic-memory"), "{err}");
-        // This binary's relative paths pass.
-        a.archive_path = "conversation-archive/a.gen-1.jsonl".into();
-        let tx = c.transaction().unwrap();
-        crate::db::upsert_file(&tx, &a).unwrap();
-        tx.commit().unwrap();
+        assert_eq!(migrate(&paths).unwrap(), (2..=HEAD).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn absolute_paths_written_after_v4_1_0_are_converted() {
+        let (_t, paths) = legacy(4);
+        // v4.1.0 ran revision 2 (unfenced); a 4.0.7 daemon then registered a new file.
+        add_absolute_rows(&paths, &format!("{}/", paths.data.display()));
+        fs::write(paths.revision_file(), "2\n").unwrap();
+        assert_eq!(migrate(&paths).unwrap(), vec![3]);
+        assert_relative(&paths);
+    }
+
+    #[test]
+    fn a_revision_file_below_1_beside_version_4_reads_as_1() {
+        let (_t, paths) = legacy(4);
+        fs::write(paths.revision_file(), "0\n").unwrap();
+        assert_eq!(revision(&paths), 1);
     }
 
     #[test]
@@ -446,7 +503,7 @@ PRAGMA user_version = 1;
             .execute_batch("ALTER TABLE files ADD COLUMN reparse_offset_line INTEGER")
             .unwrap();
         assert!(migrate(&paths).is_err());
-        // Stamped at revision 0; binaries before revisions still use the DB as before.
+        // Nothing recorded: older binaries still use the DB as before.
         assert_eq!(revision(&paths), 0);
         let v: i64 = crate::db::open(&paths.db())
             .unwrap()

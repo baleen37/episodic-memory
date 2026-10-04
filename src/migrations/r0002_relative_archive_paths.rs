@@ -8,6 +8,8 @@ use anyhow::Result;
 pub const NAME: &str = "relative archive paths";
 
 pub fn up(m: &Migration) -> Result<()> {
+    // Older binaries cannot write relative paths correctly; fence them off first.
+    m.sql(super::FENCE)?;
     // Stored paths were built with `Path::join` on the data dir, which adds a separator only
     // when the data dir does not already end with one.
     let mut prefix = m.paths().data.to_string_lossy().into_owned();
