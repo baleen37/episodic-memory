@@ -1,4 +1,4 @@
-use crate::embed::{E5Embedder, Embedder, FakeEmbedder};
+use crate::embed::{E5Embedder, Embedder, SlowFakeEmbedder, embed_pending};
 use crate::locks;
 use crate::log::log_line;
 use crate::mcp::{Ctx, serve};
@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,7 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DaemonOpts {
     pub idle_secs: u64,
     pub fake_embedder: bool,
+    pub fake_embed_delay_ms: u64,
 }
 
 /// The daemon socket path, or an error when it does not fit in `sun_path`.
@@ -45,7 +47,8 @@ pub enum Hello {
         host_pid: Option<u32>,
     },
     Sync,
-    /// Like `Sync`, but the daemon replies one line once that sync has finished.
+    /// Like `Sync`, but the daemon replies one line once that sync has finished. Finished means
+    /// indexed (keyword-searchable); embedding continues in the background afterwards.
     SyncWait,
     Status,
 }
@@ -87,20 +90,34 @@ struct State {
     clients: AtomicUsize,
     /// Model download/load in progress; keeps a hook-started daemon alive on slow links.
     loading: AtomicBool,
+    /// Wakes the embedding worker; capacity 1, so wake-ups during a pass collapse into one.
+    embed_wake: SyncSender<()>,
+    /// The embedding worker is in a pass.
+    embedding: AtomicBool,
     last_active: Mutex<Instant>,
 }
 
 impl State {
-    fn new(ctx: Ctx) -> State {
-        State {
+    /// The state and the receiving end of its embedding wake-up channel.
+    fn new(ctx: Ctx) -> (State, Receiver<()>) {
+        let (embed_wake, wakes) = sync_channel(1);
+        let st = State {
             ctx,
             sched: Mutex::new(Sched::default()),
             wake: Condvar::new(),
             done: Condvar::new(),
             clients: AtomicUsize::new(0),
             loading: AtomicBool::new(false),
+            embed_wake,
+            embedding: AtomicBool::new(false),
             last_active: Mutex::new(Instant::now()),
-        }
+        };
+        (st, wakes)
+    }
+
+    fn wake_embedder(&self) {
+        // Full: a queued pass will see these exchanges too. Disconnected: no worker (tests).
+        let _ = self.embed_wake.try_send(());
     }
 
     fn request_sync(&self) {
@@ -146,6 +163,7 @@ impl State {
         s.running
             || s.pending
             || self.loading.load(Ordering::SeqCst)
+            || self.embedding.load(Ordering::SeqCst)
             || self.clients.load(Ordering::SeqCst) > 0
     }
 }
@@ -169,20 +187,27 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     // daemon spawns any thread, so nothing else reads or writes the environment concurrently.
     unsafe { std::env::remove_var("HF_HOME") };
     let embedder: Option<Arc<dyn Embedder>> = if opts.fake_embedder {
-        Some(Arc::new(FakeEmbedder))
+        Some(Arc::new(SlowFakeEmbedder(Duration::from_millis(
+            opts.fake_embed_delay_ms,
+        ))))
     } else {
         None
     };
-    let state = Arc::new(State::new(Ctx {
+    let (state, wakes) = State::new(Ctx {
         paths: paths.clone(),
         embedder: Arc::new(RwLock::new(embedder)),
         load_failed: AtomicBool::new(false),
-    }));
+    });
+    let state = Arc::new(state);
     state.request_sync();
 
     let st = state.clone();
+    std::thread::spawn(move || scheduler(&st, |paths| run_sync(paths).map(drop)));
+    let st = state.clone();
     std::thread::spawn(move || {
-        scheduler(&st, |paths, embedder| run_sync(paths, embedder).map(drop));
+        embed_worker(&st, &wakes, |paths, e| {
+            embed_pending(&mut crate::db::open(&paths.db())?, e).map(drop)
+        });
     });
     if !opts.fake_embedder {
         state.loading.store(true, Ordering::SeqCst);
@@ -212,8 +237,8 @@ pub fn run(paths: &Paths, opts: DaemonOpts) -> Result<()> {
     Ok(())
 }
 
-/// Runs `sync` once per batch of sync requests, forever.
-fn scheduler(st: &State, sync: impl Fn(&Paths, Option<&dyn Embedder>) -> Result<()>) {
+/// Runs `sync` once per batch of sync requests, forever, waking the embedding worker after each.
+fn scheduler(st: &State, sync: impl Fn(&Paths) -> Result<()>) {
     loop {
         {
             let mut s = locks::lock(&st.sched);
@@ -224,22 +249,46 @@ fn scheduler(st: &State, sync: impl Fn(&Paths, Option<&dyn Embedder>) -> Result<
             s.running = true;
             s.started += 1;
         }
-        let embedder = locks::read(&st.ctx.embedder).clone();
         let paths = &st.ctx.paths;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            sync(paths, embedder.as_deref())
-        }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sync(paths)));
         match result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => log_line(paths, &format!("sync: {e:#}")),
             Err(_) => log_line(paths, "sync: panicked"),
         }
+        st.wake_embedder();
         // touch first so the idle watcher never sees not-busy with a stale last_active.
         st.touch();
         let mut s = locks::lock(&st.sched);
         s.running = false;
         s.finished += 1;
         st.done.notify_all();
+    }
+}
+
+/// Embeds pending exchanges, one pass per wake-up, until the channel closes. Holds no lock
+/// while waiting; a pass only clones the model handle (releasing the read lock at once) and
+/// leaves locking to `embed`: one model batch, then one short write transaction, in turn.
+fn embed_worker(
+    st: &State,
+    wakes: &Receiver<()>,
+    embed: impl Fn(&Paths, &dyn Embedder) -> Result<()>,
+) {
+    while wakes.recv().is_ok() {
+        let Some(e) = locks::read(&st.ctx.embedder).clone() else {
+            continue; // no model yet; `finish_load` wakes us again
+        };
+        st.embedding.store(true, Ordering::SeqCst);
+        let paths = &st.ctx.paths;
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| embed(paths, e.as_ref())));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => log_line(paths, &format!("embedding: {err:#}")),
+            Err(_) => log_line(paths, "embedding: panicked"),
+        }
+        st.touch();
+        st.embedding.store(false, Ordering::SeqCst);
     }
 }
 
@@ -251,13 +300,13 @@ fn load_model(st: &State, load: impl FnOnce() -> Result<Arc<dyn Embedder>>) {
     finish_load(st, loaded);
 }
 
-/// Installs a loaded model (and requests a sync to embed the backlog) or logs the failure.
+/// Installs a loaded model (and wakes the embedding worker for the backlog) or logs the failure.
 /// Either way loading is over: touch, then clear `loading`.
 fn finish_load(st: &State, loaded: Result<Arc<dyn Embedder>>) {
     match loaded {
         Ok(e) => {
             *locks::write(&st.ctx.embedder) = Some(e);
-            st.request_sync();
+            st.wake_embedder();
         }
         Err(e) => {
             st.ctx.load_failed.store(true, Ordering::SeqCst);
@@ -326,15 +375,16 @@ fn handle_conn(stream: UnixStream, st: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embed::FakeEmbedder;
 
-    fn state() -> (tempfile::TempDir, State) {
+    fn state() -> (tempfile::TempDir, State, Receiver<()>) {
         let t = tempfile::tempdir().unwrap();
-        let st = State::new(Ctx {
+        let (st, wakes) = State::new(Ctx {
             paths: Paths::new(t.path().join("data")),
             embedder: Arc::new(RwLock::new(None)),
             load_failed: AtomicBool::new(false),
         });
-        (t, st)
+        (t, st, wakes)
     }
 
     #[test]
@@ -355,7 +405,7 @@ mod tests {
 
     #[test]
     fn loading_counts_as_busy_until_load_finishes() {
-        let (_t, st) = state();
+        let (_t, st, _wakes) = state();
         assert!(!st.busy());
         st.loading.store(true, Ordering::SeqCst);
         assert!(st.busy(), "model loading must block idle exit");
@@ -366,7 +416,7 @@ mod tests {
 
     #[test]
     fn panicking_load_counts_as_failed() {
-        let (_t, st) = state();
+        let (_t, st, _wakes) = state();
         st.loading.store(true, Ordering::SeqCst);
         load_model(&st, || panic!("synthetic load panic"));
         assert!(!st.loading.load(Ordering::SeqCst));
@@ -375,7 +425,7 @@ mod tests {
 
     #[test]
     fn status_reports_model_state() {
-        let (_t, st) = state();
+        let (_t, st, _wakes) = state();
         st.loading.store(true, Ordering::SeqCst);
         assert_eq!(st.status().model, "loading");
         finish_load(&st, Err(anyhow::anyhow!("offline")));
@@ -385,22 +435,67 @@ mod tests {
         assert_eq!(s.model, "ready");
         assert_eq!(s.version, VERSION);
         assert_eq!(s.clients, 0);
-        assert!(s.sync_running, "load success requested a sync");
+        assert!(
+            !s.sync_running,
+            "a loaded model needs no sync, only embedding"
+        );
     }
 
     #[test]
-    fn successful_load_installs_model_and_requests_sync() {
-        let (_t, st) = state();
+    fn successful_load_installs_model_and_wakes_embedder() {
+        let (_t, st, wakes) = state();
         st.loading.store(true, Ordering::SeqCst);
         finish_load(&st, Ok(Arc::new(FakeEmbedder)));
         assert!(!st.loading.load(Ordering::SeqCst));
         assert!(st.ctx.embedder.read().unwrap().is_some());
-        assert!(st.sched.lock().unwrap().pending);
+        assert!(wakes.try_recv().is_ok());
+    }
+
+    #[test]
+    fn embed_wakes_collapse_and_worker_survives_a_panicking_pass() {
+        let (_t, st, wakes) = state();
+        *st.ctx.embedder.write().unwrap() = Some(Arc::new(FakeEmbedder));
+        for _ in 0..5 {
+            st.wake_embedder();
+        }
+        st.wake_embedder();
+        let st = Arc::new(st);
+        let passes = Arc::new(AtomicUsize::new(0));
+        let (w_st, w_passes) = (st.clone(), passes.clone());
+        std::thread::spawn(move || {
+            embed_worker(&w_st, &wakes, |_, _| {
+                // The first pass panics.
+                assert!(
+                    w_passes.fetch_add(1, Ordering::SeqCst) > 0,
+                    "synthetic embedding panic"
+                );
+                Ok(())
+            });
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while passes.load(Ordering::SeqCst) < 1 || st.busy() {
+            assert!(Instant::now() < deadline, "first pass never ran");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            passes.load(Ordering::SeqCst),
+            1,
+            "six wake-ups ran more than one pass"
+        );
+        st.wake_embedder();
+        while passes.load(Ordering::SeqCst) < 2 {
+            assert!(
+                Instant::now() < deadline,
+                "worker died with the panicking pass"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
     fn scheduler_keeps_syncing_after_locks_were_poisoned() {
-        let (_t, st) = state();
+        let (_t, st, _wakes) = state();
         let st = Arc::new(st);
         let poison = st.clone();
         let _ = std::thread::spawn(move || {
@@ -415,7 +510,7 @@ mod tests {
         let runs = Arc::new(AtomicUsize::new(0));
         let (sched_st, sched_runs) = (st.clone(), runs.clone());
         std::thread::spawn(move || {
-            scheduler(&sched_st, |_, _| {
+            scheduler(&sched_st, |_| {
                 sched_runs.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             });
