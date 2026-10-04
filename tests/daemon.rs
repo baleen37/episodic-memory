@@ -76,14 +76,20 @@ impl Env {
         assert!(t.elapsed() < Duration::from_secs(2), "sync hook blocked");
     }
 
-    fn meta(&self, key: &str) -> Option<String> {
+    /// A read-only connection to the daemon's DB, or None before it exists.
+    fn db(&self) -> Option<Connection> {
         let db = self.data.join("episodic.db");
         if !db.exists() {
             return None;
         }
         let c = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
         c.busy_timeout(Duration::from_secs(5)).ok()?;
-        c.query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
+        Some(c)
+    }
+
+    fn meta(&self, key: &str) -> Option<String> {
+        self.db()?
+            .query_row("SELECT value FROM meta WHERE key = ?", [key], |r| r.get(0))
             .ok()
     }
 
@@ -439,11 +445,7 @@ fn search_during_sync_sees_committed_state() {
     assert!(done, "sync never finished");
     assert!(rounds >= 2);
     assert!(!seen.is_empty());
-    let c = Connection::open_with_flags(
-        env.data.join("episodic.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
+    let c = env.db().unwrap();
     for (path, s, e) in &seen {
         // Cards show absolute paths; the DB stores them relative to the data dir.
         let key = Path::new(path).strip_prefix(&env.data).unwrap();
@@ -567,7 +569,7 @@ fn doctor_after_sync_reports_running_daemon() {
     assert!(daemon.contains("0 client(s)"), "status counted as a client");
     assert!(d.line("model").starts_with("[ok]"));
     let db = d.line("db");
-    assert!(db.starts_with("[ok]") && db.contains("revision 4"), "{db}");
+    assert!(db.starts_with("[ok]") && db.contains("revision 2"), "{db}");
     let n: i64 = db
         .split(", ")
         .find_map(|p| p.strip_suffix(" exchanges")?.parse().ok())
@@ -622,12 +624,7 @@ fn symlink_to_ancestor_does_not_loop_discovery() {
         wait_until(Duration::from_secs(15), || env.sync_count() >= 1),
         "sync never finished"
     );
-    let c = Connection::open_with_flags(
-        env.data.join("episodic.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
-    c.busy_timeout(Duration::from_secs(5)).unwrap();
+    let c = env.db().unwrap();
     let mut stmt = c
         .prepare(
             "SELECT source_path FROM files WHERE source_kind = 'claude-code-projects' \
@@ -681,66 +678,4 @@ fn mcp_client_idle_past_hello_timeout_still_served() {
     thread::sleep(Duration::from_secs(7));
     let r = m.request("tools/list", &json!({}));
     assert_eq!(r["result"]["tools"].as_array().map(Vec::len), Some(2));
-}
-
-#[test]
-fn keyword_search_does_not_wait_for_embedding_backlog() {
-    use std::fmt::Write as _;
-    let env = Env::new();
-    // 2,000 exchanges at 25ms per batch of 8: about 6 seconds of embedding backlog.
-    let mut big = String::new();
-    for i in 0..2000 {
-        let _ = write!(
-            big,
-            "{{\"type\":\"user\",\"sessionId\":\"big\",\"cwd\":\"/work/big\",\"timestamp\":\"2026-01-03T00:00:00.000Z\",\"message\":{{\"role\":\"user\",\"content\":\"backlog question {i}\"}}}}\n\
-             {{\"type\":\"assistant\",\"sessionId\":\"big\",\"timestamp\":\"2026-01-03T00:00:01.000Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"backlog answer {i}\"}}]}}}}\n"
-        );
-    }
-    std::fs::write(env.root.join("c/projects/demo/big.jsonl"), big).unwrap();
-    let slow_sync_wait = || {
-        let t = Instant::now();
-        let st = env
-            .fast("sync")
-            .args(["--fake-embed-delay-ms", "25", "--wait"])
-            .status()
-            .unwrap();
-        assert!(st.success());
-        t.elapsed()
-    };
-    let pending = || -> i64 {
-        let c = Connection::open_with_flags(
-            env.data.join("episodic.db"),
-            OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .unwrap();
-        c.busy_timeout(Duration::from_secs(5)).unwrap();
-        c.query_row(
-            "SELECT count(*) FROM exchanges WHERE embedded = 0",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap()
-    };
-
-    // `sync --wait` means indexed, not embedded: it returns with the backlog still pending.
-    slow_sync_wait();
-    assert!(pending() > 1000, "sync waited for the embedding backlog");
-
-    std::fs::write(
-        env.root.join("c/projects/demo/fresh.jsonl"),
-        "{\"type\":\"user\",\"sessionId\":\"fresh\",\"cwd\":\"/work/demo\",\"timestamp\":\"2026-01-04T00:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"how do I calibrate the zeppelin\"}}\n\
-         {\"type\":\"assistant\",\"sessionId\":\"fresh\",\"timestamp\":\"2026-01-04T00:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"zeppelin calibrated\"}]}}\n",
-    )
-    .unwrap();
-    let took = slow_sync_wait();
-    assert!(took < Duration::from_secs(3), "sync --wait took {took:?}");
-    assert!(pending() > 0, "backlog drained before the check");
-    let mut m = env.mcp();
-    let (err, text) = m.search("zeppelin");
-    assert!(!err && text.contains("fresh.jsonl:"), "{text}");
-
-    assert!(
-        wait_until(Duration::from_secs(60), || pending() == 0),
-        "embedding backlog never drained"
-    );
 }

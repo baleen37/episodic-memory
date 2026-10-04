@@ -23,10 +23,6 @@ fn spawn_daemon(opts: &DaemonOpts) -> Result<()> {
     if opts.fake_embedder {
         cmd.arg("--fake-embedder");
     }
-    if opts.fake_embed_delay_ms > 0 {
-        cmd.arg("--fake-embed-delay-ms")
-            .arg(opts.fake_embed_delay_ms.to_string());
-    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -84,10 +80,15 @@ pub fn run_mcp(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     }
 }
 
+/// `EPISODIC_MEMORY_DISABLE=1`: sync is a no-op.
+fn disabled() -> bool {
+    std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1")
+}
+
 /// `SessionStart` hook: asks the daemon for a sync, or starts it (it syncs on startup).
 /// Never fails and never writes to stdout.
 pub fn run_sync_hook(paths: &Paths, opts: &DaemonOpts) {
-    if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {
+    if disabled() {
         return;
     }
     if let Err(e) = try_sync_hook(paths, opts) {
@@ -106,7 +107,7 @@ fn try_sync_hook(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
 /// `sync --wait`: asks the daemon (spawning it if absent) for a sync and returns once a sync
 /// that started after the request has finished indexing. Embedding is not waited for.
 pub fn run_sync_wait(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
-    if std::env::var("EPISODIC_MEMORY_DISABLE").as_deref() == Ok("1") {
+    if disabled() {
         return Ok(());
     }
     let mut stream = connect_or_spawn(paths, opts, MCP_CONNECT_TIMEOUT)?;

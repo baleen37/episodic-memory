@@ -35,9 +35,6 @@ struct Hidden {
     idle_secs: u64,
     #[arg(long, hide = true)]
     fake_embedder: bool,
-    /// With `--fake-embedder`: sleep this long per embedding batch, to simulate a slow model.
-    #[arg(long, hide = true, default_value_t = 0)]
-    fake_embed_delay_ms: u64,
 }
 
 impl Hidden {
@@ -45,7 +42,6 @@ impl Hidden {
         DaemonOpts {
             idle_secs: self.idle_secs,
             fake_embedder: self.fake_embedder,
-            fake_embed_delay_ms: self.fake_embed_delay_ms,
         }
     }
 }

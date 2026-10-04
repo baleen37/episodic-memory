@@ -242,7 +242,10 @@ fn db_checks(paths: &Paths, daemon_up: bool) -> Vec<Check> {
                     n.exchanges,
                     n.skipped
                 ),
-                migrations::stored(paths).map(|r| r.or(migrations::from_user_version(n.version))),
+                migrations::stored(paths).and_then(|r| match r {
+                    Some(r) => Ok(Some(r)),
+                    None => migrations::from_user_version(n.version),
+                }),
             ),
             pending_check(
                 n.pending,
@@ -437,26 +440,17 @@ mod tests {
     fn pending_and_newer_revisions() {
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
-        // A data dir from before REVISION: DB user_version 4 is revision 3.
+        // A data dir from before REVISION: DB user_version 4 is revision 1.
         drop(crate::db::open(&paths.db()).unwrap());
         let db = &db_checks(&paths, false)[0];
         assert_eq!(db.level, Level::Warn, "{}", db.detail);
-        assert!(db.detail.contains("revision 3 of"), "{}", db.detail);
+        assert!(db.detail.contains("revision 1 of"), "{}", db.detail);
         std::fs::write(paths.revision_file(), "999\n").unwrap();
         assert_eq!(db_checks(&paths, false)[0].level, Level::Fail);
     }
 
     #[test]
     fn embedding_failure_warns_until_a_batch_succeeds() {
-        struct Broken;
-        impl crate::embed::Embedder for Broken {
-            fn embed_passages(&self, _: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-                anyhow::bail!("model exploded")
-            }
-            fn embed_query(&self, _: &str) -> anyhow::Result<Vec<f32>> {
-                anyhow::bail!("model exploded")
-            }
-        }
         let t = tempfile::tempdir().unwrap();
         let paths = Paths::new(t.path().to_path_buf());
         let embeddings = |paths: &Paths| {
@@ -483,11 +477,11 @@ mod tests {
             };
             crate::db::insert_exchange(&tx, &e, "q a").unwrap();
             tx.commit().unwrap();
-            assert!(crate::embed::embed_pending(&mut c, &Broken).is_err());
+            assert!(crate::embed::embed_pending(&mut c, &crate::embed::Broken).is_err());
         }
         let check = embeddings(&paths);
         assert_eq!(check.level, Level::Warn);
-        assert!(check.detail.contains("model exploded"), "{}", check.detail);
+        assert!(check.detail.contains("broken"), "{}", check.detail);
         {
             let mut c = crate::db::open(&paths.db()).unwrap();
             crate::embed::embed_pending(&mut c, &crate::embed::FakeEmbedder).unwrap();

@@ -51,6 +51,14 @@ impl FileRow {
             skipped: false,
         }
     }
+
+    /// Makes the next index pass start over: parse from line 1, learn file meta and the project
+    /// again.
+    pub fn reset_index(&mut self) {
+        self.reparse = ReparsePoint::START;
+        self.meta_offset = 0;
+        self.harness = None;
+    }
 }
 
 pub struct NewExchange {
@@ -308,28 +316,6 @@ pub fn insert_exchange(tx: &Transaction, e: &NewExchange, terms: &str) -> Result
     Ok(id)
 }
 
-/// Sets the file meta columns of every exchange of an archive, including the metadata columns
-/// `vec_exchanges` filters on (it has no FK support either).
-pub fn update_exchange_meta(
-    tx: &Transaction,
-    archive_path: &str,
-    session_id: Option<&str>,
-    project: &str,
-    is_sidechain: bool,
-) -> Result<()> {
-    tx.prepare_cached(
-        "UPDATE vec_exchanges SET project = ?2, is_sidechain = ?3
-         WHERE rowid IN (SELECT id FROM exchanges WHERE archive_path = ?1 AND embedded = 1)",
-    )?
-    .execute(params![archive_path, project, is_sidechain])?;
-    tx.prepare_cached(
-        "UPDATE exchanges SET session_id = ?2, project = ?3, is_sidechain = ?4
-         WHERE archive_path = ?1",
-    )?
-    .execute(params![archive_path, session_id, project, is_sidechain])?;
-    Ok(())
-}
-
 /// The only path that deletes exchanges. The virtual tables have no FK support,
 /// so their rows go first, then the `exchanges` rows.
 pub fn delete_exchanges_from(
@@ -469,6 +455,34 @@ mod tests {
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vocab, 0);
+    }
+
+    /// Openers that read version 0 before another one created the schema must accept the v4
+    /// they find under the write lock. (The DB is already WAL so only the version check races.)
+    #[test]
+    fn concurrent_first_opens_all_succeed() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let p = dir.path().join("episodic.db");
+            Connection::open(&p)
+                .unwrap()
+                .execute_batch("PRAGMA journal_mode=WAL;")
+                .unwrap();
+            let start = std::sync::Barrier::new(8);
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..8)
+                    .map(|_| {
+                        s.spawn(|| {
+                            start.wait();
+                            open(&p).map(drop)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    h.join().unwrap().unwrap();
+                }
+            });
+        }
     }
 
     #[test]

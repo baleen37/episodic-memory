@@ -298,7 +298,7 @@ fn read_tool(args: &Map<String, Value>, ctx: &Ctx) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embed::FakeEmbedder;
+    use crate::embed::{Broken, FakeEmbedder};
     use crate::paths::{SourceKind, SourceRoot};
     use crate::sync::run_sync_with_roots;
     use serde_json::{Value, json};
@@ -308,10 +308,7 @@ mod tests {
         let projects = t.path().join("claude/projects/demo");
         std::fs::create_dir_all(&projects).unwrap();
         std::fs::copy(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/claude/main.jsonl"
-            ),
+            crate::parse::tests::fixture("claude", "main"),
             projects.join("main.jsonl"),
         )
         .unwrap();
@@ -453,16 +450,6 @@ mod tests {
             ),
             "{body}"
         );
-    }
-
-    struct Broken;
-    impl Embedder for Broken {
-        fn embed_passages(&self, _: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-            anyhow::bail!("broken")
-        }
-        fn embed_query(&self, _: &str) -> anyhow::Result<Vec<f32>> {
-            anyhow::bail!("broken")
-        }
     }
 
     #[test]
