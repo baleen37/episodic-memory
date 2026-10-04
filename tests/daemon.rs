@@ -309,6 +309,29 @@ fn sync_hook_triggers_indexing() {
 }
 
 #[test]
+fn sync_wait_returns_after_the_triggered_sync_commits() {
+    let env = Env::new();
+    // No daemon yet: --wait spawns it and still waits for the indexed state.
+    let st = env.fast("sync").arg("--wait").status().unwrap();
+    assert!(st.success());
+    let mut m = env.mcp();
+    let (err, text) = m.search("list files");
+    assert!(!err && text.contains("main.jsonl:"), "{text}");
+
+    // Daemon running: a transcript written now is searchable as soon as --wait returns.
+    std::fs::write(
+        env.root.join("c/projects/demo/fresh.jsonl"),
+        "{\"type\":\"user\",\"sessionId\":\"fresh\",\"cwd\":\"/work/demo\",\"timestamp\":\"2026-01-04T00:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":\"how do I calibrate the zeppelin\"}}\n\
+         {\"type\":\"assistant\",\"sessionId\":\"fresh\",\"timestamp\":\"2026-01-04T00:00:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"zeppelin calibrated\"}]}}\n",
+    )
+    .unwrap();
+    let st = env.fast("sync").arg("--wait").status().unwrap();
+    assert!(st.success());
+    let (err, text) = m.search("zeppelin");
+    assert!(!err && text.contains("fresh.jsonl:"), "{text}");
+}
+
+#[test]
 fn sync_requests_coalesce() {
     let env = Env::new();
     env.run_sync_hook();
