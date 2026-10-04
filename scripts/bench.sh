@@ -35,7 +35,7 @@ FLAGS=(--fake-embedder --idle-secs 600)
 mkdir -p "$CLAUDE/projects" "$CODEX/sessions/2026/01/02" "$DATA"
 
 cleanup() {
-  exec 3>&- 4<&- 2>/dev/null || true
+  exec 3>&- 4<&- || true
   local pid
   for lock in "$DATA"/daemon-*.lock; do
     [ -f "$lock" ] || continue
@@ -156,7 +156,11 @@ report first_sync "$(timed_sync)"
 # Embedding runs in a daemon worker after sync returns; wait for the backlog so it does not
 # overlap the measurements below. Reports the time from first_sync's return until drained.
 t0="$(now)"
-until em doctor 2>/dev/null | grep -q '^\[ok\] embeddings: none pending'; do sleep 0.1; done
+deadline=$(($(date +%s) + 300))
+until em doctor 2>/dev/null | grep -q '^\[ok\] embeddings: none pending'; do
+  [ "$(date +%s)" -lt "$deadline" ] || { echo "bench: embeddings not drained after 300 s" >&2; exit 1; }
+  sleep 0.1
+done
 t1="$(now)"
 report embed_drain "$(elapsed "$t0" "$t1")"
 
@@ -196,11 +200,19 @@ ID=0
 rpc() { # method params -> response line in $REPLY
   ID=$((ID + 1))
   printf '{"jsonrpc":"2.0","id":%d,"method":"%s","params":%s}\n' "$ID" "$1" "$2" >&3
-  while IFS= read -r REPLY <&4; do
+  local rc
+  while :; do
+    IFS= read -r -t 60 REPLY <&4 || {
+      rc=$?
+      if [ "$rc" -gt 128 ]; then
+        echo "bench: mcp gave no response line for 60 s on request $ID" >&2
+      else
+        echo "bench: mcp closed before answering request $ID" >&2
+      fi
+      exit 1
+    }
     case "$REPLY" in *"\"id\":$ID,"* | *"\"id\":$ID}"*) return 0 ;; esac
   done
-  echo "bench: mcp closed before answering request $ID" >&2
-  exit 1
 }
 rpc initialize '{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bench","version":"0"}}'
 
