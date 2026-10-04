@@ -198,7 +198,13 @@ fn search_tool(
     params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
     let embedder = crate::locks::read(&ctx.embedder).clone();
     let out = match search(&conn, embedder.as_deref(), &params) {
-        Err(_) if embedder.is_some() => search(&conn, None, &params),
+        Err(e) if embedder.is_some() => {
+            crate::log::log_line(
+                &ctx.paths,
+                &format!("vector search failed, keyword-only fallback: {e:#}"),
+            );
+            search(&conn, None, &params)
+        }
         r => r,
     }
     .map_err(|e| format!("search failed: {e:#}"))?;
@@ -444,6 +450,12 @@ mod tests {
         assert_ne!(r["result"]["isError"], true, "{r}");
         assert!(text(r).starts_with(KEYWORD_ONLY), "{}", text(r));
         assert!(text(r).contains("main.jsonl:"));
+        let log = std::fs::read_to_string(ctx.paths.logs().join("episodic-memory.log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|l| l.contains("vector search failed") && l.contains("broken")),
+            "{log}"
+        );
     }
 
     #[test]
