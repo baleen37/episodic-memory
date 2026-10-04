@@ -1,3 +1,4 @@
+use crate::parse::FileMeta;
 use crate::paths::SourceKind;
 use anyhow::Result;
 use rusqlite::ffi::sqlite3_auto_extension;
@@ -14,12 +15,15 @@ pub struct FileRow {
     pub generation: i64,
     pub offset: i64,
     pub reparse_line: i64,
-    pub session_id: Option<String>,
-    pub cwd: Option<String>,
+    /// File meta learned from the archive's first `meta_offset` bytes.
+    pub meta: FileMeta,
+    /// Archive bytes observed into `meta`; 0 means `meta` starts over from the provider's
+    /// initial meta.
+    pub meta_offset: i64,
+    /// No later line can change `meta`, so appended lines are not observed.
+    pub meta_settled: bool,
     pub project: Option<String>,
     pub harness: Option<String>,
-    pub is_sidechain: Option<bool>,
-    pub user_signal: Option<String>,
     pub skipped: bool,
 }
 
@@ -39,12 +43,11 @@ impl FileRow {
             generation,
             offset,
             reparse_line: 1,
-            session_id: None,
-            cwd: None,
+            meta: FileMeta::default(),
+            meta_offset: 0,
+            meta_settled: false,
             project: None,
             harness: None,
-            is_sidechain: None,
-            user_signal: None,
             skipped: false,
         }
     }
@@ -75,7 +78,11 @@ CREATE TABLE files(
   session_id TEXT, cwd TEXT, project TEXT,
   harness TEXT, is_sidechain INTEGER,
   user_signal TEXT,
-  skipped INTEGER NOT NULL DEFAULT 0
+  skipped INTEGER NOT NULL DEFAULT 0,
+  sidechain_known INTEGER NOT NULL DEFAULT 0,
+  agent_path TEXT,
+  meta_offset INTEGER NOT NULL DEFAULT 0,
+  meta_settled INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE exchanges(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,8 +107,18 @@ CREATE VIRTUAL TABLE vec_exchanges USING vec0(
   project TEXT, ts INTEGER, is_sidechain INTEGER);
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE VIRTUAL TABLE fts_vocab USING fts5vocab(fts_exchanges, row);
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 "#;
+
+/// Version 1 to 2: every file meta field is stored, with the archive bytes it was learned
+/// from. Rows start with `meta_offset` 0, so their meta is learned again from the archive.
+const MIGRATE_1_TO_2: &str = r"
+ALTER TABLE files ADD COLUMN sidechain_known INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE files ADD COLUMN agent_path TEXT;
+ALTER TABLE files ADD COLUMN meta_offset INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE files ADD COLUMN meta_settled INTEGER NOT NULL DEFAULT 0;
+PRAGMA user_version = 2;
+";
 
 fn register_vec() {
     static ONCE: Once = Once::new();
@@ -127,12 +144,14 @@ pub fn open(path: &Path) -> Result<Connection> {
     // upgrade to write with SQLITE_BUSY at once in WAL mode, ignoring busy_timeout.
     c.set_transaction_behavior(TransactionBehavior::Immediate);
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version == 0 {
-        // IMMEDIATE so two processes opening a fresh DB don't both create the schema.
+    if version < 2 {
+        // IMMEDIATE so two processes opening the DB don't both create or migrate the schema.
         let tx = c.transaction()?;
         let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version == 0 {
-            tx.execute_batch(SCHEMA)?;
+        match version {
+            0 => tx.execute_batch(SCHEMA)?,
+            1 => tx.execute_batch(MIGRATE_1_TO_2)?,
+            _ => {}
         }
         tx.commit()?;
     }
@@ -170,7 +189,8 @@ pub fn open_readonly(path: &Path, immutable: bool) -> Result<Connection> {
 pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
     Ok(c.prepare_cached(
         r#"SELECT source_path, source_kind, archive_path, generation, "offset", reparse_line,
-                  session_id, cwd, project, harness, is_sidechain, user_signal, skipped
+                  session_id, cwd, project, harness, is_sidechain, user_signal, skipped,
+                  sidechain_known, agent_path, meta_offset, meta_settled
            FROM files WHERE source_path = ?"#,
     )?
     .query_row([source_path], |r| {
@@ -188,12 +208,18 @@ pub fn get_file(c: &Connection, source_path: &str) -> Result<Option<FileRow>> {
             generation: r.get(3)?,
             offset: r.get(4)?,
             reparse_line: r.get(5)?,
-            session_id: r.get(6)?,
-            cwd: r.get(7)?,
+            meta: FileMeta {
+                session_id: r.get(6)?,
+                cwd: r.get(7)?,
+                is_sidechain: r.get::<_, Option<bool>>(10)?.unwrap_or(false),
+                sidechain_known: r.get(13)?,
+                agent_path: r.get(14)?,
+                user_signal: r.get(11)?,
+            },
+            meta_offset: r.get(15)?,
+            meta_settled: r.get(16)?,
             project: r.get(8)?,
             harness: r.get(9)?,
-            is_sidechain: r.get(10)?,
-            user_signal: r.get(11)?,
             skipped: r.get(12)?,
         })
     })
@@ -204,15 +230,18 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
     tx.prepare_cached(
         r#"INSERT INTO files(source_path, source_kind, archive_path, generation, "offset",
                              reparse_line, session_id, cwd, project, harness, is_sidechain,
-                             user_signal, skipped)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                             user_signal, skipped, sidechain_known, agent_path, meta_offset,
+                             meta_settled)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
            ON CONFLICT(source_path) DO UPDATE SET
              source_kind = excluded.source_kind, archive_path = excluded.archive_path,
              generation = excluded.generation, "offset" = excluded."offset",
              reparse_line = excluded.reparse_line, session_id = excluded.session_id,
              cwd = excluded.cwd, project = excluded.project, harness = excluded.harness,
              is_sidechain = excluded.is_sidechain, user_signal = excluded.user_signal,
-             skipped = excluded.skipped"#,
+             skipped = excluded.skipped, sidechain_known = excluded.sidechain_known,
+             agent_path = excluded.agent_path, meta_offset = excluded.meta_offset,
+             meta_settled = excluded.meta_settled"#,
     )?
     .execute(params![
         f.source_path,
@@ -221,13 +250,17 @@ pub fn upsert_file(tx: &Transaction, f: &FileRow) -> Result<()> {
         f.generation,
         f.offset,
         f.reparse_line,
-        f.session_id,
-        f.cwd,
+        f.meta.session_id,
+        f.meta.cwd,
         f.project,
         f.harness,
-        f.is_sidechain,
-        f.user_signal,
-        f.skipped
+        f.meta.is_sidechain,
+        f.meta.user_signal,
+        f.skipped,
+        f.meta.sidechain_known,
+        f.meta.agent_path,
+        f.meta_offset,
+        f.meta_settled
     ])?;
     Ok(())
 }
@@ -391,11 +424,37 @@ mod tests {
         let v: i64 = c
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, 2);
         let vocab: i64 = c
             .query_row("SELECT count(*) FROM fts_vocab", [], |r| r.get(0))
             .unwrap();
         assert_eq!(vocab, 0);
+    }
+
+    #[test]
+    fn version_1_database_gains_meta_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("episodic.db");
+        open(&p)
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE files DROP COLUMN sidechain_known;
+                 ALTER TABLE files DROP COLUMN agent_path;
+                 ALTER TABLE files DROP COLUMN meta_offset;
+                 ALTER TABLE files DROP COLUMN meta_settled;
+                 INSERT INTO files(source_path, source_kind, archive_path, \"offset\")
+                   VALUES ('/src/a.jsonl', 'codex-sessions', 'a.jsonl', 10);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        let c = open(&p).unwrap();
+        let v: i64 = c
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 2);
+        let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
+        assert_eq!((got.offset, got.meta_offset), (10, 0));
+        assert_eq!(got.meta, FileMeta::default());
     }
 
     #[test]
@@ -461,12 +520,20 @@ mod tests {
     fn file_row_roundtrip_and_meta() {
         let (_d, mut c) = temp_db();
         assert!(get_file(&c, "/src/a.jsonl").unwrap().is_none());
-        let mut f = FileRow {
+        let meta = FileMeta {
             session_id: Some("s".into()),
+            cwd: Some("/w".into()),
+            is_sidechain: true,
+            sidechain_known: true,
+            agent_path: Some("/root/a".into()),
+            user_signal: Some("user_message".into()),
+        };
+        let mut f = FileRow {
+            meta: meta.clone(),
+            meta_offset: 10,
+            meta_settled: true,
             project: Some("p".into()),
             harness: Some("codex".into()),
-            is_sidechain: Some(false),
-            user_signal: Some("user_message".into()),
             ..FileRow::new(
                 "/src/a.jsonl".into(),
                 SourceKind::CodexSessions,
@@ -484,8 +551,8 @@ mod tests {
         let got = get_file(&c, "/src/a.jsonl").unwrap().unwrap();
         assert_eq!(got.offset, 20);
         assert!(got.skipped);
-        assert_eq!(got.is_sidechain, Some(false));
-        assert_eq!(got.user_signal.as_deref(), Some("user_message"));
+        assert_eq!(got.meta, meta);
+        assert_eq!((got.meta_offset, got.meta_settled), (10, true));
         assert_eq!(count(&c, "files"), 1);
 
         assert_eq!(meta_get(&c, "k"), None);
