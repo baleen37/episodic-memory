@@ -1,5 +1,6 @@
 use crate::db;
 use crate::embed::Embedder;
+use crate::host::session_of;
 use crate::paths::Paths;
 use crate::read::read_archive;
 use crate::search::{search, Hit, SearchParams};
@@ -25,15 +26,16 @@ pub struct Ctx {
     pub load_failed: AtomicBool,
 }
 
-/// Newline-delimited JSON-RPC 2.0 over `r`/`w` until EOF on `r`.
-pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx) -> Result<()> {
+/// Newline-delimited JSON-RPC 2.0 over `r`/`w` until EOF on `r`. `host_pid` is the Claude Code
+/// or Codex process behind the connection; search leaves out the session it is running.
+pub fn serve(r: impl BufRead, mut w: impl Write, ctx: &Ctx, host_pid: Option<u32>) -> Result<()> {
     for line in r.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let resp = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&msg, ctx),
+            Ok(msg) => handle(&msg, ctx, host_pid),
             Err(_) => Some(error(Value::Null, -32700, "Parse error")),
         };
         if let Some(resp) = resp {
@@ -50,7 +52,7 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 }
 
 /// Messages without an `id` are notifications and get no response.
-fn handle(msg: &Value, ctx: &Ctx) -> Option<Value> {
+fn handle(msg: &Value, ctx: &Ctx, host_pid: Option<u32>) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result = match msg.get("method").and_then(Value::as_str).unwrap_or("") {
@@ -69,7 +71,7 @@ fn handle(msg: &Value, ctx: &Ctx) -> Option<Value> {
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
             let out = match params.get("name").and_then(Value::as_str) {
-                Some("search") => search_tool(args, ctx),
+                Some("search") => search_tool(args, ctx, host_pid),
                 Some("read") => read_tool(args, ctx),
                 other => Err(format!("unknown tool: {}", other.unwrap_or(""))),
             };
@@ -182,12 +184,18 @@ fn search_params(args: &Map<String, Value>) -> Result<SearchParams, String> {
         after: date(args, "after")?,
         before: date(args, "before")?,
         project,
+        exclude_session: None,
     })
 }
 
-fn search_tool(args: &Map<String, Value>, ctx: &Ctx) -> Result<String, String> {
-    let params = search_params(args)?;
+fn search_tool(
+    args: &Map<String, Value>,
+    ctx: &Ctx,
+    host_pid: Option<u32>,
+) -> Result<String, String> {
+    let mut params = search_params(args)?;
     let conn = db::open(&ctx.paths.db()).map_err(|e| format!("search failed: {e:#}"))?;
+    params.exclude_session = host_pid.and_then(|pid| session_of(&conn, pid));
     let embedder = ctx.embedder.read().ok().and_then(|g| g.clone());
     let out = match search(&conn, embedder.as_deref(), &params) {
         Err(_) if embedder.is_some() => search(&conn, None, &params),
@@ -299,7 +307,7 @@ mod tests {
     fn exchange(ctx: &Ctx, reqs: &[Value]) -> Vec<Value> {
         let input: String = reqs.iter().map(|r| format!("{r}\n")).collect();
         let mut out = Vec::new();
-        serve(input.as_bytes(), &mut out, ctx).unwrap();
+        serve(input.as_bytes(), &mut out, ctx, None).unwrap();
         String::from_utf8(out)
             .unwrap()
             .lines()
@@ -571,7 +579,7 @@ mod tests {
         let (_t, ctx) = indexed_ctx();
         let input = "not json\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"nope\"}\n{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"ping\"}\n";
         let mut out = Vec::new();
-        serve(input.as_bytes(), &mut out, &ctx).unwrap();
+        serve(input.as_bytes(), &mut out, &ctx, None).unwrap();
         let r: Vec<Value> = String::from_utf8(out)
             .unwrap()
             .lines()

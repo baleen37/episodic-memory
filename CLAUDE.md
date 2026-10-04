@@ -39,6 +39,7 @@ bats tests/wrapper.bats          # bash wrapper tests (stubbed uname/curl, no ne
 | `src/search.rs` | BM25 + KNN (cosine floor `MIN_VECTOR_SIMILARITY`), weighted RRF (K=60, 0.4/0.6), absolute 0-1 scores, array AND query |
 | `src/read.rs` | Archive line reader (markdown render, 4KB per item, 60KB cap, continue marker) |
 | `src/mcp.rs` | MCP JSON-RPC tools `search` and `read` |
+| `src/host.rs` | Session id of the Claude Code / Codex process behind an MCP connection (search excludes it) |
 | `src/daemon.rs` | Singleton daemon: unix socket, model, sync jobs, idle exit |
 | `src/client.rs` | `sync` hook client and `mcp` stdio-to-socket bridge; starts daemon if absent |
 | `src/doctor.rs` | `doctor`: read-only health checks (daemon via `{"client":"status"}`, DB opened read-only), `[ok]/[warn]/[fail]` lines, exit 1 on fail |

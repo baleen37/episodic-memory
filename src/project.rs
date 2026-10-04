@@ -3,6 +3,8 @@ use std::process::Command;
 
 /// Spec §5 project: the main repo directory name via `git rev-parse --git-common-dir`
 /// (so worktrees map to their main repo), else the cwd basename, else `unknown`.
+/// A cwd that no longer exists (a removed worktree) is resolved from its nearest existing
+/// ancestor, which still finds the repo for worktrees kept inside it (`<repo>/.worktrees/x`).
 pub fn resolve_project(cwd: Option<&str>) -> String {
     let Some(cwd) = cwd else {
         return "unknown".into();
@@ -17,12 +19,10 @@ pub fn resolve_project(cwd: Option<&str>) -> String {
 }
 
 fn git_repo_name(cwd: &Path) -> Option<String> {
-    if !cwd.is_dir() {
-        return None;
-    }
+    let dir = cwd.ancestors().find(|p| p.is_dir())?;
     let out = Command::new("git")
         .arg("-C")
-        .arg(cwd)
+        .arg(dir)
         .args(["rev-parse", "--git-common-dir"])
         .output()
         .ok()?;
@@ -30,7 +30,7 @@ fn git_repo_name(cwd: &Path) -> Option<String> {
         return None;
     }
     let common = String::from_utf8(out.stdout).ok()?;
-    let common = cwd.join(common.trim()).canonicalize().ok()?;
+    let common = dir.join(common.trim()).canonicalize().ok()?;
     Some(common.parent()?.file_name()?.to_string_lossy().into_owned())
 }
 
@@ -67,6 +67,18 @@ mod tests {
         let sub = repo.join("a/b");
         std::fs::create_dir_all(&sub).unwrap();
         assert_eq!(resolve_project(Some(sub.to_str().unwrap())), "mainrepo");
+    }
+
+    #[test]
+    fn removed_worktree_inside_repo_maps_to_repo() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("mainrepo");
+        std::fs::create_dir_all(repo.join(".worktrees")).unwrap();
+        git(&repo, &["init", "-q"]);
+        let gone = repo.join(".worktrees/00001-gone/sub");
+        assert_eq!(resolve_project(Some(gone.to_str().unwrap())), "mainrepo");
+        let outside = t.path().join("elsewhere/feature");
+        assert_eq!(resolve_project(Some(outside.to_str().unwrap())), "feature");
     }
 
     #[test]

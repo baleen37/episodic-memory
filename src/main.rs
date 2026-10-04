@@ -8,6 +8,7 @@ mod daemon;
 mod db;
 mod doctor;
 mod embed;
+mod host;
 mod log;
 mod mcp;
 mod parse;

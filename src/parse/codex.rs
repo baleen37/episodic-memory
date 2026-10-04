@@ -105,10 +105,20 @@ fn start_text(v: &Value, meta: &FileMeta) -> Option<String> {
 }
 
 fn add_answer_and_tools(c: &mut ParsedExchange, v: &Value) {
+    let p = &v["payload"];
+    if v["type"] == "event_msg" && p["type"] == "agent_message" {
+        // Duplicated by a `response_item` answer unless the user interrupted the turn.
+        if let Some(t) = p["message"].as_str().filter(|t| !t.is_empty()) {
+            if !c.fallback_answer.is_empty() {
+                c.fallback_answer.push_str("\n\n");
+            }
+            c.fallback_answer.push_str(t);
+        }
+        return;
+    }
     if v["type"] != "response_item" {
         return;
     }
-    let p = &v["payload"];
     match p["type"].as_str() {
         Some("message") if p["role"] == "assistant" => {
             if let Some(t) = block_texts(&p["content"], &["output_text"], "\n\n") {
@@ -253,13 +263,14 @@ mod tests {
             "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"x\"}}}}\n\
              {{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":{marker}}}}}\n\
              {{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"ignored\"}}]}}}}\n\
+             {{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"ok\"}}]}}}}\n\
              not json\n"
         );
         std::fs::write(&p, content).unwrap();
         let (meta, out) = parse(p.to_str().unwrap(), 1);
         assert_eq!(meta.user_signal.as_deref(), Some("user_message"));
         assert_eq!(out.exchanges.len(), 1);
-        assert_eq!(out.exchanges[0].line_end, 4);
+        assert_eq!(out.exchanges[0].line_end, 5);
         assert_eq!(out.bad_lines, 1);
         assert!(out.do_not_index);
         assert_eq!(out.exchanges[0].ts, 0);
@@ -276,5 +287,39 @@ mod tests {
         );
         std::fs::write(&p, content).unwrap();
         assert!(!parse(p.to_str().unwrap(), 1).1.do_not_index);
+    }
+
+    #[test]
+    fn interrupted_turn_keeps_streamed_answer_and_drops_silent_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.jsonl");
+        let user = |t: &str| {
+            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"{t}\"}}}}\n")
+        };
+        let streamed = |t: &str| {
+            format!("{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\",\"message\":\"{t}\"}}}}\n")
+        };
+        let answer = |t: &str| {
+            format!("{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{t}\"}}]}}}}\n")
+        };
+        let content = [
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"x\"}}\n".to_string(),
+            user("go"),
+            streamed("starting"), // interrupted: no response_item answer follows
+            user("silent"),       // interrupted before any output
+            user("again"),
+            streamed("done"),
+            answer("done"),
+            user("open"), // the turn still running
+        ]
+        .concat();
+        std::fs::write(&p, content).unwrap();
+        let (_, out) = parse(p.to_str().unwrap(), 1);
+        let got: Vec<_> = out
+            .exchanges
+            .iter()
+            .map(|e| (e.user_message.as_str(), e.assistant_message.as_str()))
+            .collect();
+        assert_eq!(got, [("go", "starting"), ("again", "done")]);
     }
 }

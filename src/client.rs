@@ -56,7 +56,10 @@ pub fn connect_or_spawn(paths: &Paths, opts: &DaemonOpts, total: Duration) -> Re
 /// Bridges stdio to a daemon MCP connection until either side closes.
 pub fn run_mcp(paths: &Paths, opts: &DaemonOpts) -> Result<()> {
     let stream = connect_or_spawn(paths, opts, MCP_CONNECT_TIMEOUT)?;
-    (&stream).write_all(Hello::Mcp.line().as_bytes())?;
+    let hello = Hello::Mcp {
+        host_pid: Some(std::os::unix::process::parent_id()),
+    };
+    (&stream).write_all(hello.line().as_bytes())?;
 
     let mut to_daemon = stream.try_clone()?;
     std::thread::spawn(move || {
