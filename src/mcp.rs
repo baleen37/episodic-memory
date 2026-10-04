@@ -297,7 +297,9 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&paths, &roots).unwrap();
+        crate::embed::embed_pending(&mut crate::db::open(&paths.db()).unwrap(), &FakeEmbedder)
+            .unwrap();
         let embedder: Arc<dyn Embedder> = Arc::new(FakeEmbedder);
         let ctx = Ctx {
             paths,
@@ -574,7 +576,12 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root: t.path().join("claude/projects"),
         }];
-        run_sync_with_roots(&ctx.paths, Some(&FakeEmbedder), &roots).unwrap();
+        run_sync_with_roots(&ctx.paths, &roots).unwrap();
+        crate::embed::embed_pending(
+            &mut crate::db::open(&ctx.paths.db()).unwrap(),
+            &FakeEmbedder,
+        )
+        .unwrap();
         let path = ctx
             .paths
             .archive_root()

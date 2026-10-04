@@ -349,7 +349,7 @@ mod tests {
             kind: SourceKind::ClaudeCodeProjects,
             root,
         }];
-        crate::sync::run_sync_with_roots(&paths, None, &roots).unwrap();
+        crate::sync::run_sync_with_roots(&paths, &roots).unwrap();
         (t, paths)
     }
 
