@@ -87,3 +87,13 @@ embedding worker  -> embed pending exchanges (8 per batch) into vec_exchanges,
 - While an older-version daemon is still alive, it and the new one each reindex everything when they see the other's `index_version`; this ping-pong is transient and stops once the old daemon exits (idle exit).
 - Do not touch `~/.config/episodic-memory` from tests; use `EPISODIC_MEMORY_DIR` with a temp dir.
 - The wrapper reads the version from `.claude-plugin/plugin.json`; release bumps it via `scripts/sync-versions.sh`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`baleen37/episodic-memory`), managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
