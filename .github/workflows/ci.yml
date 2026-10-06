@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,39 +19,28 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Format
-        run: cargo fmt --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test
-
-      - name: Install bats
-        run: sudo apt-get install -y bats
-
-      - name: Wrapper tests
-        run: bats tests/wrapper.bats
-
-  embed:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
       - name: Cache embedding model
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-multilingual-e5-small-v1
 
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit and integration tests
+        run: cargo test
+
       - name: Embedding tests
         env:
           FASTEMBED_CACHE_DIR: ${{ runner.temp }}/fastembed-cache
         run: cargo test -- --ignored
+
+      - name: Install bats
+        run: sudo apt-get install -y bats
+
+      - name: Wrapper tests
+        run: bats tests/wrapper.bats
