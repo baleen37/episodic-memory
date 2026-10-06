@@ -592,6 +592,37 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_coalesces_requests_made_during_a_run() {
+        let (_t, st, _wakes) = state();
+        let st = Arc::new(st);
+        // Each run blocks until `release` is dropped, so all requests land mid-run.
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let gate = Mutex::new(gate);
+        let s_st = st.clone();
+        std::thread::spawn(move || {
+            scheduler(&s_st, |_| {
+                let _ = gate.lock().unwrap().recv();
+                Ok(SyncStats::default())
+            });
+        });
+        st.request_sync();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while st.sched.lock().unwrap().started < 1 {
+            assert!(Instant::now() < deadline, "first sync never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for _ in 0..10 {
+            st.request_sync();
+        }
+        drop(release);
+        while st.status().sync_running {
+            assert!(Instant::now() < deadline, "syncs never finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(st.sched.lock().unwrap().started, 2);
+    }
+
+    #[test]
     fn scheduler_keeps_syncing_after_locks_were_poisoned() {
         let (_t, st, _wakes) = state();
         let st = Arc::new(st);
